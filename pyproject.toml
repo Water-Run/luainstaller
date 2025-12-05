@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "luainstaller"
+version = "1.0.0"
+description = "Package Lua scripts into standalone, dependency-free native executables"
+readme = "README.md"
+license = {text = "LGPL-3.0-or-later"}
+requires-python = ">=3.10"
+authors = [
+    {name = "WaterRun", email = "linzhangrun49@gmail.com"}
+]
+maintainers = [
+    {name = "WaterRun", email = "linzhangrun49@gmail.com"}
+]
+keywords = [
+    "lua",
+    "luastatic",
+    "compiler",
+    "executable",
+    "binary",
+    "packaging",
+    "dependency-analysis",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: GTK",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Compilers",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "simpsave>=1.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/Water-Run/luainstallers"
+Repository = "https://github.com/Water-Run/luainstallers"
+Documentation = "https://github.com/Water-Run/luainstallers/tree/main/luainstaller"
+Issues = "https://github.com/Water-Run/luainstallers/issues"
+
+[project.scripts]
+luainstaller = "luainstaller.cli:cli_main"
+luainstaller-cli = "luainstaller.cli:cli_main"
+luainstaller-gui = "luainstaller.gui:gui_main"
+
+[tool.setuptools]
+packages = ["luainstaller"]
+package-dir = {"luainstaller" = "source"}
+
+[tool.setuptools.package-data]
+luainstaller = ["py.typed"]
