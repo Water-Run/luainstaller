@@ -1,6 +1,6 @@
 """
 luainstaller - Python library for packaging Lua scripts into standalone executables.
-https://github.com/Water-Run/luainstallers/tree/main/luainstaller
+https://github.com/Water-Run/luainstaller
 
 This package provides tools for:
 - Dependency analysis of Lua scripts
@@ -8,7 +8,6 @@ This package provides tools for:
 - Command-line and graphical interfaces
 
 :author: WaterRun
-:email: linzhangrun49@gmail.com
 :file: __init__.py
 :date: 2025-12-05
 """

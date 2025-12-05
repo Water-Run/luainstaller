@@ -1,6 +1,6 @@
 """
 Graphical user interface for luainstaller.
-https://github.com/Water-Run/luainstallers/tree/main/luainstaller
+https://github.com/Water-Run/luainstaller
 
 This module provides a simple Tkinter-based GUI for building
 Lua scripts into standalone executables.

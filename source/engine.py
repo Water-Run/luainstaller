@@ -1,6 +1,6 @@
 """
 Compilation engine for luainstaller.
-https://github.com/Water-Run/luainstallers/tree/main/luainstaller
+https://github.com/Water-Run/luainstaller
 
 This module provides the core compilation functionality using luastatic
 to build standalone executables from Lua scripts.

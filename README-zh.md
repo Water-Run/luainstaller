@@ -2,9 +2,7 @@
 
 ***[English](./README.md)***  
 
-> `luainstaller`开源于[GitHub](https://github.com/Water-Run/luainstallers/tree/main/luainstaller), 遵循`LGPL`协议, 是[luainstallers](https://github.com/Water-Run/luainstallers/tree/main)工具集的成员  
-
-`luainstaller`是一个开源的**Python库**, 封装了**将`.lua`打包为可执行文件**的能力.  
+`luainstaller`是一个[开源](https://github.com/Water-Run/luainstaller)的**Python库**, 遵循`LGPL`协议, 封装了**将`.lua`打包为可执行文件**的能力.  
 
 `luainstaller`可以:  
 
@@ -30,7 +28,7 @@ luainstaller
 
 ```plaintext
 luainstaller by WaterRun. Version 1.0.
-Visit: https://github.com/Water-Run/luainstallers/tree/main/luainstaller :-)
+Visit: https://github.com/Water-Run/luainstaller :-)
 ```
 
 在开始使用前, 还需要配置`luastatic`环境, 包括:  
@@ -129,7 +127,7 @@ luainstaller-gui
 
 ### 作为命令行工具使用  
 
-`luainstaller`也可直接作为命令行工具使用. 直接在终端中输入:  
+`luainstaller`最主要的使用方式是作为命令行工具. 在终端中输入:  
 
 ```bash
 luainstaller
@@ -162,7 +160,7 @@ luainstaller logs [-limit 限制数] [-asc]
 - limit: 限制的输出数目, 大于0的整数
 - asc: 按时间顺序(默认倒序)
 
-> 日志系统使用SimpSave
+> 日志系统使用[SimpSave](https://github.com/Water-Run/SimpSave)  
 
 ##### 依赖分析  
 
@@ -177,7 +175,7 @@ luainstaller analyze 入口脚本 [-max 最大依赖数] [--detail]
 - max: 限制的最大依赖树, 大于0的整数
 - detail: 详细的运行输出
 
-> 默认情况下, 分析至多36个依赖.
+> 默认情况下, 分析至多36个依赖
 
 ##### 执行编译  
 

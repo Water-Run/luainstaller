@@ -47,10 +47,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Water-Run/luainstallers"
-Repository = "https://github.com/Water-Run/luainstallers"
-Documentation = "https://github.com/Water-Run/luainstallers/tree/main/luainstaller"
-Issues = "https://github.com/Water-Run/luainstallers/issues"
+Homepage = "https://github.com/Water-Run"
+Repository = "https://github.com/Water-Run/luainstaller"
+Documentation = "https://github.com/Water-Run/luainstaller/blob/main/README.md"
+Issues = "https://github.com/Water-Run/luainstaller/issues"
 
 [project.scripts]
 luainstaller = "luainstaller.cli:cli_main"

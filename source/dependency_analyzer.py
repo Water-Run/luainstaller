@@ -1,6 +1,6 @@
 """
 Dependency analysis engine for Lua scripts.
-https://github.com/Water-Run/luainstallers/tree/main/luainstaller
+https://github.com/Water-Run/luainstaller
 
 This module provides comprehensive dependency analysis for Lua scripts,
 including static require extraction, module path resolution, and dependency

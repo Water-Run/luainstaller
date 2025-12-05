@@ -2,9 +2,7 @@
 
 ***[中文](./README-zh.md)***
 
-> `luainstaller` is open-sourced on [GitHub](https://github.com/Water-Run/luainstallers/tree/main/luainstaller), follows the `LGPL` license, and is a member of the [luainstallers](https://github.com/Water-Run/luainstallers/tree/main) toolkit
-
-`luainstaller` is an open-source **Python library** that encapsulates the capability to **package `.lua` files into executables**.
+`luainstaller` is an [open-source](https://github.com/Water-Run/luainstaller) **Python library** that follows the `LGPL` license and encapsulates the capability to **package `.lua` files into executables**.
 
 `luainstaller` can be used:
 
@@ -14,7 +12,7 @@
 
 ## Installation
 
-`luainstaller` is published on [PyPI](https://pypi.org/), install it using `pip`:
+`luainstaller` is published on [PyPI](https://pypi.org/project/luainstaller/), install it using `pip`:
 
 ```bash
 pip install luainstaller
@@ -30,7 +28,7 @@ You should get the output:
 
 ```plaintext
 luainstaller by WaterRun. Version 1.0.
-Visit: https://github.com/Water-Run/luainstallers/tree/main/luainstaller :-)
+Visit: https://github.com/Water-Run/luainstaller :-)
 ```
 
 Before using, you also need to configure the `luastatic` environment, including:
@@ -45,15 +43,15 @@ And ensure these are configured in your environment variables.
 
 The workflow of `luainstaller` is very simple:
 
-1. Analyze the current environment and obtain dynamic libraries  
-2. Scan the entry script recursively to build dependency analysis (if automatic dependency analysis is not disabled)  
-3. Merge manually configured dependency scripts to generate the dependency list  
-4. Call `luastatic` to compile according to the dependency list and output to the specified directory  
+1. Analyze the current environment and obtain dynamic libraries
+2. Scan the entry script recursively to build dependency analysis (if automatic dependency analysis is not disabled)
+3. Merge manually configured dependency scripts to generate the dependency list
+4. Call `luastatic` to compile according to the dependency list and output to the specified directory
 
 As shown:
 
 ```plaintext
-                {Environment Analysis}
+                    {Environment Analysis}
                          |
                   test.lua <Entry Script>
                          |
@@ -100,7 +98,7 @@ luastatic test.lua utils/log.lua utils/time.lua core/init.lua core/config.lua co
 
 ### About Automatic Dependency Analysis
 
-The automatic dependency analysis engine of `luainstaller` will match `require` statements in the following forms:
+`luainstaller` has limited automatic dependency analysis capability. The engine matches `require` statements in the following forms, performs recursive searching, and obtains the dependency list:
 
 ```lua
 require '{pkg_name}'
@@ -110,9 +108,9 @@ require("pkg_name")
 require([[pkg_name]])
 ```
 
-Other forms will cause errors, including dynamic dependencies.
+> Imports using `pcall` are also treated as equivalent to `require` imports
 
-> In such cases, you should disable automatic dependency analysis and manually add the required dependencies
+Other forms will cause errors, including dynamic dependencies. In such cases, you should disable automatic dependency analysis and manually add the required dependencies.
 
 ### Using as a Graphical Tool
 
@@ -129,7 +127,7 @@ This will launch it.
 
 ### Using as a Command-Line Tool
 
-`luainstaller` can also be used directly as a command-line tool. Simply enter in the terminal:
+The primary way to use `luainstaller` is as a command-line tool. Simply enter in the terminal:
 
 ```bash
 luainstaller
@@ -160,7 +158,7 @@ This will output the operation logs stored by luainstaller.
 - limit: The number of outputs to limit, a positive integer
 - asc: In chronological order (default is reverse order)
 
-> The logging system uses SimpSave
+> The logging system uses [SimpSave](https://github.com/Water-Run/SimpSave)
 
 ##### Dependency Analysis
 
@@ -175,7 +173,7 @@ This will perform dependency analysis and output the analysis list.
 - max: Maximum dependency tree limit, a positive integer
 - detail: Detailed runtime output
 
-> By default, analyzes up to 36 dependencies.
+> By default, analyzes up to 36 dependencies
 
 ##### Execute Compilation
 
@@ -234,6 +232,7 @@ def get_logs(limit: int | None = None,
              desc: bool = True) -> list[dict[str, Any]]:
     r"""
     Returns luainstaller logs.
+
     :param limit: Return number limit, None means no limit
     :param _range: Return range limit, None means no limit
     :param desc: Whether to return in reverse order
@@ -246,8 +245,8 @@ Example:
 ```python
 import luainstaller
 
-log_1: dict = luainstaller.get_logs() # Get all logs in reverse order
-log_2: dict = luainstaller.get_logs(limit=100, _range=range(128, 256), desc=False) # Get up to 100 logs in order, within the range of 128 to 256
+log_1: dict = luainstaller.get_logs()  # Get all logs in reverse order
+log_2: dict = luainstaller.get_logs(limit=100, _range=range(128, 256), desc=False)  # Get up to 100 logs in order, within the range of 128 to 256
 ```
 
 ### `analyze()`
@@ -271,8 +270,8 @@ Example:
 ```python
 import luainstaller
 
-deps_1: list = luainstaller.analyze("main.lua") # Dependency analysis, analyzes up to 36 dependencies by default
-deps_2: list = luainstaller.analyze("main.lua", max_deps=112) # Execute dependency analysis, modify maximum dependency analysis count to 112
+deps_1: list = luainstaller.analyze("main.lua")  # Dependency analysis, analyzes up to 36 dependencies by default
+deps_2: list = luainstaller.analyze("main.lua", max_deps=112)  # Execute dependency analysis, modify maximum dependency analysis count to 112
 ```
 
 ### `build()`

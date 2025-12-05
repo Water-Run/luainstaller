@@ -1,6 +1,6 @@
 """
 Logging system for luainstaller.
-https://github.com/Water-Run/luainstallers/tree/main/luainstaller
+https://github.com/Water-Run/luainstaller
 
 This module provides a centralized logging system that persists logs
 to disk using simpsave and provides query functionality.

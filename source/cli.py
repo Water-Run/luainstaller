@@ -1,6 +1,6 @@
 """
 Command-line interface for luainstaller.
-https://github.com/Water-Run/luainstallers/tree/main/luainstaller
+https://github.com/Water-Run/luainstaller
 
 This module provides the CLI functionality for luainstaller,
 including commands for dependency analysis, compilation, and log viewing.
@@ -21,7 +21,7 @@ from .logger import LogLevel, get_logs, log_error, log_success
 
 
 VERSION = "1.0"
-PROJECT_URL = "https://github.com/Water-Run/luainstallers/tree/main/luainstaller"
+PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 
 
 HELP_MESSAGE = f"""\

@@ -1,6 +1,6 @@
 """
 Custom exception classes for luainstaller.
-https://github.com/Water-Run/luainstallers/tree/main/luainstaller
+https://github.com/Water-Run/luainstaller
 
 :author: WaterRun
 :file: exceptions.py
