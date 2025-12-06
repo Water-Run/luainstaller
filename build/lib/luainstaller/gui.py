@@ -8,11 +8,10 @@ the luainstaller CLI commands.
 :author: WaterRun
 :email: linzhangrun49@gmail.com
 :file: gui.py
-:date: 2025-12-06
+:date: 2025-12-05
 """
 
 import os
-import shutil
 import subprocess
 import sys
 import tkinter as tk
@@ -34,23 +33,8 @@ class LuaInstallerGUI:
     GUI wrapper for luainstaller CLI.
     
     Provides a minimal interface for selecting entry Lua script
-    and invoking the CLI build command via subprocess.
+    and invoking the CLI build command.
     """
-
-    __slots__ = (
-        "root",
-        "entry_script_var",
-        "output_path_var",
-        "entry_script_entry",
-        "output_path_entry",
-        "log_text",
-        "build_button",
-        "_font_normal",
-        "_font_bold",
-        "_font_title",
-        "_font_mono",
-        "_cli_executable",
-    )
 
     def __init__(self, root: tk.Tk) -> None:
         """
@@ -65,33 +49,10 @@ class LuaInstallerGUI:
         self.entry_script_var = tk.StringVar()
         self.output_path_var = tk.StringVar()
 
-        self._cli_executable = self._find_cli_executable()
-
         self._setup_styles()
         self._setup_ui()
 
         self.entry_script_var.trace_add("write", self._on_entry_changed)
-
-    @staticmethod
-    def _find_cli_executable() -> str:
-        """
-        Find the luainstaller-cli executable.
-        
-        :return: Path to the CLI executable
-        :raises FileNotFoundError: If CLI executable is not found
-        """
-        cli_path = shutil.which("luainstaller-cli")
-        if cli_path:
-            return cli_path
-
-        cli_path = shutil.which("luainstaller")
-        if cli_path:
-            return cli_path
-
-        raise FileNotFoundError(
-            "luainstaller-cli not found in PATH. "
-            "Please ensure luainstaller is properly installed."
-        )
 
     def _setup_styles(self) -> None:
         """Setup ttk styles for modern appearance."""
@@ -311,9 +272,9 @@ class LuaInstallerGUI:
 
     def _validate_inputs(self) -> bool:
         """
-        Validate user inputs before building.
+        Validate user inputs.
         
-        :return: True if all inputs are valid, False otherwise
+        :return: True if valid, False otherwise
         """
         entry_script = self.entry_script_var.get().strip()
 
@@ -338,7 +299,7 @@ class LuaInstallerGUI:
         return True
 
     def _run_build(self) -> None:
-        """Run the CLI build command using luainstaller-cli."""
+        """Run the CLI build command."""
         if not self._validate_inputs():
             return
 
@@ -346,7 +307,9 @@ class LuaInstallerGUI:
         output_path = self.output_path_var.get().strip()
 
         cmd = [
-            self._cli_executable,
+            sys.executable,
+            "-m",
+            "luainstaller",
             "build",
             entry_script,
             "-output",
@@ -377,12 +340,9 @@ class LuaInstallerGUI:
                     f"\n[Build failed with exit code {result.returncode}]")
 
         except FileNotFoundError:
-            self._log(
-                "[Error: luainstaller-cli not found. "
-                "Please ensure luainstaller is properly installed.]\n"
-            )
-        except OSError as e:
-            self._log(f"[Error executing command: {e}]\n")
+            self._log("[Error: Python interpreter not found]")
+        except Exception as e:
+            self._log(f"[Error: {e}]")
 
 
 def run_gui() -> None:
@@ -395,11 +355,7 @@ def run_gui() -> None:
     except tk.TclError:
         ...
 
-    try:
-        _ = LuaInstallerGUI(root)
-    except FileNotFoundError as e:
-        messagebox.showerror("Error", str(e))
-        sys.exit(1)
+    _ = LuaInstallerGUI(root)
 
     root.update_idletasks()
     x = (root.winfo_screenwidth() // 2) - (WINDOW_WIDTH // 2)

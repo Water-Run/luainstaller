@@ -1,0 +1,173 @@
+.TH LUAINSTALLER 1 "2025-12-06" "luainstaller 1.0" "User Commands"
+.SH NAME
+luainstaller - Package Lua scripts into standalone, dependency-free native executables
+
+.SH SYNOPSIS
+.B luainstaller
+[\fIcommand\fR] [\fIoptions\fR]
+.br
+.B luainstaller-cli
+[\fIcommand\fR] [\fIoptions\fR]
+.br
+.B luainstaller-gui
+
+.SH DESCRIPTION
+luainstaller is an open-source Python library and command-line tool designed to
+package Lua (\.lua) scripts into standalone, dependency-free native executable
+binaries. It provides automatic dependency analysis, a command-line interface,
+a GUI interface, and seamless integration with luastatic.
+
+Before using luainstaller, the following tools must be installed and available
+in your PATH:
+.TP
+.B lua
+The Lua interpreter from the official Lua website.
+.TP
+.B luarocks
+The Lua package manager (required for installing luastatic).
+.TP
+.B luastatic
+Install via:
+.BR "luarocks install luastatic" .
+.TP
+.B gcc
+C compiler. On Linux it usually comes preinstalled. On Windows, MinGW is recommended.
+
+.SH WORKFLOW
+The workflow of luainstaller consists of:
+.IP 1. 4
+Analyze the environment and detect required dynamic libraries.
+.IP 2. 4
+Recursively scan the entry script to build dependency analysis.
+.IP 3. 4
+Merge manually specified dependencies.
+.IP 4. 4
+Invoke luastatic to compile the entry script and its dependencies into a binary.
+
+.SH AUTOMATIC DEPENDENCY ANALYSIS
+luainstaller supports automatic dependency extraction by matching the following
+require patterns:
+.PP
+.nf
+require 'pkg'
+require "pkg"
+require('pkg')
+require("pkg")
+require([[pkg]])
+.fi
+.PP
+Modules loaded via pcall(require, ...) are also recognized as dependencies.
+
+Dynamic or computed import names are not supported and will cause analysis
+failure. In such cases, disable automatic analysis and specify dependencies
+manually.
+
+.SH COMMANDS
+
+.SS help
+Display help message.
+.PP
+.B luainstaller help
+
+.SS logs
+Display stored logs (powered by SimpSave).
+.PP
+.B luainstaller logs
+[\fB-limit N\fR] [\fB-asc\fR]
+.RS
+.IP \fB-limit N\fR 10
+Limit the number of output logs.
+.IP \fB-asc\fR 10
+Display logs in chronological order (default: reverse order).
+.RE
+
+.SS analyze
+Perform dependency analysis.
+.PP
+.B luainstaller analyze
+\fIentry.lua\fR [\fB-max N\fR] [\fB--detail\fR]
+.RS
+.IP \fB-max N\fR 10
+Maximum number of dependencies (default: 36).
+.IP \fB--detail\fR 10
+Show detailed analysis output.
+.RE
+
+.SS build
+Compile the Lua script into a native executable.
+.PP
+.B luainstaller build
+\fIentry.lua\fR
+[\fB-require a.lua,b.lua\fR]
+[\fB-max N\fR]
+[\fB-output PATH\fR]
+[\fB--manual\fR]
+[\fB--detail\fR]
+.RS
+.IP \fBentry.lua\fR 10
+Entry script and starting point of dependency analysis.
+.IP \fB-require LIST\fR 10
+Manually specify dependency scripts (comma-separated).
+.IP \fB-max N\fR 10
+Maximum dependency analysis limit.
+.IP \fB-output PATH\fR 10
+Output binary path (Windows automatically appends .exe).
+.IP \fB--manual\fR 10
+Disable automatic dependency analysis.
+.IP \fB--detail\fR 10
+Enable verbose compilation output.
+.RE
+
+.SH GUI USAGE
+Launch the graphical interface:
+.PP
+.B luainstaller-gui
+.PP
+The GUI is implemented using Tkinter and provides basic functionality.
+
+.SH PYTHON API
+
+.SS get_logs()
+Return stored logs.
+.PP
+.nf
+get_logs(limit=None, _range=None, desc=True) -> list[dict]
+.fi
+
+.SS analyze()
+Perform dependency analysis.
+.PP
+.nf
+analyze(entry: str, max_deps: int = 36) -> list[str]
+.fi
+
+.SS build()
+Compile the Lua script.
+.PP
+.nf
+build(entry: str,
+      requires: list[str] | None = None,
+      max_deps: int = 36,
+      output: str | None = None,
+      manual: bool = False) -> str
+.fi
+
+.SH EXAMPLES
+
+.SS Build using automatic dependency analysis
+.B luainstaller hello.lua
+
+.SS Manual dependency specification
+.B luainstaller a.lua -require b.lua,c.lua --manual
+
+.SS Custom dependency limit and output path
+.B luainstaller test.lua -max 100 -output ../myProgram --detail
+
+.SH SEE ALSO
+lua(1), luastatic(1), gcc(1)
+
+.SH AUTHOR
+WaterRun <linzhangrun49@gmail.com>
+
+.SH LICENSE
+LGPL-3.0-or-later

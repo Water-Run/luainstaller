@@ -22,7 +22,7 @@ keywords = [
     "executable",
     "binary",
     "packaging",
-    "dependency-analysis",
+    "dependency-analysis"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -39,7 +39,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Build Tools",
     "Topic :: Software Development :: Compilers",
-    "Typing :: Typed",
+    "Typing :: Typed"
 ]
 
 dependencies = [
@@ -63,3 +63,6 @@ package-dir = {"luainstaller" = "source"}
 
 [tool.setuptools.package-data]
 luainstaller = ["py.typed"]
+
+[tool.setuptools.data-files]
+"share/man/man1" = ["luainstaller.1"]
