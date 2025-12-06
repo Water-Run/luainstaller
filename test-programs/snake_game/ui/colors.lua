@@ -45,7 +45,17 @@ local CODES = {
     bg_blue = "\27[44m",
     bg_magenta = "\27[45m",
     bg_cyan = "\27[46m",
-    bg_white = "\27[47m"
+    bg_white = "\27[47m",
+
+    -- Bright background colors
+    bg_bright_black = "\27[100m",
+    bg_bright_red = "\27[101m",
+    bg_bright_green = "\27[102m",
+    bg_bright_yellow = "\27[103m",
+    bg_bright_blue = "\27[104m",
+    bg_bright_magenta = "\27[105m",
+    bg_bright_cyan = "\27[106m",
+    bg_bright_white = "\27[107m"
 }
 
 -- Check if terminal supports colors
@@ -58,12 +68,18 @@ local function supports_colors()
         return true
     end
 
-    if term:match("color") or term:match("xterm") or term:match("screen") or term:match("256") then
+    if term:match("color") or term:match("xterm") or term:match("screen") or
+       term:match("256") or term:match("linux") or term:match("vt100") then
         return true
     end
 
     -- Check for Windows Terminal or similar
     if os.getenv("WT_SESSION") or os.getenv("ConEmuANSI") == "ON" then
+        return true
+    end
+
+    -- Check for common terminal emulators
+    if os.getenv("TERM_PROGRAM") then
         return true
     end
 
@@ -97,8 +113,16 @@ function colors.styled(text, ...)
     local result = text
     local styles = {...}
 
-    for i = #styles, 1, -1 do
-        result = colors.apply(styles[i], result)
+    local prefix = ""
+    for _, style in ipairs(styles) do
+        local code = CODES[style]
+        if code then
+            prefix = prefix .. code
+        end
+    end
+
+    if prefix ~= "" then
+        result = prefix .. result .. CODES.reset
     end
 
     return result
@@ -106,11 +130,17 @@ end
 
 -- Get raw color code
 function colors.code(color_name)
+    if not COLOR_ENABLED then
+        return ""
+    end
     return CODES[color_name] or ""
 end
 
 -- Reset code
 function colors.reset_code()
+    if not COLOR_ENABLED then
+        return ""
+    end
     return CODES.reset
 end
 

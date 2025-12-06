@@ -4,8 +4,8 @@
 
 local history = {}
 
--- File path for history data
-local HISTORY_FILE = "snake_history.dat"
+-- File path for history data (相对于游戏目录)
+local HISTORY_FILE = "data/snake_history.dat"
 
 -- Default stats structure
 local function default_stats()
@@ -18,31 +18,47 @@ local function default_stats()
     }
 end
 
--- Serialize table to string (simple implementation)
-local function serialize(tbl)
+-- Serialize table to string
+local function serialize(tbl, indent)
+    indent = indent or ""
     local parts = {}
+    local next_indent = indent .. "  "
 
     for key, value in pairs(tbl) do
-        local key_str = tostring(key)
-        local value_str
-
-        if type(value) == "table" then
-            value_str = serialize(value)
-        elseif type(value) == "string" then
-            value_str = string.format("%q", value)
+        local key_str
+        if type(key) == "number" then
+            key_str = "[" .. key .. "]"
         else
-            value_str = tostring(value)
+            key_str = "[" .. string.format("%q", tostring(key)) .. "]"
         end
 
-        table.insert(parts, string.format("[%q]=%s", key_str, value_str))
+        local value_str
+        if type(value) == "table" then
+            value_str = serialize(value, next_indent)
+        elseif type(value) == "string" then
+            value_str = string.format("%q", value)
+        elseif type(value) == "number" then
+            value_str = tostring(value)
+        elseif type(value) == "boolean" then
+            value_str = tostring(value)
+        else
+            value_str = "nil"
+        end
+
+        table.insert(parts, key_str .. " = " .. value_str)
     end
 
-    return "{" .. table.concat(parts, ",") .. "}"
+    if #parts == 0 then
+        return "{}"
+    end
+
+    return "{\n" .. next_indent .. table.concat(parts, ",\n" .. next_indent) .. "\n" .. indent .. "}"
 end
 
--- Deserialize string to table (simple implementation)
+-- Deserialize string to table (安全实现)
 local function deserialize(str)
-    local func = load("return " .. str)
+    -- 使用 load 函数解析，但在沙盒环境中执行
+    local func, err = load("return " .. str, "data", "t", {})
     if func then
         local ok, result = pcall(func)
         if ok and type(result) == "table" then
@@ -62,6 +78,10 @@ function history.load()
     local content = file:read("*all")
     file:close()
 
+    if not content or content == "" then
+        return default_stats()
+    end
+
     local stats = deserialize(content)
     if not stats then
         return default_stats()
@@ -75,11 +95,19 @@ function history.load()
         end
     end
 
+    -- 确保 score_history 是表
+    if type(stats.score_history) ~= "table" then
+        stats.score_history = {}
+    end
+
     return stats
 end
 
 -- Save history to file
 function history.save(stats)
+    -- 确保 data 目录存在
+    os.execute("mkdir -p data 2>/dev/null || mkdir data 2>nul")
+
     local file = io.open(HISTORY_FILE, "w")
     if not file then
         return false

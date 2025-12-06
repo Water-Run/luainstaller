@@ -20,7 +20,7 @@ function snake.create(start_x, start_y, initial_length)
         growing = false
     }
 
-    -- Initialize body segments
+    -- Initialize body segments (头在前，尾在后)
     for i = 0, initial_length - 1 do
         table.insert(s.body, {
             x = start_x - i,
@@ -46,6 +46,11 @@ function snake.get_length(s)
     return #s.body
 end
 
+-- Get current direction
+function snake.get_direction(s)
+    return s.direction
+end
+
 -- Move the snake in the given direction
 function snake.move(s, direction)
     local vec = DIRECTION_VECTORS[direction]
@@ -59,7 +64,7 @@ function snake.move(s, direction)
         y = head.y + vec.y
     }
 
-    -- Insert new head
+    -- Insert new head at the beginning
     table.insert(s.body, 1, new_head)
 
     -- Remove tail unless growing
@@ -104,6 +109,11 @@ function snake.get_positions(s)
         positions[i] = { x = segment.x, y = segment.y }
     end
     return positions
+end
+
+-- Get body (for external access)
+function snake.get_body(s)
+    return s.body
 end
 
 return snake

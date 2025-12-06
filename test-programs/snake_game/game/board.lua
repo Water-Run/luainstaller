@@ -59,4 +59,12 @@ function board.get_dimensions(b)
     return b.width, b.height
 end
 
+-- Check if a position is empty
+function board.is_empty(b, x, y)
+    if not board.in_bounds(b, x, y) then
+        return false
+    end
+    return b.cells[y][x] == " "
+end
+
 return board

@@ -18,6 +18,9 @@ local OPPOSITES = {
 
 -- Check if direction change is valid (can't reverse)
 function logic.is_valid_direction(current, new)
+    if not new then
+        return false
+    end
     return OPPOSITES[current] ~= new
 end
 
@@ -73,9 +76,25 @@ function logic.is_game_over(snake, board)
     return false, nil
 end
 
--- Calculate score
+-- Calculate score based on snake length
 function logic.calculate_score(snake_length, initial_length)
     return (snake_length - initial_length) * 10
+end
+
+-- Get next head position without moving
+function logic.get_next_position(snake, direction)
+    local head = snake_module.get_head(snake)
+    local vectors = {
+        up    = { x = 0,  y = -1 },
+        down  = { x = 0,  y = 1  },
+        left  = { x = -1, y = 0  },
+        right = { x = 1,  y = 0  }
+    }
+    local vec = vectors[direction]
+    if vec then
+        return head.x + vec.x, head.y + vec.y
+    end
+    return head.x, head.y
 end
 
 return logic
