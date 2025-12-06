@@ -2,13 +2,15 @@
 
 ***[English](./README.md)***  
 
-`luainstaller`是一个[开源](https://github.com/Water-Run/luainstaller)的**Python库**, 遵循`LGPL`协议, 封装了**将`.lua`打包为可执行文件**的能力.  
+`luainstaller`是一个[开源](https://github.com/Water-Run/luainstaller)的**Python库**, 遵循`LGPL`协议, 封装了[luastatic](https://github.com/ers35/luastatic/tree/master), 提供了**将`.lua`打包为可执行文件**的能力.  
 
 `luainstaller`可以:  
 
 - ***以命令行工具使用***  
 - ***以图形化工具使用***  
 - ***作为库引入到你的项目中***  
+
+> 由于`luastatic`本身的限制, `luainstaller`也只能用在`linux`平台上; 如果需要在`Windows`上使用, 考虑`wsl`  
 
 ## 安装  
 
@@ -31,13 +33,7 @@ luainstaller by WaterRun. Version 1.0.
 Visit: https://github.com/Water-Run/luainstaller :-)
 ```
 
-在开始使用前, 还需要配置`luastatic`环境, 包括:  
-
-- lua: [Lua官网](https://www.lua.org/), 包括包管理器`luarocks`  
-- luastatic: `luarocks install luastatic`  
-- gcc: `linux`上一般自带, `windows`上参考: [MinGW](https://github.com/niXman/mingw-builds-binaries)
-
-并确保这些名称配置在环境变量中.  
+> 准备`luastatic`环境: `luarocks install luastatic`  
 
 ## 上手教程  
 

@@ -1,8 +1,8 @@
 # `luainstaller`: Python Library for Packaging `.lua` into Binaries with Dependency Analysis
 
-***[中文](./README-zh.md)***
+***[English](./README.md)***
 
-`luainstaller` is an [open-source](https://github.com/Water-Run/luainstaller) **Python library** that follows the `LGPL` license and encapsulates the capability to **package `.lua` files into executables**.
+`luainstaller` is an [open-source](https://github.com/Water-Run/luainstaller) **Python library** that follows the `LGPL` license. It wraps [luastatic](https://github.com/ers35/luastatic/tree/master) and provides the capability to **package `.lua` files into executables**.
 
 `luainstaller` can be used:
 
@@ -10,9 +10,11 @@
 - ***As a graphical tool***
 - ***As a library imported into your projects***
 
+> Due to limitations of `luastatic` itself, `luainstaller` can only be used on `linux` platforms; if you need to use it on `Windows`, consider `wsl`
+
 ## Installation
 
-`luainstaller` is published on [PyPI](https://pypi.org/project/luainstaller/), install it using `pip`:
+`luainstaller` is published on [pypi](https://pypi.org/project/luainstaller/). Install it using `pip`:
 
 ```bash
 pip install luainstaller
@@ -31,13 +33,7 @@ luainstaller by WaterRun. Version 1.0.
 Visit: https://github.com/Water-Run/luainstaller :-)
 ```
 
-Before using, you also need to configure the `luastatic` environment, including:
-
-- lua: [Lua official website](https://www.lua.org/), including the package manager `luarocks`
-- luastatic: `luarocks install luastatic`
-- gcc: usually comes with `linux`, on `windows` refer to: [MinGW](https://github.com/niXman/mingw-builds-binaries)
-
-And ensure these are configured in your environment variables.
+> Prepare the `luastatic` environment: `luarocks install luastatic`
 
 ## Getting Started Tutorial
 

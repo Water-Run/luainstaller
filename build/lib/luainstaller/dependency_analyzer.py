@@ -73,7 +73,15 @@ class LuaLexer:
         self.long_bracket_level = 0
     
     def extract_requires(self) -> list[tuple[str, int]]:
-        """Extract all static require statements from the source code."""
+        """
+        Extract all static require statements from the source code.
+        
+        Scans through the Lua source code and identifies all require statements,
+        including both direct require calls and pcall-wrapped requires. Returns
+        a list of tuples containing the module name and line number.
+        
+        :return: List of (module_name, line_number) tuples
+        """
         requires: list[tuple[str, int]] = []
 
         while self.pos < len(self.source):
@@ -84,13 +92,14 @@ class LuaLexer:
                 if self._match_keyword("pcall"):
                     if module_name := self._parse_pcall_require():
                         requires.append((module_name, self.line))
-                    continue
-                
+                        continue
+                    # Parse failed, fall through to advance position normally
+
                 if self._match_keyword("require"):
                     if module_name := self._parse_require():
                         requires.append((module_name, self.line))
                     continue
-            
+
             if char == "\n":
                 self.line += 1
 
