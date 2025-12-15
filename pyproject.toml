@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "luainstaller"
-version = "1.0.0"
-description = "Package Lua scripts into standalone, dependency-free native executables"
+version = "2.0.0"
+description = "Package Lua scripts into standalone executables with multi-engine support"
 readme = "README.md"
 license = {text = "LGPL-3.0-or-later"}
 requires-python = ">=3.10"
@@ -18,6 +18,7 @@ maintainers = [
 keywords = [
     "lua",
     "luastatic",
+    "srlua",
     "compiler",
     "executable",
     "binary",
@@ -28,9 +29,11 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Environment :: X11 Applications :: GTK",
+    "Environment :: Win32 (MS Windows)",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -43,7 +46,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "simpsave>=1.0.0"
+    "simpsave>=10.1.0"
 ]
 
 [project.urls]
@@ -58,11 +61,15 @@ luainstaller-cli = "luainstaller.cli:cli_main"
 luainstaller-gui = "luainstaller.gui:gui_main"
 
 [tool.setuptools]
-packages = ["luainstaller"]
-package-dir = {"luainstaller" = "source"}
+packages = ["luainstaller", "luainstaller.srlua"]
+package-dir = {"luainstaller" = "source", "luainstaller.srlua" = "source/srlua"}
 
 [tool.setuptools.package-data]
 luainstaller = ["py.typed"]
+"luainstaller.srlua" = [
+    "windows/*.exe",
+    "linux/*"
+]
 
 [tool.setuptools.data-files]
 "share/man/man1" = ["luainstaller.1"]

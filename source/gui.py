@@ -8,9 +8,10 @@ the luainstaller CLI commands.
 :author: WaterRun
 :email: linzhangrun49@gmail.com
 :file: gui.py
-:date: 2025-12-06
+:date: 2025-12-15
 """
 
+import ctypes
 import os
 import shutil
 import subprocess
@@ -21,12 +22,32 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import NoReturn
 
+from .engine import get_default_engine
 
-VERSION = "1.0"
+
+VERSION = "2.0"
 WINDOW_TITLE = "luainstaller-gui@waterrun"
-WINDOW_WIDTH = 600
-WINDOW_HEIGHT = 450
-PROJECT_URL = "https://github.com/Water-Run/luainstallers/tree/main/luainstaller"
+WINDOW_WIDTH = 650
+WINDOW_HEIGHT = 520
+PROJECT_URL = "https://github.com/Water-Run/luainstaller"
+
+
+def _enable_windows_dpi_awareness() -> None:
+    """
+    Enable DPI awareness on Windows for proper scaling.
+    
+    This should be called before creating any Tkinter windows.
+    """
+    if os.name != "nt":
+        return
+
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except (AttributeError, OSError):
+            ...
 
 
 class LuaInstallerGUI:
@@ -45,11 +66,13 @@ class LuaInstallerGUI:
         "output_path_entry",
         "log_text",
         "build_button",
+        "engine_label",
         "_font_normal",
         "_font_bold",
         "_font_title",
         "_font_mono",
         "_cli_executable",
+        "_default_engine",
     )
 
     def __init__(self, root: tk.Tk) -> None:
@@ -66,6 +89,7 @@ class LuaInstallerGUI:
         self.output_path_var = tk.StringVar()
 
         self._cli_executable = self._find_cli_executable()
+        self._default_engine = get_default_engine()
 
         self._setup_styles()
         self._setup_ui()
@@ -99,7 +123,11 @@ class LuaInstallerGUI:
 
         try:
             if os.name == "nt":
-                style.theme_use("vista")
+                available_themes = style.theme_names()
+                for theme in ("vista", "winnative", "xpnative", "clam"):
+                    if theme in available_themes:
+                        style.theme_use(theme)
+                        break
             else:
                 available = style.theme_names()
                 for theme in ("clam", "alt", "default"):
@@ -123,6 +151,8 @@ class LuaInstallerGUI:
         style.configure("Title.TLabel", font=self._font_title)
         style.configure("Hint.TLabel", font=self._font_normal,
                         foreground="#666666")
+        style.configure("Engine.TLabel", font=self._font_normal,
+                        foreground="#0066cc")
         style.configure(
             "Link.TLabel",
             font=(self._font_normal[0], self._font_normal[1], "underline"),
@@ -132,12 +162,16 @@ class LuaInstallerGUI:
                         padding=(20, 10))
         style.configure("TLabelframe.Label", font=self._font_normal)
 
+        style.configure("TEntry", padding=5)
+        style.configure("TButton", padding=5)
+
     def _setup_ui(self) -> None:
         """Setup the user interface components."""
         main_frame = ttk.Frame(self.root, padding=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         self._create_header(main_frame)
+        self._create_engine_info(main_frame)
         self._create_input_section(main_frame)
         self._create_output_section(main_frame)
         self._create_log_section(main_frame)
@@ -151,7 +185,7 @@ class LuaInstallerGUI:
         :param parent: Parent frame
         """
         header_frame = ttk.Frame(parent)
-        header_frame.pack(fill=tk.X, pady=(0, 15))
+        header_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(header_frame, text="luainstaller", style="Title.TLabel").pack(
             anchor=tk.W
@@ -159,11 +193,31 @@ class LuaInstallerGUI:
 
         ttk.Label(
             header_frame,
-            text="GUI provides basic build functionality only. "
-            "For full features, use CLI or library.",
+            text=(
+                "GUI provides basic build functionality only. "
+                "For full features (engine selection, etc.), use CLI or library."
+            ),
             style="Hint.TLabel",
-            wraplength=560,
+            wraplength=600,
         ).pack(anchor=tk.W, pady=(5, 0))
+
+    def _create_engine_info(self, parent: ttk.Frame) -> None:
+        """
+        Create the engine information section.
+        
+        :param parent: Parent frame
+        """
+        engine_frame = ttk.Frame(parent)
+        engine_frame.pack(fill=tk.X, pady=(0, 10))
+
+        platform_name = "Windows" if os.name == "nt" else "Linux"
+
+        self.engine_label = ttk.Label(
+            engine_frame,
+            text=f"Current Engine: {self._default_engine} ({platform_name})",
+            style="Engine.TLabel",
+        )
+        self.engine_label.pack(anchor=tk.W)
 
     def _create_input_section(self, parent: ttk.Frame) -> None:
         """
@@ -178,7 +232,7 @@ class LuaInstallerGUI:
         entry_row.pack(fill=tk.X)
 
         self.entry_script_entry = ttk.Entry(
-            entry_row, textvariable=self.entry_script_var
+            entry_row, textvariable=self.entry_script_var, font=self._font_normal
         )
         self.entry_script_entry.pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10)
@@ -200,7 +254,10 @@ class LuaInstallerGUI:
         output_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.output_path_entry = ttk.Entry(
-            output_frame, textvariable=self.output_path_var, state="readonly"
+            output_frame,
+            textvariable=self.output_path_var,
+            state="readonly",
+            font=self._font_normal,
         )
         self.output_path_entry.pack(fill=tk.X)
 
@@ -221,10 +278,13 @@ class LuaInstallerGUI:
 
         self.log_text = tk.Text(
             text_frame,
-            height=8,
+            height=10,
             state=tk.DISABLED,
             wrap=tk.WORD,
             font=self._font_mono,
+            bg="#fafafa" if os.name == "nt" else None,
+            relief=tk.FLAT if os.name == "nt" else tk.SUNKEN,
+            borderwidth=1,
         )
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -260,6 +320,11 @@ class LuaInstallerGUI:
         ttk.Separator(footer_frame, orient=tk.HORIZONTAL).pack(
             fill=tk.X, pady=(0, 8))
 
+        version_label = ttk.Label(
+            footer_frame, text=f"v{VERSION}", style="Hint.TLabel"
+        )
+        version_label.pack(side=tk.LEFT)
+
         link_label = ttk.Label(
             footer_frame, text="GitHub", style="Link.TLabel", cursor="hand2"
         )
@@ -285,9 +350,16 @@ class LuaInstallerGUI:
 
     def _browse_entry_script(self) -> None:
         """Open file dialog to select entry script."""
+        initial_dir = None
+        if current := self.entry_script_var.get().strip():
+            current_path = Path(current)
+            if current_path.parent.exists():
+                initial_dir = str(current_path.parent)
+
         filepath = filedialog.askopenfilename(
             title="Select Entry Lua Script",
             filetypes=[("Lua Scripts", "*.lua"), ("All Files", "*.*")],
+            initialdir=initial_dir,
         )
         if filepath:
             self.entry_script_var.set(filepath)
@@ -357,6 +429,9 @@ class LuaInstallerGUI:
         self._log_clear()
         self._log(f"$ {' '.join(cmd)}\n\n")
 
+        self.build_button.config(state=tk.DISABLED)
+        self.root.update()
+
         try:
             result = subprocess.run(
                 cmd,
@@ -372,6 +447,9 @@ class LuaInstallerGUI:
 
             if result.returncode == 0:
                 self._log("\n[Build completed successfully]")
+                messagebox.showinfo(
+                    "Success", f"Build completed!\n\nOutput: {output_path}"
+                )
             else:
                 self._log(
                     f"\n[Build failed with exit code {result.returncode}]")
@@ -384,9 +462,14 @@ class LuaInstallerGUI:
         except OSError as e:
             self._log(f"[Error executing command: {e}]\n")
 
+        finally:
+            self.build_button.config(state=tk.NORMAL)
+
 
 def run_gui() -> None:
     """Run the luainstaller GUI application."""
+    _enable_windows_dpi_awareness()
+
     root = tk.Tk()
 
     try:
@@ -394,6 +477,9 @@ def run_gui() -> None:
             root.iconbitmap(default="")
     except tk.TclError:
         ...
+
+    if os.name == "nt":
+        root.tk.call("tk", "scaling", 1.0)
 
     try:
         _ = LuaInstallerGUI(root)

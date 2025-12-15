@@ -49,17 +49,18 @@ Visit: https://github.com/Water-Run/luainstaller :-)
 
 | 引擎名称 | 说明 | 平台支持 |
 |---------|------|---------|
-| `luastatic` | 编译为真正的原生二进制 | 仅Linux |
-| `srlua` | 当前系统对应的srlua 5.4.8（默认别名） | Windows/Linux |
-| `winsrlua515` | Windows平台 Lua 5.1.5 (64位) | Windows |
-| `winsrlua515-32` | Windows平台 Lua 5.1.5 (32位) | Windows |
-| `winsrlua548` | Windows平台 Lua 5.4.8 | Windows |
-| `linsrlua515` | Linux平台 Lua 5.1.5 (64位) | Linux |
-| `linsrlua515-32` | Linux平台 Lua 5.1.5 (32位) | Linux |
-| `linsrlua548` | Linux平台 Lua 5.4.8 | Linux |
+| `luastatic` | 编译为真正的原生二进制 | Linux |
+| `srlua` | 当前系统对应的srlua（默认别名），预编译提供，不过容易被反编译 | Windows/Linux |
+| `winsrlua515` | 适用于Windows平台 Lua 5.1.5 (64位)的srlua | Windows |
+| `winsrlua515-32` | 适用于Windows平台 Lua 5.1.5 (32位)的srlua  | Windows |
+| `winsrlua548` | 适用于Windows平台 Lua 5.4.8的srlua  | Windows |
+| `linsrlua515` | 适用于Linux平台 Lua 5.1.5 (64位)的srlua  | Linux |
+| `linsrlua515-32` | 适用于Linux平台 Lua 5.1.5 (32位)的srlua  | Linux |
+| `linsrlua548` | 适用于Linux平台 Lua 5.4.8的srlua  | Linux |
 
 **默认引擎**：
-- Windows平台：`srlua`（即`winsrlua548`）
+
+- Windows平台：`srlua`  
 - Linux平台：`luastatic`
 
 ## 上手教程
@@ -136,7 +137,7 @@ Visit: https://github.com/Water-Run/luainstaller :-)
         └──────────────────────────────────────────┘
 ```
 
-### 关于自动依赖分析
+### 关于自动依赖分析与单文件打包
 
 `luainstaller`具备有限的自动依赖分析能力，引擎会匹配以下形式的`require`语句，进行递归查找，获取依赖列表：
 
@@ -153,6 +154,8 @@ require([[pkg_name]])
 此外的形式将导致报错，包括动态依赖等。此时，应当禁用自动依赖分析，改用手动添加所需依赖。
 
 > 只能包含纯`lua`的库
+
+由于`srlua`引擎的限制, 在使用`srlua`引擎时, 还需要进行单文件打包流程:  
 
 ### 作为图形化工具使用
 
@@ -214,7 +217,7 @@ luainstaller engines
 ##### 依赖分析
 
 ```bash
-luainstaller analyze <入口脚本> [-max <最大依赖数>] [--detail]
+luainstaller analyze <入口脚本> [-max <最大依赖数>] [--detail] [-bundle <输出的脚本名>]
 ```
 
 这将执行依赖分析，输出分析列表。
@@ -223,6 +226,7 @@ luainstaller analyze <入口脚本> [-max <最大依赖数>] [--detail]
 
 - `max`: 限制的最大依赖树，大于0的整数
 - `detail`: 详细的运行输出
+- `bundle`: 打包输出至单`.lua`脚本
 
 > 默认情况下，分析至多36个依赖
 
@@ -349,6 +353,29 @@ import luainstaller
 
 deps_1: list = luainstaller.analyze("main.lua")  # 依赖分析, 默认最多分析36个依赖
 deps_2: list = luainstaller.analyze("main.lua", max_deps=112)  # 执行依赖分析, 将最大依赖分析数量修改为112
+```
+
+### `bundle_to_singlefile()`
+
+打包输出至单文件  
+
+```python
+def bundle_to_singlefile(scripts: list[str], output: str) -> None:
+    r"""
+    打包输出至单文件.
+
+    :param scripts: 需要打包的脚本列表
+    :param output: 输出路径
+    """
+```
+
+示例:
+
+```python
+import luainstaller
+
+luainstaller.bundle_to_singlefile(["a.lua", "b.lua"], "c.lua")  # 打包a.lua和b.lua至单文件c.lua中
+luainstaller.bundle_to_singlefile(luainstaller.analyze("main.lua"), "bundled.lua")  # 打包main.lua的所有依赖与其本身至单文件bundled.lua中
 ```
 
 ### `build()`

@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "2025-12-10" "luainstaller 2.0" "User Commands"
+.TH LUAINSTALLER 1 "2025-12-15" "luainstaller 2.0" "User Commands"
 
 .SH NAME
 luainstaller \- Package Lua (.lua) scripts into standalone executables using
@@ -20,12 +20,12 @@ multi-engine architecture supporting both luastatic (native compilation) and
 precompiled srlua engines for Windows and Linux.
 
 luainstaller may be used as:
-.IP • 2
+.IP \(bu 2
 a command-line tool
-.IP • 2
+.IP \(bu 2
 a graphical user interface (GUI) tool
-.IP • 2
-a backend packager integrated into other systems
+.IP \(bu 2
+a Python library integrated into other systems
 
 .SH ENGINES
 luainstaller 2.0 provides the following packaging engines:
@@ -37,7 +37,7 @@ l l l.
 Engine Name	Description	Platform
 _
 luastatic	Compile to true native binary	Linux only
-srlua	Default alias: system srlua 5.4.8	Windows/Linux
+srlua	Default alias: system srlua	Windows/Linux
 winsrlua515	Windows Lua 5.1.5 (64-bit)	Windows
 winsrlua515-32	Windows Lua 5.1.5 (32-bit)	Windows
 winsrlua548	Windows Lua 5.4.8	Windows
@@ -47,9 +47,9 @@ linsrlua548	Linux Lua 5.4.8	Linux
 .TE
 
 Default engine:
-.IP • 2
+.IP \(bu 2
 Windows: \fBsrlua\fR (winsrlua548)
-.IP • 2
+.IP \(bu 2
 Linux: \fBluastatic\fR
 
 The srlua engines ship with precompiled binaries. luastatic engine requires a
@@ -116,6 +116,12 @@ Show general help.
 .PP
 .B luainstaller help
 
+.SS engines
+List all supported packaging engines.
+
+.PP
+.B luainstaller engines
+
 .SS logs
 Display luainstaller logs.
 
@@ -130,23 +136,19 @@ Display logs in chronological order (default: reverse).
 
 Logs are persisted using SimpSave.
 
-.SS engines
-List all supported packaging engines.
-
-.PP
-.B luainstaller engines
-
 .SS analyze
 Perform dependency analysis on an entry script.
 
 .PP
 .B luainstaller analyze \fIentry.lua\fR
-[\fB-max N\fR] [\fB--detail\fR]
+[\fB-max N\fR] [\fB--detail\fR] [\fB-bundle PATH\fR]
 
 .IP \fB-max N\fR
 Maximum dependency count (default: 36).
 .IP \fB--detail\fR
 Display detailed analysis output.
+.IP \fB-bundle PATH\fR
+Bundle to single .lua script file.
 
 .SS build
 Compile entry Lua script into an executable.
@@ -181,12 +183,15 @@ Launch the graphical Tkinter interface:
 .PP
 .B luainstaller-gui
 
-The GUI provides basic build and configuration functionality.
+The GUI provides basic build functionality using the platform default engine.
 
 .SH EXAMPLES
 
 .SS Build with automatic dependency analysis
 .B luainstaller build hello.lua
+
+.SS Specify engine
+.B luainstaller build app.lua -engine linsrlua548
 
 .SS Manual dependency mode
 .B luainstaller build a.lua --manual -require b.lua,c.lua
@@ -196,6 +201,9 @@ The GUI provides basic build and configuration functionality.
 
 .SS Build with extended dependency limit
 .B luainstaller build main.lua -max 100
+
+.SS Bundle to single file
+.B luainstaller analyze main.lua -bundle bundled.lua
 
 .SH SEE ALSO
 lua(1), luastatic(1), gcc(1)

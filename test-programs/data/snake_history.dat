@@ -1,0 +1,12 @@
+{
+  ["last_played"] = "2025-12-15 13:41:19",
+  ["total_score"] = 0,
+  ["score_history"] = {
+    [1] = {
+      ["score"] = 0,
+      ["date"] = "2025-12-15 13:41:19"
+    }
+  },
+  ["high_score"] = 0,
+  ["games_played"] = 1
+}

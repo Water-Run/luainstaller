@@ -7,7 +7,7 @@
 `luainstaller 2.0` introduces multi-engine support, greatly enhancing flexibility and cross-platform capability:
 
 - **`luastatic`**: The packaging engine wrapped in `luainstaller 1.0`, compiles `.lua` scripts into true native binaries, Linux platform only
-- **`srlua`**: New engine in `luainstaller 2.0`, with pre-compiled binaries bundled into the library for out-of-the-box usage. Supports both `Windows` and `Linux` platforms, providing `Lua 5.1.5` and `Lua 5.4.8` versions; `Lua 5.1.5` additionally offers 32-bit versions
+- **`srlua`**: New engine in `luainstaller 2.0`, with pre-compiled binaries bundled into the library for out-of-the-box usage. Supports `Windows` and `Linux` platforms, providing `Lua 5.1.5` and `Lua 5.4.8` versions; `Lua 5.1.5` additionally offers 32-bit versions
 
 `luainstaller` can be used:
 
@@ -48,18 +48,19 @@ Depending on the chosen engine, additional configuration may be required:
 `luainstaller 2.0` supports the following engines:
 
 | Engine Name | Description | Platform Support |
-|-------------|-------------|------------------|
-| `luastatic` | Compiles to true native binary | Linux only |
-| `srlua` | srlua 5.4.8 for current system (default alias) | Windows/Linux |
-| `winsrlua515` | Windows Lua 5.1.5 (64-bit) | Windows |
-| `winsrlua515-32` | Windows Lua 5.1.5 (32-bit) | Windows |
-| `winsrlua548` | Windows Lua 5.4.8 | Windows |
-| `linsrlua515` | Linux Lua 5.1.5 (64-bit) | Linux |
-| `linsrlua515-32` | Linux Lua 5.1.5 (32-bit) | Linux |
-| `linsrlua548` | Linux Lua 5.4.8 | Linux |
+|------------|-------------|------------------|
+| `luastatic` | Compiles to true native binary | Linux |
+| `srlua` | srlua for current system (default alias), pre-compiled, but easily decompiled | Windows/Linux |
+| `winsrlua515` | Windows Lua 5.1.5 (64-bit) srlua | Windows |
+| `winsrlua515-32` | Windows Lua 5.1.5 (32-bit) srlua | Windows |
+| `winsrlua548` | Windows Lua 5.4.8 srlua | Windows |
+| `linsrlua515` | Linux Lua 5.1.5 (64-bit) srlua | Linux |
+| `linsrlua515-32` | Linux Lua 5.1.5 (32-bit) srlua | Linux |
+| `linsrlua548` | Linux Lua 5.4.8 srlua | Linux |
 
 **Default Engine**:
-- Windows: `srlua` (i.e., `winsrlua548`)
+
+- Windows: `srlua`
 - Linux: `luastatic`
 
 ## Getting Started Tutorial
@@ -139,7 +140,7 @@ As shown:
         └──────────────────────────────────────────┘
 ```
 
-### About Automatic Dependency Analysis
+### About Automatic Dependency Analysis and Single-File Packaging
 
 `luainstaller` has limited automatic dependency analysis capability. The engine matches `require` statements in the following forms, performs recursive searching, and obtains the dependency list:
 
@@ -156,6 +157,8 @@ Imports using `pcall` are also treated as equivalent to `require` imports.
 Other forms will cause errors, including dynamic dependencies. In such cases, you should disable automatic dependency analysis and manually add the required dependencies.
 
 > Only pure `lua` libraries can be included
+
+Due to limitations of the `srlua` engine, when using the `srlua` engine, a single-file packaging process is also required.
 
 ### Using as a Graphical Tool
 
@@ -215,7 +218,7 @@ This will output all engine names supported by luainstaller.
 ##### Dependency Analysis
 
 ```bash
-luainstaller analyze <entry script> [-max <max dependencies>] [--detail]
+luainstaller analyze <entry script> [-max <max dependencies>] [--detail] [-bundle <output script name>]
 ```
 
 This will perform dependency analysis and output the analysis list.
@@ -224,6 +227,7 @@ This will perform dependency analysis and output the analysis list.
 
 - `max`: Maximum dependency tree limit, a positive integer
 - `detail`: Detailed runtime output
+- `bundle`: Package output to a single `.lua` script
 
 > By default, analyzes up to 36 dependencies
 
@@ -237,7 +241,7 @@ luainstaller build <entry script> [-engine <engine name>] [-require <dependent .
 
 - `entry script`: The corresponding entry script, starting point of dependency analysis
 - `engine`: Specify the engine name to use. Default is `srlua` on Windows, `luastatic` on Linux
-- `require`: Dependent scripts, if the corresponding script has been automatically analyzed by the analysis engine, it will be skipped. Multiple scripts separated by commas
+- `require`: Dependent scripts; if the corresponding script has been automatically analyzed by the analysis engine, it will be skipped. Multiple scripts separated by `,`
 - `max`: Maximum dependency tree limit, a positive integer. By default, analyzes up to 36
 - `output`: Specifies the output binary path, defaults to an executable file with the same name as the `.lua` in the current directory, automatically adding `.exe` suffix on Windows platform
 - `manual`: Do not perform dependency analysis, directly compile the entry script unless forcibly specified using `-require`
@@ -277,7 +281,7 @@ Packages app.lua using the srlua 5.4.8 engine on Linux platform.
 import luainstaller
 ```
 
-And provides a functional API.
+And provides a functional-style API.
 
 ## API Reference
 
@@ -350,6 +354,29 @@ import luainstaller
 
 deps_1: list = luainstaller.analyze("main.lua")  # Dependency analysis, analyzes up to 36 dependencies by default
 deps_2: list = luainstaller.analyze("main.lua", max_deps=112)  # Execute dependency analysis, modify maximum dependency analysis count to 112
+```
+
+### `bundle_to_singlefile()`
+
+Package output to a single file
+
+```python
+def bundle_to_singlefile(scripts: list[str], output: str) -> None:
+    r"""
+    Package output to a single file.
+
+    :param scripts: List of scripts to be packaged
+    :param output: Output path
+    """
+```
+
+Example:
+
+```python
+import luainstaller
+
+luainstaller.bundle_to_singlefile(["a.lua", "b.lua"], "c.lua")  # Package a.lua and b.lua into a single file c.lua
+luainstaller.bundle_to_singlefile(luainstaller.analyze("main.lua"), "bundled.lua")  # Package all dependencies of main.lua along with itself into a single file bundled.lua
 ```
 
 ### `build()`

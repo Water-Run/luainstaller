@@ -8,7 +8,7 @@ list construction with cycle detection.
 
 :author: WaterRun
 :file: dependency_analyzer.py
-:date: 2025-12-05
+:date: 2025-12-15
 """
 
 import os
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 class LexerState(Enum):
     """Enumeration of lexer states for parsing Lua source code."""
-    
+
     NORMAL = auto()
     IN_STRING_SINGLE = auto()
     IN_STRING_DOUBLE = auto()
@@ -55,9 +55,10 @@ class LuaLexer:
         - pcall(require, 'module')
         - pcall(require, "module")
     """
-    
-    __slots__ = ("source", "file_path", "pos", "line", "state", "long_bracket_level")
-    
+
+    __slots__ = ("source", "file_path", "pos", "line",
+                 "state", "long_bracket_level")
+
     def __init__(self, source_code: str, file_path: str) -> None:
         """
         Initialize the Lua lexer.
@@ -71,7 +72,7 @@ class LuaLexer:
         self.line = 1
         self.state = LexerState.NORMAL
         self.long_bracket_level = 0
-    
+
     def extract_requires(self) -> list[tuple[str, int]]:
         """
         Extract all static require statements from the source code.
@@ -93,7 +94,6 @@ class LuaLexer:
                     if module_name := self._parse_pcall_require():
                         requires.append((module_name, self.line))
                         continue
-                    # Parse failed, fall through to advance position normally
 
                 if self._match_keyword("require"):
                     if module_name := self._parse_require():
@@ -110,12 +110,12 @@ class LuaLexer:
     def _current_char(self) -> str:
         """Get the current character, or empty string if at end."""
         return self.source[self.pos] if self.pos < len(self.source) else ""
-    
+
     def _peek_char(self, offset: int = 1) -> str:
         """Peek ahead at a character without advancing position."""
         peek_pos = self.pos + offset
         return self.source[peek_pos] if peek_pos < len(self.source) else ""
-    
+
     def _match_keyword(self, keyword: str) -> bool:
         """
         Check if the current position matches a keyword.
@@ -125,20 +125,20 @@ class LuaLexer:
         """
         if not self.source[self.pos:].startswith(keyword):
             return False
-        
+
         if (prev_pos := self.pos - 1) >= 0:
             prev_char = self.source[prev_pos]
             if prev_char.isalnum() or prev_char in ("_", ".", ":"):
                 return False
-        
+
         next_pos = self.pos + len(keyword)
         if next_pos < len(self.source):
             next_char = self.source[next_pos]
             if next_char.isalnum() or next_char == "_":
                 return False
-        
+
         return True
-    
+
     def _update_state(self, char: str) -> None:
         """Update the lexer state machine based on current character."""
         match self.state:
@@ -160,40 +160,40 @@ class LuaLexer:
                     if level >= 0:
                         self.state = LexerState.IN_LONG_STRING
                         self.long_bracket_level = level
-            
+
             case LexerState.IN_STRING_SINGLE:
                 if char == "'" and self._is_not_escaped():
                     self.state = LexerState.NORMAL
-            
+
             case LexerState.IN_STRING_DOUBLE:
                 if char == '"' and self._is_not_escaped():
                     self.state = LexerState.NORMAL
-            
+
             case LexerState.IN_LONG_STRING:
                 if char == "]" and self._check_closing_bracket(self.long_bracket_level):
                     self.state = LexerState.NORMAL
-            
+
             case LexerState.IN_LINE_COMMENT:
                 if char == "\n":
                     self.state = LexerState.NORMAL
-            
+
             case LexerState.IN_BLOCK_COMMENT:
                 if char == "]" and self._check_closing_bracket(self.long_bracket_level):
                     self.state = LexerState.NORMAL
-    
+
     def _is_not_escaped(self) -> bool:
         """Check if the current character is not escaped by backslash."""
         if self.pos == 0:
             return True
-        
+
         backslash_count = 0
         check_pos = self.pos - 1
         while check_pos >= 0 and self.source[check_pos] == "\\":
             backslash_count += 1
             check_pos -= 1
-        
+
         return backslash_count % 2 == 0
-    
+
     def _count_bracket_level(self, start_offset: int) -> int:
         """
         Count the level of a long bracket [=*[.
@@ -204,37 +204,37 @@ class LuaLexer:
         pos = self.pos + start_offset
         if pos >= len(self.source) or self.source[pos] != "[":
             return -1
-        
+
         pos += 1
         level = 0
-        
+
         while pos < len(self.source) and self.source[pos] == "=":
             level += 1
             pos += 1
-        
+
         return level if pos < len(self.source) and self.source[pos] == "[" else -1
-    
+
     def _check_closing_bracket(self, expected_level: int) -> bool:
         """Check if current position starts a closing bracket ]=*] with matching level."""
         if self._current_char() != "]":
             return False
-        
+
         pos = self.pos + 1
         level = 0
-        
+
         while pos < len(self.source) and self.source[pos] == "=":
             level += 1
             pos += 1
-        
+
         return pos < len(self.source) and self.source[pos] == "]" and level == expected_level
-    
+
     def _skip_whitespace(self) -> None:
         """Skip whitespace characters, updating line count for newlines."""
         while self.pos < len(self.source) and self._current_char() in " \t\n\r":
             if self._current_char() == "\n":
                 self.line += 1
             self.pos += 1
-    
+
     def _parse_pcall_require(self) -> str | None:
         """
         Parse a pcall(require, 'module') statement and extract the module name.
@@ -243,59 +243,60 @@ class LuaLexer:
         """
         start_pos = self.pos
         start_line = self.line
-        
+
         self.pos += len("pcall")
         self._skip_whitespace()
-        
+
         if self._current_char() != "(":
             self.pos = start_pos
             return None
-        
+
         self.pos += 1
         self._skip_whitespace()
-        
+
         if not self.source[self.pos:].startswith("require"):
             self.pos = start_pos
             return None
-        
+
         next_after_require = self.pos + len("require")
         if next_after_require < len(self.source):
             next_char = self.source[next_after_require]
             if next_char.isalnum() or next_char == "_":
                 self.pos = start_pos
                 return None
-        
+
         self.pos += len("require")
         self._skip_whitespace()
-        
+
         if self._current_char() != ",":
             self.pos = start_pos
             return None
-        
+
         self.pos += 1
         self._skip_whitespace()
-        
+
         char = self._current_char()
-        
+
         if char in ('"', "'"):
             module_name = self._extract_string_literal(start_line)
             self._skip_whitespace()
             if self._current_char() == ")":
                 self.pos += 1
             return module_name
-        
+
         if char == "[":
             level = self._count_bracket_level(0)
             if level >= 0:
-                module_name = self._extract_long_string_literal(level, start_line)
+                module_name = self._extract_long_string_literal(
+                    level, start_line)
                 self._skip_whitespace()
                 if self._current_char() == ")":
                     self.pos += 1
                 return module_name
-        
+
         self.pos = start_pos
         return None
-    
+
     def _parse_require(self) -> str | None:
         """
         Parse a require statement and extract the module name.
@@ -305,19 +306,19 @@ class LuaLexer:
         """
         start_pos = self.pos
         start_line = self.line
-        
+
         self.pos += len("require")
         self._skip_whitespace()
-        
+
         char = self._current_char()
-        
+
         has_paren = False
         if char == "(":
             has_paren = True
             self.pos += 1
             self._skip_whitespace()
             char = self._current_char()
-        
+
         if char in ('"', "'"):
             module_name = self._extract_string_literal(start_line)
             if has_paren:
@@ -325,24 +326,25 @@ class LuaLexer:
                 if self._current_char() == ")":
                     self.pos += 1
             return module_name
-        
+
         if char == "[":
             level = self._count_bracket_level(0)
             if level >= 0:
-                module_name = self._extract_long_string_literal(level, start_line)
+                module_name = self._extract_long_string_literal(
+                    level, start_line)
                 if has_paren:
                     self._skip_whitespace()
                     if self._current_char() == ")":
                         self.pos += 1
                 return module_name
-        
+
         end_pos = self.pos
         while end_pos < len(self.source) and self.source[end_pos] not in "\n;":
             end_pos += 1
-        
+
         statement = self.source[start_pos:end_pos].strip()
         raise DynamicRequireError(self.file_path, start_line, statement)
-    
+
     def _extract_string_literal(self, start_line: int) -> str:
         """
         Extract a string literal (single or double quoted).
@@ -353,18 +355,18 @@ class LuaLexer:
         """
         quote_char = self._current_char()
         self.pos += 1
-        
+
         result: list[str] = []
-        
+
         while self.pos < len(self.source):
             char = self._current_char()
-            
+
             if char == quote_char and self._is_not_escaped():
                 self.pos += 1
                 module_name = "".join(result)
                 self._check_no_concatenation(start_line, module_name)
                 return module_name
-            
+
             if char == "\\":
                 result.append(char)
                 self.pos += 1
@@ -372,15 +374,15 @@ class LuaLexer:
                     result.append(self._current_char())
             else:
                 result.append(char)
-            
+
             self.pos += 1
-        
+
         raise DynamicRequireError(
             self.file_path,
             start_line,
-            "Unterminated string in require statement"
+            "Unterminated string in require statement",
         )
-    
+
     def _extract_long_string_literal(self, level: int, start_line: int) -> str:
         """
         Extract a long string literal [[...]].
@@ -390,27 +392,27 @@ class LuaLexer:
         :return: The string content
         """
         self.pos += 2 + level
-        
+
         result: list[str] = []
-        
+
         while self.pos < len(self.source):
             if self._current_char() == "]" and self._check_closing_bracket(level):
                 self.pos += 2 + level
                 module_name = "".join(result)
                 self._check_no_concatenation(start_line, module_name)
                 return module_name
-            
+
             result.append(self._current_char())
             if self._current_char() == "\n":
                 self.line += 1
             self.pos += 1
-        
+
         raise DynamicRequireError(
             self.file_path,
             start_line,
-            "Unterminated long string in require statement"
+            "Unterminated long string in require statement",
         )
-    
+
     def _check_no_concatenation(self, start_line: int, module_name: str) -> None:
         """
         Check that there's no string concatenation after the string literal.
@@ -422,14 +424,14 @@ class LuaLexer:
         saved_pos = self.pos
         while self.pos < len(self.source) and self._current_char() in " \t\n\r":
             self.pos += 1
-        
-        if self.source[self.pos:self.pos + 2] == "..":
+
+        if self.source[self.pos: self.pos + 2] == "..":
             raise DynamicRequireError(
                 self.file_path,
                 start_line,
-                f"require('{module_name}' .. ...) - String concatenation not supported"
+                f"require('{module_name}' .. ...) - String concatenation not supported",
             )
-        
+
         self.pos = saved_pos
 
 
@@ -440,9 +442,9 @@ class ModuleResolver:
     This resolver handles dot-separated module names, relative paths,
     LuaRocks package paths, and standard Lua search patterns.
     """
-    
+
     C_EXTENSIONS = frozenset({".so", ".dll", ".dylib"})
-    
+
     BUILTIN_MODULES = frozenset({
         "_G",
         "coroutine",
@@ -455,9 +457,9 @@ class ModuleResolver:
         "table",
         "utf8",
     })
-    
+
     __slots__ = ("base_path", "search_paths")
-    
+
     def __init__(self, base_path: Path) -> None:
         """
         Initialize the module resolver.
@@ -466,48 +468,49 @@ class ModuleResolver:
         """
         self.base_path = base_path.resolve()
         self.search_paths = self._build_search_paths()
-    
+
     def _detect_luarocks(self) -> list[Path]:
         """Detect LuaRocks installation and return module paths."""
         paths: list[Path] = []
-        
+
         try:
             result = subprocess.run(
                 ["luarocks", "path", "--lr-path"],
                 capture_output=True,
                 text=True,
                 timeout=5,
-                check=False
+                check=False,
             )
-            
+
             if result.returncode == 0 and result.stdout.strip():
                 raw = result.stdout.strip()
-                
+
                 if "=" in raw and os.linesep in raw:
-                    raw = raw.split(os.linesep)[-1].strip().strip("'").strip('"')
-                
+                    raw = raw.split(
+                        os.linesep)[-1].strip().strip("'").strip('"')
+
                 sep = ";" if os.name == "nt" else ":"
                 lua_paths = raw.split(sep)
-                
+
                 for lua_path in lua_paths:
                     lua_path = lua_path.strip().strip("'").strip('"')
-                    
+
                     if lua_path.endswith("?.lua"):
-                        lua_path = lua_path[:-len("?.lua")]
+                        lua_path = lua_path[: -len("?.lua")]
                     elif lua_path.endswith("?/init.lua"):
-                        lua_path = lua_path[:-len("?/init.lua")]
-                    
+                        lua_path = lua_path[: -len("?/init.lua")]
+
                     lua_path = lua_path.strip()
                     if lua_path:
                         path_obj = Path(lua_path)
                         if path_obj.exists():
                             paths.append(path_obj.resolve())
-        
+
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             ...
-        
+
         return paths
-    
+
     def _build_search_paths(self) -> list[Path]:
         """Build the complete list of module search paths."""
         paths: list[Path] = []
@@ -532,9 +535,9 @@ class ModuleResolver:
                     continue
                 if "?" in chunk:
                     if chunk.endswith("?.lua"):
-                        chunk = chunk[:-len("?.lua")]
+                        chunk = chunk[: -len("?.lua")]
                     elif chunk.endswith("?/init.lua"):
-                        chunk = chunk[:-len("?/init.lua")]
+                        chunk = chunk[: -len("?/init.lua")]
                     else:
                         continue
                 if chunk:
@@ -573,7 +576,7 @@ class ModuleResolver:
             add_path(luarocks_path)
 
         return paths
-    
+
     def is_builtin_module(self, module_name: str) -> bool:
         """
         Check if a module name is a Lua builtin module.
@@ -583,7 +586,7 @@ class ModuleResolver:
         """
         root_module = module_name.split(".")[0]
         return root_module in self.BUILTIN_MODULES
-    
+
     def resolve(self, module_name: str, from_script: str) -> Path | None:
         """
         Resolve a module name to an absolute file path.
@@ -596,35 +599,36 @@ class ModuleResolver:
         """
         if self.is_builtin_module(module_name):
             return None
-        
+
         from_script_path = Path(from_script).resolve()
-        
+
         if module_name.startswith("./") or module_name.startswith("../"):
             return self._resolve_relative(module_name, from_script_path)
-        
+
         module_path = module_name.replace(".", "/")
-        
+
         for search_path in self.search_paths:
             lua_candidates = [
                 search_path / f"{module_path}.lua",
                 search_path / module_path / "init.lua",
             ]
-            
+
             for candidate in lua_candidates:
                 if candidate.exists():
                     return candidate.resolve()
-            
+
             for ext in self.C_EXTENSIONS:
                 c_candidate = search_path / f"{module_path}{ext}"
                 if c_candidate.exists():
-                    raise CModuleNotSupportedError(module_name, str(c_candidate))
-        
+                    raise CModuleNotSupportedError(
+                        module_name, str(c_candidate))
+
         raise ModuleNotFoundError(
             module_name,
             from_script,
-            [str(p) for p in self.search_paths]
+            [str(p) for p in self.search_paths],
         )
-        
+
     def _resolve_relative(self, module_name: str, from_script_path: Path) -> Path:
         """
         Resolve a relative module path.
@@ -637,7 +641,7 @@ class ModuleResolver:
         """
         base_dir = from_script_path.parent
         target_path = (base_dir / module_name).resolve()
-        
+
         candidates: list[Path] = []
         if target_path.suffix == ".lua":
             candidates.append(target_path)
@@ -646,20 +650,20 @@ class ModuleResolver:
                 Path(f"{target_path}.lua"),
                 target_path / "init.lua",
             ])
-        
+
         for candidate in candidates:
             if candidate.exists():
                 return candidate.resolve()
-        
+
         for ext in self.C_EXTENSIONS:
             c_candidate = Path(f"{target_path}{ext}")
             if c_candidate.exists():
                 raise CModuleNotSupportedError(module_name, str(c_candidate))
-        
+
         raise ModuleNotFoundError(
             module_name,
             str(from_script_path),
-            [str(base_dir)]
+            [str(base_dir)],
         )
 
 
@@ -671,7 +675,7 @@ class DependencyAnalyzer:
     dependency detection, dependency count limitation, and topological
     sorting of dependencies.
     """
-    
+
     __slots__ = (
         "entry_script",
         "max_dependencies",
@@ -681,7 +685,7 @@ class DependencyAnalyzer:
         "dependency_graph",
         "dependency_count",
     )
-    
+
     def __init__(self, entry_script: str, max_dependencies: int = 36) -> None:
         """
         Initialize the dependency analyzer.
@@ -691,17 +695,17 @@ class DependencyAnalyzer:
         """
         self.entry_script = Path(entry_script).resolve()
         self.max_dependencies = max_dependencies
-        
+
         if not self.entry_script.exists():
             raise ScriptNotFoundError(str(entry_script))
-        
+
         self.resolver = ModuleResolver(self.entry_script.parent)
-        
+
         self.visited: set[Path] = set()
         self.stack: list[Path] = []
         self.dependency_graph: dict[Path, list[Path]] = {}
         self.dependency_count: int = 0
-    
+
     def analyze(self) -> list[str]:
         """
         Perform complete dependency analysis.
@@ -709,13 +713,14 @@ class DependencyAnalyzer:
         :return: List of dependency file paths (absolute, topologically sorted)
         """
         self._analyze_recursive(self.entry_script)
-        
+
         total_count = len(self.visited) - 1
         if total_count > self.max_dependencies:
-            raise DependencyLimitExceededError(total_count, self.max_dependencies)
-        
+            raise DependencyLimitExceededError(
+                total_count, self.max_dependencies)
+
         return self._generate_manifest()
-    
+
     def _analyze_recursive(self, script_path: Path) -> None:
         """Recursively analyze a single script and its dependencies."""
         if script_path in self.stack:
@@ -729,7 +734,9 @@ class DependencyAnalyzer:
         if script_path != self.entry_script:
             prospective_total = self.dependency_count + 1
             if prospective_total > self.max_dependencies:
-                raise DependencyLimitExceededError(prospective_total, self.max_dependencies)
+                raise DependencyLimitExceededError(
+                    prospective_total, self.max_dependencies
+                )
             self.dependency_count = prospective_total
 
         if not script_path.exists():
@@ -779,29 +786,29 @@ class DependencyAnalyzer:
         """
         sorted_deps: list[str] = []
         visited: set[Path] = set()
-        
+
         def visit(node: Path) -> None:
             if node in visited:
                 return
             visited.add(node)
-            
+
             for dep in self.dependency_graph.get(node, []):
                 visit(dep)
-            
+
             sorted_deps.append(str(node))
-        
+
         visit(self.entry_script)
-        
+
         if str(self.entry_script) in sorted_deps:
             sorted_deps.remove(str(self.entry_script))
-        
+
         return sorted_deps
 
 
 def analyze_dependencies(
     entry_script: str,
     manual_mode: bool = False,
-    max_dependencies: int = 36
+    max_dependencies: int = 36,
 ) -> list[str]:
     """
     Analyze Lua script dependencies.
@@ -815,7 +822,7 @@ def analyze_dependencies(
     """
     if manual_mode:
         return []
-    
+
     analyzer = DependencyAnalyzer(entry_script, max_dependencies)
     return analyzer.analyze()
 
@@ -829,12 +836,12 @@ def print_dependency_list(entry_script: str, max_dependencies: int = 36) -> None
     """
     analyzer = DependencyAnalyzer(entry_script, max_dependencies)
     deps = analyzer.analyze()
-    
+
     print(f"Dependencies for {Path(entry_script).name}:")
-    
+
     if not deps:
         print("  (no dependencies)")
         return
-    
+
     for i, dep_path in enumerate(deps, 1):
         print(f"  {i}. {Path(dep_path).name}")
