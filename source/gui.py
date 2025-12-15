@@ -27,27 +27,52 @@ from .engine import get_default_engine
 
 VERSION = "2.0"
 WINDOW_TITLE = "luainstaller-gui@waterrun"
-WINDOW_WIDTH = 650
-WINDOW_HEIGHT = 520
+BASE_WINDOW_WIDTH = 650
+BASE_WINDOW_HEIGHT = 520
 PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 
 
-def _enable_windows_dpi_awareness() -> None:
+def _get_windows_dpi_scale() -> float:
+    """
+    Get the DPI scaling factor on Windows.
+    
+    :return: DPI scale factor (e.g., 1.0, 1.25, 1.5, 2.0)
+    """
+    if os.name != "nt":
+        return 1.0
+    
+    try:
+        # Try to get DPI from the primary monitor
+        hdc = ctypes.windll.user32.GetDC(0)
+        dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX = 88
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+        return dpi / 96.0
+    except (AttributeError, OSError):
+        return 1.0
+
+
+def _enable_windows_dpi_awareness() -> float:
     """
     Enable DPI awareness on Windows for proper scaling.
     
     This should be called before creating any Tkinter windows.
+    
+    :return: DPI scale factor
     """
     if os.name != "nt":
-        return
+        return 1.0
 
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        # Per-monitor DPI awareness (Windows 8.1+)
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except (AttributeError, OSError):
         try:
+            # System DPI awareness (Windows Vista+)
             ctypes.windll.user32.SetProcessDPIAware()
         except (AttributeError, OSError):
             ...
+    
+    return _get_windows_dpi_scale()
 
 
 class LuaInstallerGUI:
@@ -73,15 +98,18 @@ class LuaInstallerGUI:
         "_font_mono",
         "_cli_executable",
         "_default_engine",
+        "_dpi_scale",
     )
 
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(self, root: tk.Tk, dpi_scale: float = 1.0) -> None:
         """
         Initialize the GUI application.
         
         :param root: The Tkinter root window
+        :param dpi_scale: DPI scaling factor for high-DPI displays
         """
         self.root = root
+        self._dpi_scale = dpi_scale
         self.root.title(WINDOW_TITLE)
         self.root.resizable(False, False)
 
@@ -95,6 +123,15 @@ class LuaInstallerGUI:
         self._setup_ui()
 
         self.entry_script_var.trace_add("write", self._on_entry_changed)
+
+    def _scale(self, value: int) -> int:
+        """
+        Scale a pixel value according to DPI.
+        
+        :param value: Base pixel value
+        :return: Scaled pixel value
+        """
+        return int(value * self._dpi_scale)
 
     @staticmethod
     def _find_cli_executable() -> str:
@@ -137,16 +174,31 @@ class LuaInstallerGUI:
         except tk.TclError:
             ...
 
+        # Scale font sizes based on DPI
+        base_size_normal = 9
+        base_size_bold = 10
+        base_size_title = 14
+        
+        # For high DPI, we don't need to scale fonts as much since 
+        # the system usually handles font scaling
+        font_scale = 1.0
+        if self._dpi_scale > 1.5:
+            font_scale = 1.0  # Let system handle it
+        
+        size_normal = int(base_size_normal * font_scale)
+        size_bold = int(base_size_bold * font_scale)
+        size_title = int(base_size_title * font_scale)
+
         if os.name == "nt":
-            self._font_normal = ("Segoe UI", 9)
-            self._font_bold = ("Segoe UI", 10, "bold")
-            self._font_title = ("Segoe UI", 14, "bold")
-            self._font_mono = ("Consolas", 9)
+            self._font_normal = ("Segoe UI", size_normal)
+            self._font_bold = ("Segoe UI", size_bold, "bold")
+            self._font_title = ("Segoe UI", size_title, "bold")
+            self._font_mono = ("Consolas", size_normal)
         else:
-            self._font_normal = ("Sans", 9)
-            self._font_bold = ("Sans", 10, "bold")
-            self._font_title = ("Sans", 14, "bold")
-            self._font_mono = ("Monospace", 9)
+            self._font_normal = ("Sans", size_normal)
+            self._font_bold = ("Sans", size_bold, "bold")
+            self._font_title = ("Sans", size_title, "bold")
+            self._font_mono = ("Monospace", size_normal)
 
         style.configure("Title.TLabel", font=self._font_title)
         style.configure("Hint.TLabel", font=self._font_normal,
@@ -167,7 +219,7 @@ class LuaInstallerGUI:
 
     def _setup_ui(self) -> None:
         """Setup the user interface components."""
-        main_frame = ttk.Frame(self.root, padding=20)
+        main_frame = ttk.Frame(self.root, padding=self._scale(20))
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         self._create_header(main_frame)
@@ -185,7 +237,7 @@ class LuaInstallerGUI:
         :param parent: Parent frame
         """
         header_frame = ttk.Frame(parent)
-        header_frame.pack(fill=tk.X, pady=(0, 10))
+        header_frame.pack(fill=tk.X, pady=(0, self._scale(10)))
 
         ttk.Label(header_frame, text="luainstaller", style="Title.TLabel").pack(
             anchor=tk.W
@@ -198,8 +250,8 @@ class LuaInstallerGUI:
                 "For full features (engine selection, etc.), use CLI or library."
             ),
             style="Hint.TLabel",
-            wraplength=600,
-        ).pack(anchor=tk.W, pady=(5, 0))
+            wraplength=self._scale(600),
+        ).pack(anchor=tk.W, pady=(self._scale(5), 0))
 
     def _create_engine_info(self, parent: ttk.Frame) -> None:
         """
@@ -208,7 +260,7 @@ class LuaInstallerGUI:
         :param parent: Parent frame
         """
         engine_frame = ttk.Frame(parent)
-        engine_frame.pack(fill=tk.X, pady=(0, 10))
+        engine_frame.pack(fill=tk.X, pady=(0, self._scale(10)))
 
         platform_name = "Windows" if os.name == "nt" else "Linux"
 
@@ -225,8 +277,9 @@ class LuaInstallerGUI:
         
         :param parent: Parent frame
         """
-        input_frame = ttk.LabelFrame(parent, text="Entry Script", padding=10)
-        input_frame.pack(fill=tk.X, pady=(0, 10))
+        input_frame = ttk.LabelFrame(parent, text="Entry Script", 
+                                      padding=self._scale(10))
+        input_frame.pack(fill=tk.X, pady=(0, self._scale(10)))
 
         entry_row = ttk.Frame(input_frame)
         entry_row.pack(fill=tk.X)
@@ -235,7 +288,7 @@ class LuaInstallerGUI:
             entry_row, textvariable=self.entry_script_var, font=self._font_normal
         )
         self.entry_script_entry.pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10)
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, self._scale(10))
         )
 
         ttk.Button(
@@ -249,9 +302,9 @@ class LuaInstallerGUI:
         :param parent: Parent frame
         """
         output_frame = ttk.LabelFrame(
-            parent, text="Output Path (auto-generated)", padding=10
+            parent, text="Output Path (auto-generated)", padding=self._scale(10)
         )
-        output_frame.pack(fill=tk.X, pady=(0, 10))
+        output_frame.pack(fill=tk.X, pady=(0, self._scale(10)))
 
         self.output_path_entry = ttk.Entry(
             output_frame,
@@ -267,8 +320,9 @@ class LuaInstallerGUI:
         
         :param parent: Parent frame
         """
-        log_frame = ttk.LabelFrame(parent, text="CLI Output", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        log_frame = ttk.LabelFrame(parent, text="CLI Output", 
+                                    padding=self._scale(10))
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, self._scale(10)))
 
         text_frame = ttk.Frame(log_frame)
         text_frame.pack(fill=tk.BOTH, expand=True)
@@ -298,7 +352,7 @@ class LuaInstallerGUI:
         :param parent: Parent frame
         """
         build_frame = ttk.Frame(parent)
-        build_frame.pack(fill=tk.X, pady=(0, 10))
+        build_frame.pack(fill=tk.X, pady=(0, self._scale(10)))
 
         self.build_button = ttk.Button(
             build_frame,
@@ -318,7 +372,7 @@ class LuaInstallerGUI:
         footer_frame.pack(fill=tk.X, side=tk.BOTTOM)
 
         ttk.Separator(footer_frame, orient=tk.HORIZONTAL).pack(
-            fill=tk.X, pady=(0, 8))
+            fill=tk.X, pady=(0, self._scale(8)))
 
         version_label = ttk.Label(
             footer_frame, text=f"v{VERSION}", style="Hint.TLabel"
@@ -468,8 +522,9 @@ class LuaInstallerGUI:
 
 def run_gui() -> None:
     """Run the luainstaller GUI application."""
-    _enable_windows_dpi_awareness()
-
+    # Enable DPI awareness and get scale factor
+    dpi_scale = _enable_windows_dpi_awareness()
+    
     root = tk.Tk()
 
     try:
@@ -478,19 +533,30 @@ def run_gui() -> None:
     except tk.TclError:
         ...
 
+    # Configure Tk scaling for high-DPI displays
     if os.name == "nt":
-        root.tk.call("tk", "scaling", 1.0)
+        # Set Tk scaling based on DPI
+        root.tk.call("tk", "scaling", dpi_scale)
 
     try:
-        _ = LuaInstallerGUI(root)
+        gui = LuaInstallerGUI(root, dpi_scale)
     except FileNotFoundError as e:
         messagebox.showerror("Error", str(e))
         sys.exit(1)
 
+    # Calculate scaled window dimensions
+    scaled_width = int(BASE_WINDOW_WIDTH * dpi_scale)
+    scaled_height = int(BASE_WINDOW_HEIGHT * dpi_scale)
+    
     root.update_idletasks()
-    x = (root.winfo_screenwidth() // 2) - (WINDOW_WIDTH // 2)
-    y = (root.winfo_screenheight() // 2) - (WINDOW_HEIGHT // 2)
-    root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{x}+{y}")
+    
+    # Center window on screen
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x = (screen_width // 2) - (scaled_width // 2)
+    y = (screen_height // 2) - (scaled_height // 2)
+    
+    root.geometry(f"{scaled_width}x{scaled_height}+{x}+{y}")
 
     root.mainloop()
 
@@ -503,3 +569,4 @@ def gui_main() -> NoReturn:
 
 if __name__ == "__main__":
     gui_main()
+    

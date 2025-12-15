@@ -98,6 +98,14 @@ Visit: {PROJECT_URL}
 """
 
 
+# ASCII-compatible symbols for cross-platform compatibility
+SYMBOL_SUCCESS = "[OK]"
+SYMBOL_ERROR = "[FAIL]"
+SYMBOL_WARNING = "[WARN]"
+SYMBOL_DEBUG = "[DEBUG]"
+SYMBOL_INFO = "[INFO]"
+
+
 class ArgumentParser:
     """Simple argument parser for luainstaller CLI."""
 
@@ -161,7 +169,7 @@ def print_error(message: str) -> None:
 
 def print_success(message: str) -> None:
     """Print a success message."""
-    print(f"✓ {message}")
+    print(f"{SYMBOL_SUCCESS} {message}")
 
 
 def print_info(message: str) -> None:
@@ -236,11 +244,11 @@ def cmd_logs(parser: ArgumentParser) -> int:
         message = entry.get("message", "")
 
         symbol = {
-            "success": "✓",
-            "error": "✗",
-            "warning": "⚠",
-            "debug": "◦",
-        }.get(log_level, "○")
+            "success": SYMBOL_SUCCESS,
+            "error": SYMBOL_ERROR,
+            "warning": SYMBOL_WARNING,
+            "debug": SYMBOL_DEBUG,
+        }.get(log_level, SYMBOL_INFO)
 
         print(f"[{timestamp}] {symbol} [{source}:{action}] {message}")
 
@@ -545,3 +553,4 @@ def cli_main() -> NoReturn:
 
 if __name__ == "__main__":
     cli_main()
+    
