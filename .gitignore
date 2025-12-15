@@ -9,3 +9,4 @@ __pycache__/
 # Distribution /
 luainstaller.egg-info/
 .tmp/
+build/
