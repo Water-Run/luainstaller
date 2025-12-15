@@ -7,7 +7,7 @@ to disk using simpsave and provides query functionality.
 
 :author: WaterRun
 :file: logger.py
-:date: 2025-12-05
+:date: 2025-12-15
 """
 
 from datetime import datetime
@@ -19,6 +19,7 @@ import simpsave as ss
 
 class LogLevel(StrEnum):
     """Log level enumeration."""
+
     DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
@@ -28,6 +29,7 @@ class LogLevel(StrEnum):
 
 class LogEntry(TypedDict):
     """Type definition for a log entry."""
+
     timestamp: str
     level: str
     source: str
@@ -46,7 +48,7 @@ def log(
     source: str,
     action: str,
     message: str,
-    **details: Any
+    **details: Any,
 ) -> None:
     """
     Log an event to the persistent log store.
@@ -57,7 +59,6 @@ def log(
     :param message: Human-readable message
     :param details: Additional key-value details to store
     """
-    
     entry: LogEntry = {
         "timestamp": datetime.now().isoformat(),
         "level": str(log_level),
@@ -66,10 +67,10 @@ def log(
         "message": message,
         "details": details,
     }
-    
+
     try:
         existing: list[LogEntry] = []
-        
+
         try:
             if ss.has(_LOG_KEY, file=_LOG_FILE):
                 loaded = ss.read(_LOG_KEY, file=_LOG_FILE)
@@ -77,12 +78,12 @@ def log(
                     existing = loaded
         except FileNotFoundError:
             existing = []
-        
+
         existing.append(entry)
-        
+
         if len(existing) > _MAX_LOGS:
             existing = existing[-_MAX_LOGS:]
-        
+
         ss.write(_LOG_KEY, existing, file=_LOG_FILE)
     except Exception:
         ...
@@ -105,36 +106,35 @@ def get_logs(
     :param descending: Sort by timestamp descending (newest first)
     :return: List of log entries
     """
-    
     try:
         try:
             if not ss.has(_LOG_KEY, file=_LOG_FILE):
                 return []
         except FileNotFoundError:
             return []
-        
+
         logs: list[LogEntry] = ss.read(_LOG_KEY, file=_LOG_FILE)
-        
+
         if not isinstance(logs, list):
             return []
-        
+
         if level is not None:
             level_str = str(level)
             logs = [e for e in logs if e.get("level") == level_str]
-        
+
         if source is not None:
             logs = [e for e in logs if e.get("source") == source]
-        
+
         if action is not None:
             logs = [e for e in logs if e.get("action") == action]
-        
+
         logs.sort(key=lambda x: x.get("timestamp", ""), reverse=descending)
-        
+
         if limit is not None and limit > 0:
             logs = logs[:limit]
-        
+
         return logs
-    
+
     except Exception:
         return []
 
@@ -145,7 +145,6 @@ def clear_logs() -> bool:
     
     :return: True if successful, False otherwise
     """
-    
     try:
         ss.write(_LOG_KEY, [], file=_LOG_FILE)
         return True
@@ -161,3 +160,13 @@ def log_error(source: str, action: str, message: str, **details: Any) -> None:
 def log_success(source: str, action: str, message: str, **details: Any) -> None:
     """Log a success message."""
     log(LogLevel.SUCCESS, source, action, message, **details)
+
+
+def log_info(source: str, action: str, message: str, **details: Any) -> None:
+    """Log an info message."""
+    log(LogLevel.INFO, source, action, message, **details)
+
+
+def log_warning(source: str, action: str, message: str, **details: Any) -> None:
+    """Log a warning message."""
+    log(LogLevel.WARNING, source, action, message, **details)

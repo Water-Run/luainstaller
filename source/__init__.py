@@ -96,17 +96,17 @@ def get_logs(
     desc: bool = True,
 ) -> list[dict[str, Any]]:
     r"""
-    返回luainstaller日志.
+    Returns luainstaller logs.
     
-    :param limit: 返回数限制, None表示不限制
-    :param _range: 返回范围限制, None表示不限制
-    :param desc: 是否倒序返回
-    :return list[dict[str, Any]]: 日志字典组成的列表
+    :param limit: Return count limit, None means no limit
+    :param _range: Return range limit, None means no limit
+    :param desc: Whether to return in descending order
+    :return list[dict[str, Any]]: List of log dictionaries
     
     Example::
     
         >>> import luainstaller
-        >>> log_1 = luainstaller.get_logs()  # 以倒序获取全部日志
+        >>> log_1 = luainstaller.get_logs()  # Get all logs in descending order
         >>> log_2 = luainstaller.get_logs(limit=100, _range=range(128, 256), desc=False)
     """
     logs = _get_logs(limit=None, descending=desc)
@@ -122,9 +122,9 @@ def get_logs(
 
 def get_engines() -> list[str]:
     r"""
-    返回luainstaller支持的全部引擎名称.
+    Returns all engine names supported by luainstaller.
     
-    :return list[str]: 引擎名称列表
+    :return list[str]: List of engine names
     
     Example::
     
@@ -136,7 +136,7 @@ def get_engines() -> list[str]:
 
 def analyze(entry: str, max_deps: int = 36) -> list[str]:
     """
-    对入口脚本执行依赖分析.
+    Execute dependency analysis on the entry script.
     
     Recursively scans the entry script for require statements and resolves
     all dependencies. Supports standard require patterns including:
@@ -150,9 +150,9 @@ def analyze(entry: str, max_deps: int = 36) -> list[str]:
     Dynamic require statements (e.g., require(variable)) are not supported
     and will raise DynamicRequireError.
     
-    :param entry: 入口脚本路径
-    :param max_deps: 最大递归依赖数, 默认36
-    :return list[str]: 分析得到的依赖脚本路径列表
+    :param entry: Entry script path
+    :param max_deps: Maximum recursive dependency count, default 36
+    :return list[str]: List of dependency script paths obtained from analysis
     :raises ScriptNotFoundError: If the entry script does not exist.
     :raises CircularDependencyError: If circular dependencies are detected.
     :raises DynamicRequireError: If a dynamic require statement is found.
@@ -170,10 +170,10 @@ def analyze(entry: str, max_deps: int = 36) -> list[str]:
 
 def bundle_to_singlefile(scripts: list[str], output: str) -> None:
     r"""
-    打包输出至单文件.
+    Bundle and output to a single file.
     
-    :param scripts: 需要打包的脚本列表
-    :param output: 输出路径
+    :param scripts: List of scripts to bundle
+    :param output: Output path
     
     Example::
     
@@ -202,7 +202,7 @@ def build(
     manual: bool = False,
 ) -> str:
     r"""
-    执行脚本编译.
+    Execute script compilation.
     
     This function performs the following steps:
     
@@ -211,13 +211,13 @@ def build(
     3. Selects the appropriate engine based on platform or user specification
     4. Invokes the engine to compile the executable
     
-    :param entry: 入口脚本
-    :param engine: 引擎名称, None使用平台默认引擎(Windows: srlua, Linux: luastatic)
-    :param requires: 手动指定依赖列表; 若为空则仅依赖自动分析
-    :param max_deps: 最大依赖树分析数
-    :param output: 输出二进制路径, None使用默认规则
-    :param manual: 禁用自动依赖分析
-    :return str: 生成的可执行文件路径
+    :param entry: Entry script
+    :param engine: Engine name, None uses platform default engine (Windows: srlua, Linux: luastatic)
+    :param requires: Manually specified dependency list; if empty, relies only on automatic analysis
+    :param max_deps: Maximum dependency tree analysis count
+    :param output: Output binary path, None uses default rules
+    :param manual: Disable automatic dependency analysis
+    :return str: Path of the generated executable file
     :raises ScriptNotFoundError: If the entry script or a required script does not exist.
     :raises EngineNotFoundError: If the specified engine is not available.
     :raises CompilationFailedError: If compilation returns a non-zero exit code.
