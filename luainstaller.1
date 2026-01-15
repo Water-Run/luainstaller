@@ -1,0 +1,215 @@
+.TH LUAINSTALLER 1 "2025-12-15" "luainstaller 2.0" "User Commands"
+
+.SH NAME
+luainstaller \- Package Lua (.lua) scripts into standalone executables using
+multi-engine compilation (luastatic / srlua)
+
+.SH SYNOPSIS
+.B luainstaller
+[\fIcommand\fR] [\fIoptions\fR]
+.br
+.B luainstaller-cli
+[\fIcommand\fR] [\fIoptions\fR]
+.br
+.B luainstaller-gui
+
+.SH DESCRIPTION
+luainstaller is an open-source Python-based toolchain for packaging Lua
+(\.lua) scripts into standalone executable binaries. Version 2.0 introduces a
+multi-engine architecture supporting both luastatic (native compilation) and
+precompiled srlua engines for Windows and Linux.
+
+luainstaller may be used as:
+.IP \(bu 2
+a command-line tool
+.IP \(bu 2
+a graphical user interface (GUI) tool
+.IP \(bu 2
+a Python library integrated into other systems
+
+.SH ENGINES
+luainstaller 2.0 provides the following packaging engines:
+
+.TS
+center,box;
+c c c
+l l l.
+Engine Name	Description	Platform
+_
+luastatic	Compile to true native binary	Linux only
+srlua	Default alias: system srlua	Windows/Linux
+winsrlua515	Windows Lua 5.1.5 (64-bit)	Windows
+winsrlua515-32	Windows Lua 5.1.5 (32-bit)	Windows
+winsrlua548	Windows Lua 5.4.8	Windows
+linsrlua515	Linux Lua 5.1.5 (64-bit)	Linux
+linsrlua515-32	Linux Lua 5.1.5 (32-bit)	Linux
+linsrlua548	Linux Lua 5.4.8	Linux
+.TE
+
+Default engine:
+.IP \(bu 2
+Windows: \fBsrlua\fR (winsrlua548)
+.IP \(bu 2
+Linux: \fBluastatic\fR
+
+The srlua engines ship with precompiled binaries. luastatic engine requires a
+proper luastatic toolchain installed on the system.
+
+.SH ENGINE REQUIREMENTS
+
+.SS srlua engines
+No configuration is required. All binaries are bundled.
+
+.SS luastatic engine
+Requires the following tools in PATH:
+.TP
+.B lua
+Official Lua interpreter.
+.TP
+.B luarocks
+Lua package manager.
+.TP
+.B luastatic
+Installed via:
+.B luarocks install luastatic
+.TP
+.B gcc
+C compiler.
+
+.SH WORKFLOW
+The luainstaller build process consists of:
+
+.IP 1. 4
+Environment analysis and dynamic library detection.
+.IP 2. 4
+Recursive dependency analysis of the entry script.
+.IP 3. 4
+Merge user-specified manual dependencies.
+.IP 4. 4
+Packaging using the selected engine:
+  - luastatic: compile into native binary
+  - srlua: merge dependencies into temporary script and pack using bundled srlua binary
+
+.SH AUTOMATIC DEPENDENCY ANALYSIS
+luainstaller scans for require() statements in these forms:
+
+.nf
+require 'pkg'
+require "pkg"
+require('pkg')
+require("pkg")
+require([[pkg]])
+.fi
+
+pcall(require, ...) imports are also recognized.
+
+Dynamic requires are not supported. For complex or runtime-generated imports,
+disable analysis and specify dependencies manually.
+
+Only pure Lua source files (.lua) can be included.
+
+.SH COMMANDS
+
+.SS help
+Show general help.
+
+.PP
+.B luainstaller help
+
+.SS engines
+List all supported packaging engines.
+
+.PP
+.B luainstaller engines
+
+.SS logs
+Display luainstaller logs.
+
+.PP
+.B luainstaller logs
+[\fB-limit N\fR] [\fB-asc\fR]
+
+.IP \fB-limit N\fR
+Limit log count.
+.IP \fB-asc\fR
+Display logs in chronological order (default: reverse).
+
+Logs are persisted using SimpSave.
+
+.SS analyze
+Perform dependency analysis on an entry script.
+
+.PP
+.B luainstaller analyze \fIentry.lua\fR
+[\fB-max N\fR] [\fB--detail\fR] [\fB-bundle PATH\fR]
+
+.IP \fB-max N\fR
+Maximum dependency count (default: 36).
+.IP \fB--detail\fR
+Display detailed analysis output.
+.IP \fB-bundle PATH\fR
+Bundle to single .lua script file.
+
+.SS build
+Compile entry Lua script into an executable.
+
+.PP
+.B luainstaller build \fIentry.lua\fR
+[\fB-engine NAME\fR]
+[\fB-require file1.lua,file2.lua\fR]
+[\fB-max N\fR]
+[\fB-output PATH\fR]
+[\fB--manual\fR]
+[\fB--detail\fR]
+
+.IP \fBentry.lua\fR
+Entry script.
+.IP \fB-engine NAME\fR
+Select packaging engine; default per-platform.
+.IP \fB-require LIST\fR
+Manually include dependency scripts.
+.IP \fB-max N\fR
+Maximum automatic dependency depth.
+.IP \fB-output PATH\fR
+Output executable path; Windows auto-appends .exe.
+.IP \fB--manual\fR
+Disable automatic dependency analysis.
+.IP \fB--detail\fR
+Verbose output.
+
+.SH GUI USAGE
+Launch the graphical Tkinter interface:
+
+.PP
+.B luainstaller-gui
+
+The GUI provides basic build functionality using the platform default engine.
+
+.SH EXAMPLES
+
+.SS Build with automatic dependency analysis
+.B luainstaller build hello.lua
+
+.SS Specify engine
+.B luainstaller build app.lua -engine linsrlua548
+
+.SS Manual dependency mode
+.B luainstaller build a.lua --manual -require b.lua,c.lua
+
+.SS Specify engine and output
+.B luainstaller build test.lua -engine winsrlua515 -output ../myProgram --detail
+
+.SS Build with extended dependency limit
+.B luainstaller build main.lua -max 100
+
+.SS Bundle to single file
+.B luainstaller analyze main.lua -bundle bundled.lua
+
+.SH SEE ALSO
+lua(1), luastatic(1), gcc(1)
+
+.SH AUTHOR
+WaterRun <linzhangrun49@gmail.com>
+
+.SH LICENSE
+LGPL-3.0-or-later

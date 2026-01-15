@@ -1,0 +1,82 @@
+# =========================
+# Lua / LuaRocks
+# =========================
+
+# LuaRocks local tree
+.luarocks/
+.rocks/
+luarocks.lock
+
+# Compiled Lua bytecode
+*.luac
+
+# =========================
+# Build / Dist
+# =========================
+
+build/
+dist/
+out/
+target/
+
+# If you ship prebuilt binaries selectively, keep them explicit
+# e.g. do NOT ignore /bin globally unless you are sure
+# bin/
+
+# =========================
+# Logs / Temp
+# =========================
+
+*.log
+*.tmp
+*.cache
+.tmp/
+.cache/
+
+# =========================
+# Editor / IDE
+# =========================
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# =========================
+# OS / Environment
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+# Safety Net (IMPORTANT)
+# Prevent accidentally tracking HOME / system files
+# =========================
+
+.ServiceHub/
+.airbyte/
+.android/
+.bash_history*
+.bash_logout
+.bash_profile*
+.bashrc
+.bun/
+.cargo/
+.choosenim/
+.clickhouse-client-history
+.composer/
+.config/
+.disks-file-history
+.docker/
+.local/
+.ssh/
+.cache/
+
+# =========================
+# Git
+# =========================
+
+.git/
+.gitignore.bak
