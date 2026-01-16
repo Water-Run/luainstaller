@@ -1,215 +1,162 @@
-.TH LUAINSTALLER 1 "2025-12-15" "luainstaller 2.0" "User Commands"
-
+.TH LUAINSTALLER 1 "January 2026" "luainstaller v0.1.0" "User Commands"
 .SH NAME
-luainstaller \- Package Lua (.lua) scripts into standalone executables using
-multi-engine compilation (luastatic / srlua)
+luainstaller \- package .lua scripts into .exe executables (Windows/Linux)
 
 .SH SYNOPSIS
 .B luainstaller
-[\fIcommand\fR] [\fIoptions\fR]
-.br
-.B luainstaller-cli
-[\fIcommand\fR] [\fIoptions\fR]
-.br
-.B luainstaller-gui
+.I command
+[\fIoptions\fR]
 
 .SH DESCRIPTION
-luainstaller is an open-source Python-based toolchain for packaging Lua
-(\.lua) scripts into standalone executable binaries. Version 2.0 introduces a
-multi-engine architecture supporting both luastatic (native compilation) and
-precompiled srlua engines for Windows and Linux.
+\fBluainstaller\fR is a tool for packaging \fB.lua\fR files into \fB.exe\fR executables,
+supporting both Windows and Linux. It provides pre-compiled binaries and works
+out-of-the-box on devices with a \fBlua\fR environment.
 
-luainstaller may be used as:
-.IP \(bu 2
-a command-line tool
-.IP \(bu 2
-a graphical user interface (GUI) tool
-.IP \(bu 2
-a Python library integrated into other systems
+It uses \fBluastatic\fR as the packaging engine and \fBWarp\fR for bundling.
 
-.SH ENGINES
-luainstaller 2.0 provides the following packaging engines:
+The project is open-sourced on GitHub under the LGPL license.
+luainstaller was previously provided as a Python library and has been separated
+into an independent command-line tool.
 
-.TS
-center,box;
-c c c
-l l l.
-Engine Name	Description	Platform
-_
-luastatic	Compile to true native binary	Linux only
-srlua	Default alias: system srlua	Windows/Linux
-winsrlua515	Windows Lua 5.1.5 (64-bit)	Windows
-winsrlua515-32	Windows Lua 5.1.5 (32-bit)	Windows
-winsrlua548	Windows Lua 5.4.8	Windows
-linsrlua515	Linux Lua 5.1.5 (64-bit)	Linux
-linsrlua515-32	Linux Lua 5.1.5 (32-bit)	Linux
-linsrlua548	Linux Lua 5.4.8	Linux
-.TE
+.SH INSTALLATION
+There are two ways to install:
 
-Default engine:
-.IP \(bu 2
-Windows: \fBsrlua\fR (winsrlua548)
-.IP \(bu 2
-Linux: \fBluastatic\fR
-
-The srlua engines ship with precompiled binaries. luastatic engine requires a
-proper luastatic toolchain installed on the system.
-
-.SH ENGINE REQUIREMENTS
-
-.SS srlua engines
-No configuration is required. All binaries are bundled.
-
-.SS luastatic engine
-Requires the following tools in PATH:
 .TP
-.B lua
-Official Lua interpreter.
-.TP
-.B luarocks
-Lua package manager.
-.TP
-.B luastatic
-Installed via:
-.B luarocks install luastatic
-.TP
-.B gcc
-C compiler.
-
-.SH WORKFLOW
-The luainstaller build process consists of:
-
-.IP 1. 4
-Environment analysis and dynamic library detection.
-.IP 2. 4
-Recursive dependency analysis of the entry script.
-.IP 3. 4
-Merge user-specified manual dependencies.
-.IP 4. 4
-Packaging using the selected engine:
-  - luastatic: compile into native binary
-  - srlua: merge dependencies into temporary script and pack using bundled srlua binary
-
-.SH AUTOMATIC DEPENDENCY ANALYSIS
-luainstaller scans for require() statements in these forms:
-
+.B LuaRocks
 .nf
-require 'pkg'
-require "pkg"
-require('pkg')
-require("pkg")
-require([[pkg]])
+luarocks install luainstaller
 .fi
+This method allows both CLI use and Lua library usage.
 
-pcall(require, ...) imports are also recognized.
-
-Dynamic requires are not supported. For complex or runtime-generated imports,
-disable analysis and specify dependencies manually.
-
-Only pure Lua source files (.lua) can be included.
+.TP
+.B Pre-compiled binary
+Download from the repository releases page.
 
 .SH COMMANDS
+.TP
+.B help
+Show help information.
 
-.SS help
-Show general help.
+.TP
+.B bundle
+Package a Lua entry script into an executable.
 
-.PP
-.B luainstaller help
+.SH USAGE
+The CLI tool name is \fBluainstaller\fR.
 
-.SS engines
-List all supported packaging engines.
+.SS Get help
+.nf
+luainstaller help
 
-.PP
-.B luainstaller engines
+luainstaller v0.1.0
+installed via luarocks
+https://github.com/Water-Run/luainstaller
 
-.SS logs
-Display luainstaller logs.
+help:
+  ...
+.fi
 
-.PP
-.B luainstaller logs
-[\fB-limit N\fR] [\fB-asc\fR]
+If installed via a pre-compiled binary, it will show:
+.B installed via binary(windows)
+or
+.B installed via binary(linux)
 
-.IP \fB-limit N\fR
-Limit log count.
-.IP \fB-asc\fR
-Display logs in chronological order (default: reverse).
+On Linux, you can also use:
+.nf
+man luainstaller
+.fi
 
-Logs are persisted using SimpSave.
+.SS Execute packaging
+.nf
+luainstaller bundle <path_to_lua_entry_file>
+.fi
 
-.SS analyze
-Perform dependency analysis on an entry script.
+Output:
+.nf
+success.
+<path_to_lua_entry_file> => <path_to_bundled_exe_file>
+.fi
 
-.PP
-.B luainstaller analyze \fIentry.lua\fR
-[\fB-max N\fR] [\fB--detail\fR] [\fB-bundle PATH\fR]
+\fBluainstaller\fR starts from the entry \fB.lua\fR script, performs static
+dependency analysis, and packages all dependencies into an executable file
+(default: same name in the same directory).
 
-.IP \fB-max N\fR
-Maximum dependency count (default: 36).
-.IP \fB--detail\fR
-Display detailed analysis output.
-.IP \fB-bundle PATH\fR
-Bundle to single .lua script file.
+.SH OPTIONS
+The following options apply to the \fBbundle\fR command:
 
-.SS build
-Compile entry Lua script into an executable.
+.TP
+.BI \-\-output\  <path_to_bundled_exe_file>
+Specify output path.
+.nf
+luainstaller bundle main.lua --output ../output.exe
+.fi
 
-.PP
-.B luainstaller build \fIentry.lua\fR
-[\fB-engine NAME\fR]
-[\fB-require file1.lua,file2.lua\fR]
-[\fB-max N\fR]
-[\fB-output PATH\fR]
-[\fB--manual\fR]
-[\fB--detail\fR]
+.TP
+.B \-\-verbose
+Display detailed information.
+.nf
+luainstaller bundle main.lua --verbose
+.fi
 
-.IP \fBentry.lua\fR
-Entry script.
-.IP \fB-engine NAME\fR
-Select packaging engine; default per-platform.
-.IP \fB-require LIST\fR
-Manually include dependency scripts.
-.IP \fB-max N\fR
-Maximum automatic dependency depth.
-.IP \fB-output PATH\fR
-Output executable path; Windows auto-appends .exe.
-.IP \fB--manual\fR
-Disable automatic dependency analysis.
-.IP \fB--detail\fR
-Verbose output.
+.TP
+.B \-\-no\-wrap
+Do not use Warp to package into a single \fB.exe\fR.
+.nf
+luainstaller bundle main.lua --no-wrap
+.fi
 
-.SH GUI USAGE
-Launch the graphical Tkinter interface:
+.TP
+.BI \-\-max\-dependencies\  <amount>
+Maximum number of dependencies (default 36).
+.nf
+luainstaller bundle main.lua --max-dependencies 10
+.fi
 
-.PP
-.B luainstaller-gui
+.TP
+.BI \-\-manual\-add\-require\  <require_script_path>
+Manually add dependencies (for dynamic imports not detected by analysis).
+May be specified multiple times.
+.nf
+luainstaller bundle main.lua --manual-add-require ./require.lua --manual-add-require ./require2.lua
+.fi
 
-The GUI provides basic build functionality using the platform default engine.
+.TP
+.BI \-\-manual\-exclude\  <require_script_path>
+Manually exclude dependencies (to remove false positives, e.g., from pcall).
+May be specified multiple times.
+.nf
+luainstaller bundle main.lua --manual-exclude ./require.lua --manual-exclude ./require2.lua
+.fi
 
-.SH EXAMPLES
+.TP
+.B \-\-disable\-dependency\-analysis
+Disable dependency analysis; all dependencies must be added manually.
+.nf
+luainstaller bundle main.lua --disable-dependency-analysis
+.fi
 
-.SS Build with automatic dependency analysis
-.B luainstaller build hello.lua
+.SH LUA API
+When installed via LuaRocks, \fBluainstaller\fR can be invoked from Lua:
 
-.SS Specify engine
-.B luainstaller build app.lua -engine linsrlua548
+.nf
+local luainstaller = require("luainstaller")
 
-.SS Manual dependency mode
-.B luainstaller build a.lua --manual -require b.lua,c.lua
+-- Basic packaging
+local success, result = luainstaller.bundle({ entry = "main.lua" })
 
-.SS Specify engine and output
-.B luainstaller build test.lua -engine winsrlua515 -output ../myProgram --detail
+-- Only analyze dependencies
+local success, deps = luainstaller.analyze_dependencies("main.lua", 50)
 
-.SS Build with extended dependency limit
-.B luainstaller build main.lua -max 100
-
-.SS Bundle to single file
-.B luainstaller analyze main.lua -bundle bundled.lua
+-- Version info
+print(luainstaller.version())
+.fi
 
 .SH SEE ALSO
-lua(1), luastatic(1), gcc(1)
-
-.SH AUTHOR
-WaterRun <linzhangrun49@gmail.com>
+GitHub: https://github.com/Water-Run/luainstaller
+.br
+luastatic: https://github.com/ers35/luastatic
+.br
+Warp: https://github.com/warpdotdev/Warp
 
 .SH LICENSE
-LGPL-3.0-or-later
+LGPL License

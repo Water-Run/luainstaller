@@ -2,7 +2,7 @@
 
 `luainstaller`是一个将`.lua`打包为`.exe`的工具, 支持Windows和Linux平台. 提供预编译的二进制, 在有`lua`环境的设备上开箱即用.
 使用[luastatic](https://github.com/ers35/luastatic)作为打包引擎, 并使用[Warp](https://github.com/warpdotdev/Warp)进行打包.
-开源于[GitHub](https://github.com/Water-Run/luainstaller), 遵循ISC协议.  
+开源于[GitHub](https://github.com/Water-Run/luainstaller), 遵循LGPL协议.  
 
 > luainstaller曾经以一个Python库的形式提供, 但是现在它已经独立出来成为一个命令行工具
 
