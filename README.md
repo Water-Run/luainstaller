@@ -217,5 +217,3 @@ Options for `luainstaller.bundle(opts)`:
 * `include` (string[], optional, default `{}`): manually include dependencies (repeatable)
 * `exclude` (string[], optional, default `{}`): manually exclude dependencies (repeatable)
 * `depscan` (boolean, optional, default `true`): enable dependency scanning (`false` is equivalent to CLI `--no-depscan`)
-
-```

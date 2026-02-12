@@ -1,162 +1,185 @@
-.TH LUAINSTALLER 1 "January 2026" "luainstaller v0.1.0" "User Commands"
+.TH LUAINSTALLER 1 "February 2026" "luainstaller v0.1.0" "User Commands"
 .SH NAME
-luainstaller \- package .lua scripts into .exe executables (Windows/Linux)
+luainstaller \- bundle Lua projects into distributable executables (Windows/Linux)
 
 .SH SYNOPSIS
 .B luainstaller
-.I command
-[\fIoptions\fR]
+.BR bundle " " \fIentry.lua\fR
+.RI [ options ]
+.br
+.B luainstaller
+.BR analyze " " \fIentry.lua\fR
+.RI [ options ]
+.br
+.B luainstaller
+.BR version
 
 .SH DESCRIPTION
-\fBluainstaller\fR is a tool for packaging \fB.lua\fR files into \fB.exe\fR executables,
-supporting both Windows and Linux. It provides pre-compiled binaries and works
-out-of-the-box on devices with a \fBlua\fR environment.
+\fBluainstaller\fR is a packaging tool that turns a Lua project into a distributable program on
+Windows and Linux. It performs \fBstatic dependency analysis\fR starting from an entry \fB.lua\fR
+script and bundles the required runtime files.
 
-It uses \fBluastatic\fR as the packaging engine and \fBWarp\fR for bundling.
+By default, \fBluainstaller\fR outputs a \fBdirectory\fR containing the entry script and all
+dependencies needed at runtime. With \fB--onefile\fR, it further wraps the directory bundle into a
+\fBsingle executable file\fR.
 
-The project is open-sourced on GitHub under the LGPL license.
-luainstaller was previously provided as a Python library and has been separated
-into an independent command-line tool.
+The project is open-sourced on GitHub and licensed under the \fBLGPL\fR. See the repository for
+source code, releases, and documentation:
+https://github.com/Water-Run/luainstaller
+
+\fBluainstaller\fR can be used as a CLI tool and (when installed via LuaRocks) as a Lua module via
+\fBrequire("luainstaller")\fR.
 
 .SH INSTALLATION
-There are two ways to install:
-
-.TP
-.B LuaRocks
+Install via LuaRocks:
 .nf
 luarocks install luainstaller
 .fi
-This method allows both CLI use and Lua library usage.
-
-.TP
-.B Pre-compiled binary
-Download from the repository releases page.
+This installs the \fBluainstaller\fR CLI and the Lua module.
 
 .SH COMMANDS
 .TP
-.B help
-Show help information.
-
-.TP
 .B bundle
-Package a Lua entry script into an executable.
+Bundle an entry script and its dependencies. Default output is a directory; use \fB--onefile\fR for
+a single-file executable.
+.TP
+.B analyze
+Analyze dependencies only; no bundling output is produced.
+.TP
+.B version
+Print the version information.
 
-.SH USAGE
+.SH CLI USAGE
 The CLI tool name is \fBluainstaller\fR.
 
-.SS Get help
+.SS Help
 .nf
-luainstaller help
-
-luainstaller v0.1.0
-installed via luarocks
-https://github.com/Water-Run/luainstaller
-
-help:
-  ...
+luainstaller --help
 .fi
-
-If installed via a pre-compiled binary, it will show:
-.B installed via binary(windows)
-or
-.B installed via binary(linux)
-
-On Linux, you can also use:
+On Linux, if the manpage is installed:
 .nf
 man luainstaller
 .fi
 
-.SS Execute packaging
+.SS bundle
+Default mode (output a directory):
 .nf
-luainstaller bundle <path_to_lua_entry_file>
+luainstaller bundle \fIentry.lua\fR
 .fi
-
-Output:
+Typical output:
 .nf
 success.
-<path_to_lua_entry_file> => <path_to_bundled_exe_file>
+\fIentry.lua\fR => \fIoutput_dir\fR/
 .fi
 
-\fBluainstaller\fR starts from the entry \fB.lua\fR script, performs static
-dependency analysis, and packages all dependencies into an executable file
-(default: same name in the same directory).
+Single-file mode (output a single executable file):
+.nf
+luainstaller bundle \fIentry.lua\fR --onefile
+.fi
+Typical output:
+.nf
+success.
+\fIentry.lua\fR => \fIoutput_file\fR
+.fi
+
+In both modes, \fBluainstaller\fR starts from the entry script, performs static dependency analysis
+(unless disabled), then copies/includes required files into the output. With \fB--onefile\fR it wraps
+the directory bundle into a single executable.
+
+.SS analyze
+Analyze dependencies only:
+.nf
+luainstaller analyze \fIentry.lua\fR
+.fi
+Typical output:
+.nf
+success.
+N dependencies found:
+  1) ...
+  2) ...
+.fi
 
 .SH OPTIONS
-The following options apply to the \fBbundle\fR command:
+The following options apply to \fBbundle\fR and/or \fBanalyze\fR as described.
 
 .TP
-.BI \-\-output\  <path_to_bundled_exe_file>
-Specify output path.
+.BI \-o ", " \-\-out " " path
+Output path.
+For \fBbundle\fR: a directory path in default mode, or a file path when \fB--onefile\fR is set.
+Examples:
 .nf
-luainstaller bundle main.lua --output ../output.exe
+luainstaller bundle main.lua --out ../dist/
+luainstaller bundle main.lua --onefile --out ../dist/app.exe
 .fi
 
 .TP
-.B \-\-verbose
-Display detailed information.
+.B \-\-onefile
+Generate a single-file executable. Default output is a directory.
+
+.TP
+.BI \-\-max\-deps " " n
+Maximum number of dependencies allowed (default: 36).
+.nf
+luainstaller bundle main.lua --max-deps 100
+luainstaller analyze main.lua --max-deps 50
+.fi
+
+.TP
+.BI \-\-include " " path
+Manually include additional dependencies. May be specified multiple times.
+Use this for dynamic \fBrequire\fR patterns that static analysis cannot detect.
+.nf
+luainstaller bundle main.lua --include ./require.lua --include ./plugin.lua
+.fi
+
+.TP
+.BI \-\-exclude " " path
+Manually exclude dependencies. May be specified multiple times.
+Use this to remove false positives (for example, \fBpcall(require, ...)\fR patterns).
+.nf
+luainstaller bundle main.lua --exclude ./test_utils.lua
+.fi
+
+.TP
+.B \-\-no\-depscan
+Disable dependency scanning. This switches to a fully manual mode where you must specify all
+dependencies via \fB--include\fR.
+.nf
+luainstaller bundle main.lua --no-depscan --include ./a.lua --include ./b.lua
+.fi
+
+.TP
+.B \-v ", " \-\-verbose
+Enable verbose analysis and bundling logs.
 .nf
 luainstaller bundle main.lua --verbose
 .fi
 
-.TP
-.B \-\-no\-wrap
-Do not use Warp to package into a single \fB.exe\fR.
-.nf
-luainstaller bundle main.lua --no-wrap
-.fi
-
-.TP
-.BI \-\-max\-dependencies\  <amount>
-Maximum number of dependencies (default 36).
-.nf
-luainstaller bundle main.lua --max-dependencies 10
-.fi
-
-.TP
-.BI \-\-manual\-add\-require\  <require_script_path>
-Manually add dependencies (for dynamic imports not detected by analysis).
-May be specified multiple times.
-.nf
-luainstaller bundle main.lua --manual-add-require ./require.lua --manual-add-require ./require2.lua
-.fi
-
-.TP
-.BI \-\-manual\-exclude\  <require_script_path>
-Manually exclude dependencies (to remove false positives, e.g., from pcall).
-May be specified multiple times.
-.nf
-luainstaller bundle main.lua --manual-exclude ./require.lua --manual-exclude ./require2.lua
-.fi
-
-.TP
-.B \-\-disable\-dependency\-analysis
-Disable dependency analysis; all dependencies must be added manually.
-.nf
-luainstaller bundle main.lua --disable-dependency-analysis
-.fi
-
-.SH LUA API
+.SH LUA MODULE USAGE
 When installed via LuaRocks, \fBluainstaller\fR can be invoked from Lua:
 
 .nf
 local luainstaller = require("luainstaller")
 
--- Basic packaging
-local success, result = luainstaller.bundle({ entry = "main.lua" })
+-- Bundle (default: output directory, depscan enabled)
+local ok, out = luainstaller.bundle({ entry = "main.lua" })
 
--- Only analyze dependencies
-local success, deps = luainstaller.analyze_dependencies("main.lua", 50)
+-- Single-file bundle
+local ok, out = luainstaller.bundle({
+  entry   = "main.lua",
+  onefile = true,
+  out     = "../dist/app.exe",
+})
 
--- Version info
+-- Analyze only
+local ok, deps = luainstaller.analyze("main.lua", { max_deps = 50 })
+
+-- Version
 print(luainstaller.version())
 .fi
 
 .SH SEE ALSO
-GitHub: https://github.com/Water-Run/luainstaller
-.br
-luastatic: https://github.com/ers35/luastatic
-.br
-Warp: https://github.com/warpdotdev/Warp
+GitHub repository: https://github.com/Water-Run/luainstaller
 
 .SH LICENSE
-LGPL License
+LGPL
