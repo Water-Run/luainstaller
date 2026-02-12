@@ -1,52 +1,51 @@
 # luainstaller
 
-`luainstaller` is a tool for packaging `.lua` files into `.exe` executables, supporting both Windows and Linux platforms. It provides pre-compiled binaries and works out-of-the-box on devices with a `lua` environment.
+`luainstaller` is a tool that packages Lua projects into **distributable executables** for **Windows** and **Linux**. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under the **LGPL**.
+`luainstaller` provides dependency analysis and single-file bundling, and can package non-pure-Lua content inside the wrapper program.
 
-It uses [luastatic](https://github.com/ers35/luastatic) as the packaging engine and [Warp](https://github.com/warpdotdev/Warp) for bundling.
-
-Open-sourced on [GitHub](https://github.com/Water-Run/luainstaller), following the ISC license.
-
-> luainstaller was previously provided as a Python library, but it has now been separated into an independent command-line tool
+> `luainstaller` was previously provided as a Python library; older versions could only bundle pure Lua scripts.
 
 ## Installation
 
-There are two ways to install: as a Lua library or by downloading the binary directly:
+Install via `luarocks`:
 
 ```bash
 luarocks install luainstaller
-```
-
-Or [download the binary](https://github.com/Water-Run/luainstaller/releases).
-
-Regardless of which installation method you use, using it as a command-line tool is consistent. However, only installation via `luarocks` allows it to be used as a Lua library within Lua scripts.
+````
 
 ## Usage
 
+`luainstaller` can be used as a CLI tool or invoked from Lua scripts.
+
 ### Using as a Command-Line Tool
 
-The CLI tool name is `luainstaller`.
+CLI command name: `luainstaller`
 
-- Get help
+* Show help
 
 ```bash
-luainstaller help
+luainstaller --help
 ```
 
 ```plaintext
 luainstaller v0.1.0
 
-installed via luarocks
-https://github.com/Water-Run/luainstaller
+Usage:
+  luainstaller bundle <entry.lua> [options]
+  luainstaller analyze <entry.lua> [options]
+  luainstaller version
 
-help:
+Options:
   ...
 ```
 
-> If you downloaded the pre-compiled binary, it will display as `installed via binary(windows)`/`installed via binary(linux)`
+> On Linux, you can also use `man luainstaller` to view the manual (if the manpage is installed).
 
-> On Linux, you can also use `man luainstaller` to view help
+#### Bundling (bundle)
 
-- Execute packaging
+The most commonly used command is `bundle`.
+
+* Default: outputs a directory
 
 ```bash
 luainstaller bundle <path_to_lua_entry_file>
@@ -54,121 +53,169 @@ luainstaller bundle <path_to_lua_entry_file>
 
 ```plaintext
 success.
-<path_to_lua_entry_file> => <path_to_bundled_exe_file>
+<entry.lua> => <output_dir>/
 ```
 
-`luainstaller` will start from the entry `.lua` script, perform dependency analysis (static), and package all dependencies into an executable file (by default, same name in the same directory).
+By default, `luainstaller` performs **static dependency analysis** starting from the entry `.lua` file and outputs all required runtime files into a directory.
 
-Optional parameters:
+* Single-file mode: outputs a single file only when `--onefile` is specified
 
-|Parameter|Description|Example|
-|---|---|---|
-|`--output <path_to_bundled_exe_file>`|Specify output path|`luainstaller bundle main.lua --output ../output.exe`|
-|`--verbose`|Display detailed information|`luainstaller bundle main.lua --verbose`|
-|`--no-wrap`|Don't use Warp to package into a single `.exe`|`luainstaller bundle main.lua --no-wrap`|
-|`--max-dependencies <amount>`|Maximum number of dependencies (default 36)|`luainstaller bundle main.lua --max-dependencies 10`|
-|`--manual-add-require <require_script_path>`|Manually add dependencies (e.g., for dynamic imports where dependency analysis fails)|`luainstaller bundle main.lua --manual-add-require ./require.lua --manual-add-require ./require2.lua`|
-|`--manual-exclude <require_script_path>`|Manually exclude dependencies (e.g., for scenarios where dependency analysis forces imports like `pcall`)|`luainstaller bundle main.lua --manual-exclude ./require.lua --manual-exclude ./require2.lua`|
-|`--disable-dependency-analysis`|Disable dependency analysis; all dependencies must be manually added|`luainstaller bundle main.lua --disable-dependency-analysis`|
+```bash
+luainstaller bundle <path_to_lua_entry_file> --onefile
+```
+
+```plaintext
+success.
+<entry.lua> => <output_file>
+```
+
+`--onefile` further wraps the directory bundle output into a **single executable file**.
+
+#### Optional Parameters
+
+| Option             | Description                                                                                                | Example                                                                                                        |
+|--------------------|------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-o, --out <path>` | Output path: directory in default mode; file when `--onefile` is enabled                                   | `luainstaller bundle main.lua --out ../dist/` / `luainstaller bundle main.lua --onefile --out ../dist/app.exe` |
+| `--onefile`        | Generate a single-file executable (disabled by default; default output is a directory)                     | `luainstaller bundle main.lua --onefile`                                                                       |
+| `-v, --verbose`    | Print more detailed analysis and bundling logs                                                             | `luainstaller bundle main.lua --verbose`                                                                       |
+| `--max-deps <n>`   | Maximum number of dependencies (default: 36)                                                               | `luainstaller bundle main.lua --max-deps 100`                                                                  |
+| `--include <path>` | Manually include dependencies (repeatable; for cases static analysis can’t detect, e.g. dynamic `require`) | `luainstaller bundle main.lua --include ./require.lua --include ./plugin.lua`                                  |
+| `--exclude <path>` | Manually exclude dependencies (repeatable; to remove false positives such as `pcall(require, ...)`)        | `luainstaller bundle main.lua --exclude ./test_utils.lua`                                                      |
+| `--no-depscan`     | Disable dependency scanning (enter “fully manual mode”; you must specify all dependencies via `--include`) | `luainstaller bundle main.lua --no-depscan --include ./a.lua --include ./b.lua`                                |
+
+#### Analyze Dependencies Only (analyze)
+
+Perform dependency analysis only, without bundling:
+
+```bash
+luainstaller analyze <path_to_lua_entry_file>
+```
+
+```plaintext
+success.
+N dependencies found:
+  1) ...
+  2) ...
+```
+
+---
 
 ### Calling from Lua Scripts
 
-Basic usage is consistent.
+The Lua API uses the same parameter semantics as the CLI. Dependency scanning is enabled by default; set `depscan = false` to disable it.
 
 ```lua
 local luainstaller = require("luainstaller")
 
--- Simplest packaging: automatically analyze dependencies and generate exe with same name
-local success, result = luainstaller.bundle({
-    entry = "main.lua"  -- Entry script path (required)
+-- Simplest bundling: outputs a directory by default (automatic dependency scanning)
+local ok, out = luainstaller.bundle({
+  entry = "main.lua",
+})
+-- ok=true  -> out is the output directory path
+-- ok=false -> out is an error message
+
+-- Specify output directory
+local ok, out = luainstaller.bundle({
+  entry = "main.lua",
+  out   = "../dist/",     -- directory mode: out is a directory
 })
 
--- Specify output path
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    output = "../dist/myapp.exe"  -- Output executable path (optional, defaults to same directory/name)
+-- Single-file mode: outputs a single file only when onefile=true
+local ok, out = luainstaller.bundle({
+  entry   = "main.lua",
+  onefile = true,
+  out     = "../dist/app.exe",  -- single-file mode: out is a file
 })
 
--- Display detailed packaging information
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    verbose = true  -- Show detailed dependency analysis and compilation process (optional, default false)
+-- Verbose logs
+local ok, out = luainstaller.bundle({
+  entry   = "main.lua",
+  verbose = true,
 })
 
--- Manually add dependencies (for dynamic require cases that automatic analysis can't detect)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    manual_add_require = {  -- List of manually added dependencies (optional, default empty table)
-        "./lib/plugin.lua",
-        "./lib/config.lua"
-    }
+-- Manually include dependencies (for dynamic require, etc. that cannot be detected automatically)
+local ok, out = luainstaller.bundle({
+  entry    = "main.lua",
+  include  = {
+    "./lib/plugin.lua",
+    "./lib/config.lua",
+  },
 })
 
--- Manually exclude dependencies (to exclude false-positive dependencies)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    manual_exclude = {  -- List of manually excluded dependencies (optional, default empty table)
-        "./test/test_utils.lua"
-    }
+-- Manually exclude dependencies (to remove false positives)
+local ok, out = luainstaller.bundle({
+  entry    = "main.lua",
+  exclude  = {
+    "./test/test_utils.lua",
+  },
 })
 
 -- Increase dependency limit
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    max_dependencies = 100  -- Maximum dependency analysis count (optional, default 36)
+local ok, out = luainstaller.bundle({
+  entry     = "main.lua",
+  max_deps  = 100,     -- default: 36
 })
 
--- Disable Warp packaging (generate multiple files instead of single exe)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    no_wrap = true  -- Disable Warp single-file packaging (optional, default false)
+-- Fully manual mode: disable dependency scanning (you must include all dependencies)
+local ok, out = luainstaller.bundle({
+  entry    = "main.lua",
+  depscan  = false,    -- equivalent to CLI --no-depscan
+  include  = {
+    "./module1.lua",
+    "./module2.lua",
+  },
 })
 
--- Fully manual mode (disable automatic dependency analysis)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    disable_dependency_analysis = true,  -- Disable dependency analysis (optional, default false)
-    manual_add_require = {  -- Must manually specify all dependencies in this case
-        "./module1.lua",
-        "./module2.lua"
-    }
+-- Full example with all parameters
+local ok, out = luainstaller.bundle({
+  entry     = "src/main.lua",        -- entry script
+  out       = "build/",              -- output dir in directory mode; output file when onefile=true
+  onefile   = false,                 -- default: false (outputs a directory)
+  verbose   = true,                  -- verbose output
+  max_deps  = 50,                    -- max number of dependencies
+  include   = { "plugins/extra.lua" },
+  exclude   = { "test/mock.lua" },
+  depscan   = true,                  -- default: true
 })
 
--- Complete example using all parameters
-local success, result = luainstaller.bundle({
-    entry = "src/main.lua",              -- Entry script
-    output = "build/myapp.exe",          -- Output path
-    verbose = true,                      -- Show detailed information
-    max_dependencies = 50,               -- Maximum dependencies
-    manual_add_require = {               -- Manually add dependencies
-        "plugins/extra.lua"
-    },
-    manual_exclude = {                   -- Manually exclude dependencies
-        "test/mock.lua"
-    },
-    no_wrap = false,                     -- Use Warp packaging
-    disable_dependency_analysis = false  -- Enable dependency analysis
-})
-
--- Check packaging result
-if success then
-    print("Packaging successful: " .. result)  -- result is the output file path
+if ok then
+  print("Bundle succeeded: " .. out)
 else
-    print("Packaging failed: " .. result)  -- result is the error message
+  print("Bundle failed: " .. out)
 end
 
--- Only analyze dependencies without packaging
-local success, deps = luainstaller.analyze_dependencies(
-    "main.lua",  -- Entry script
-    50           -- Maximum dependencies (optional, default 36)
-)
-if success then
-    print("Found " .. #deps .. " dependencies")
-    for i, dep in ipairs(deps) do
-        print(i .. ". " .. dep)
-    end
+-- Analyze dependencies only (no bundling)
+local ok, deps = luainstaller.analyze("main.lua", {
+  max_deps = 50,      -- optional, default: 36
+  depscan  = true,    -- optional, default: true (if false, no automatic analysis is performed)
+})
+if ok then
+  print("Found " .. #deps .. " dependencies")
+  for i, dep in ipairs(deps) do
+    print(i .. ". " .. dep)
+  end
+else
+  print("Analysis failed: " .. deps)
 end
 
--- Get version information
+-- Get version
 print("luainstaller version: " .. luainstaller.version())
+```
+
+#### Lua API Options
+
+Options for `luainstaller.bundle(opts)`:
+
+* `entry` (string, required): entry script path
+* `out` (string, optional): output path
+
+  * `onefile=false` (default): output directory path
+  * `onefile=true`: output file path
+* `onefile` (boolean, optional, default `false`): single-file mode switch
+* `verbose` (boolean, optional, default `false`): verbose logging
+* `max_deps` (number, optional, default `36`): maximum number of dependencies
+* `include` (string[], optional, default `{}`): manually include dependencies (repeatable)
+* `exclude` (string[], optional, default `{}`): manually exclude dependencies (repeatable)
+* `depscan` (boolean, optional, default `true`): enable dependency scanning (`false` is equivalent to CLI `--no-depscan`)
+
 ```

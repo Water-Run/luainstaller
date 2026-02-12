@@ -1,172 +1,218 @@
 # luainstaller
 
-`luainstaller`是一个将`.lua`打包为`.exe`的工具, 支持Windows和Linux平台. 提供预编译的二进制, 在有`lua`环境的设备上开箱即用.
-使用[luastatic](https://github.com/ers35/luastatic)作为打包引擎, 并使用[Warp](https://github.com/warpdotdev/Warp)进行打包.
-开源于[GitHub](https://github.com/Water-Run/luainstaller), 遵循LGPL协议.  
+`luainstaller` 是一个将 Lua 项目打包为 **可分发可执行程序** 的工具，支持 **Windows** 与 **Linux**，开源于 [GitHub](https://github.com/Water-Run/luainstaller)，遵循 **LGPL** 协议。
+`luainstaller`具备依赖分析和单文件打包能力，可以打包封装程序中的非纯Lua的内容。  
 
-> luainstaller曾经以一个Python库的形式提供, 但是现在它已经独立出来成为一个命令行工具
+> `luainstaller` 曾经以 Python 库的形式提供，旧版本仅能打包纯Lua脚本。  
 
 ## 安装
 
-有两种方式进行安装: 以lua库的形式安装, 或直接下载二进制:
+使用 `luarocks` 安装：
 
 ```bash
 luarocks install luainstaller
 ```
 
-或[下载二进制](https://github.com/Water-Run/luainstaller/releases).
+## 使用
 
-不管使用哪种方式进行安装, 以命令行工具的方式进行使用都是一致的. 不过, 只有通过`luarocks`安装才能作为一个lua库在lua中使用.
+`luainstaller` 既可作为 CLI 使用，也可在 Lua 脚本中调用。
 
-## 使用  
+### 作为命令行工具使用
 
-### 以命令行工具的方式使用  
+CLI 命令名称：`luainstaller`
 
-CLI工具的名称是`luainstaller`.  
-
-- 获取帮助  
+* 获取帮助
 
 ```bash
-luainstaller help
+luainstaller --help
 ```
 
 ```plaintext
 luainstaller v0.1.0
 
-installed via luarocks
-https://github.com/Water-Run/luainstaller
+Usage:
+  luainstaller bundle <entry.lua> [options]
+  luainstaller analyze <entry.lua> [options]
+  luainstaller version
 
-help:
+Options:
   ...
 ```
 
-> 如果下载的是预编译的二进制, 则显示为`installed via binary(windows)`/`installed via binary(linux)`  
+> 在 Linux 上也可以用 `man luainstaller` 查看帮助（若已安装 manpage）。
 
-> 在Linux上, 也可以用`man luainstaller`查看帮助  
+#### 打包（bundle）
 
-- 执行打包  
+最常用的命令是 `bundle`。
+
+* 默认：输出为一个目录  
 
 ```bash
 luainstaller bundle <path_to_lua_entry_file>
 ```
 
 ```plaintext
-sucess.
-<path_to_lua_entry_file> => <path_to_bundled_exe_file>
+success.
+<entry.lua> => <output_dir>/
 ```
 
-`luainstaller`将从入口`.lua`脚本开始, 进行依赖分析(静态), 并将所有依赖打包到一个可执行文件中(默认在同目录下同名).  
+默认情况下，`luainstaller` 会从入口 `.lua` 开始进行 **静态依赖分析**，并将运行所需文件输出到一个目录中。  
 
-可选参数:  
+* 单文件模式：仅在 `--onefile` 时输出为一个文件
 
-|参数|说明|示例|
-|---|---|---|
-|`--output <path_to_bundled_exe_file>`|指定输出路径|`luainstaller bundle main.lua --output ../output.exe `|
-|`--verbose`|显示详细信息|`luainstaller bundle main.lua --verbose`|
-|`--no-wrap`|不调用Warp进行打包至单`.exe`中|`luainstaller bundle main.lua --no-wrap`|
-|`--max-dependencies <amount>`|最大的依赖数量(默认36)|`luainstaller bundle main.lua --max-dependencies 10`|
-|`--manual-add-require <require_script_path>`|手动添加依赖项(例如, 动态导入等依赖分析失效的场景)|`luainstaller bundle main.lua --manual-add-require ./require.lua --manual-add-require ./require2.lua`|
-|`--manual-exclude <require_script_path>`|手动排除依赖项(例如, `pcall`等依赖分析强制导入的场景)|`luainstaller bundle main.lua --manual-exclude ./require.lua --manual-exclude ./require2.lua`|
-|`--disable-dependency-analysis`|禁用依赖分析, 所有依赖需要手动安装|`luainstaller bundle main.lua --disable-dependency-analysis`|
+```bash
+luainstaller bundle <path_to_lua_entry_file> --onefile
+```
 
-### 在lua脚本中调用
+```plaintext
+success.
+<entry.lua> => <output_file>
+```
 
-基本使用是一致的.  
+`--onefile` 会在目录打包产物基础上进行进一步封装，使最终产物为 **单一可执行文件**。
+
+#### 可选参数
+
+| 参数               | 说明                                                                          | 示例                                                                                                           |
+|--------------------|-------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-o, --out <path>` | 输出路径：默认模式为目录；`--onefile` 时为文件                                | `luainstaller bundle main.lua --out ../dist/` / `luainstaller bundle main.lua --onefile --out ../dist/app.exe` |
+| `--onefile`        | 生成单文件可执行程序（默认不启用，默认输出目录）                              | `luainstaller bundle main.lua --onefile`                                                                       |
+| `-v, --verbose`    | 输出更详细的分析与打包日志                                                    | `luainstaller bundle main.lua --verbose`                                                                       |
+| `--max-deps <n>`   | 依赖数量上限（默认 36）                                                       | `luainstaller bundle main.lua --max-deps 100`                                                                  |
+| `--include <path>` | 手动追加依赖（可重复指定；用于动态 `require` 等静态分析无法识别的情况）       | `luainstaller bundle main.lua --include ./require.lua --include ./plugin.lua`                                  |
+| `--exclude <path>` | 手动排除依赖（可重复指定；用于排除误判依赖，如 `pcall(require, ...)` 等场景） | `luainstaller bundle main.lua --exclude ./test_utils.lua`                                                      |
+| `--no-depscan`     | 禁用依赖分析（进入“完全手动模式”，需自行用 `--include` 指定所有依赖）         | `luainstaller bundle main.lua --no-depscan --include ./a.lua --include ./b.lua`                                |
+
+#### 仅分析依赖（analyze）
+
+只做依赖分析，不进行打包：
+
+```bash
+luainstaller analyze <path_to_lua_entry_file>
+```
+
+```plaintext
+success.
+N dependencies found:
+  1) ...
+  2) ...
+```
+
+---
+
+### 在 Lua 脚本中调用
+
+Lua API 与 CLI 的参数语义保持一致，默认启用依赖分析，使用 `depscan = false` 关闭。
 
 ```lua
 local luainstaller = require("luainstaller")
 
--- 最简单的打包: 自动分析依赖, 生成同名exe
-local success, result = luainstaller.bundle({
-    entry = "main.lua"  -- 入口脚本路径(必需)
+-- 最简单的打包：默认输出为目录（自动依赖分析）
+local ok, out = luainstaller.bundle({
+  entry = "main.lua",
+})
+-- ok=true  -> out 为输出目录路径
+-- ok=false -> out 为错误信息
+
+-- 指定输出目录
+local ok, out = luainstaller.bundle({
+  entry = "main.lua",
+  out   = "../dist/",     -- 目录模式：out 是目录
 })
 
--- 指定输出路径
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    output = "../dist/myapp.exe"  -- 输出可执行文件路径(可选, 默认同目录同名)
+-- 单文件模式：仅在 onefile=true 时输出为单文件
+local ok, out = luainstaller.bundle({
+  entry   = "main.lua",
+  onefile = true,
+  out     = "../dist/app.exe",  -- 单文件模式：out 是文件
 })
 
--- 显示详细打包信息
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    verbose = true  -- 显示详细的依赖分析和编译过程(可选, 默认false)
+-- 输出详细日志
+local ok, out = luainstaller.bundle({
+  entry   = "main.lua",
+  verbose = true,
 })
 
--- 手动添加依赖(用于动态require等自动分析无法识别的情况)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    manual_add_require = {  -- 手动添加的依赖列表(可选, 默认空表)
-        "./lib/plugin.lua",
-        "./lib/config.lua"
-    }
+-- 手动追加依赖（动态 require 等无法自动识别的情况）
+local ok, out = luainstaller.bundle({
+  entry    = "main.lua",
+  include  = {
+    "./lib/plugin.lua",
+    "./lib/config.lua",
+  },
 })
 
--- 手动排除依赖(用于排除误判的依赖)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    manual_exclude = {  -- 手动排除的依赖列表(可选, 默认空表)
-        "./test/test_utils.lua"
-    }
+-- 手动排除依赖（用于排除误判依赖）
+local ok, out = luainstaller.bundle({
+  entry    = "main.lua",
+  exclude  = {
+    "./test/test_utils.lua",
+  },
 })
 
 -- 增加依赖数量限制
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    max_dependencies = 100  -- 最大依赖分析数量(可选, 默认36)
+local ok, out = luainstaller.bundle({
+  entry     = "main.lua",
+  max_deps  = 100,     -- 默认 36
 })
 
--- 禁用Warp打包(生成多文件而非单一exe)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    no_wrap = true  -- 禁用Warp单文件打包(可选, 默认false)
-})
-
--- 完全手动模式(禁用自动依赖分析)
-local success, result = luainstaller.bundle({
-    entry = "main.lua",
-    disable_dependency_analysis = true,  -- 禁用依赖分析(可选, 默认false)
-    manual_add_require = {  -- 此时必须手动指定所有依赖
-        "./module1.lua",
-        "./module2.lua"
-    }
+-- 完全手动模式：关闭依赖分析（此时必须 include 指定所有依赖）
+local ok, out = luainstaller.bundle({
+  entry    = "main.lua",
+  depscan  = false,    -- 等价于 CLI 的 --no-depscan
+  include  = {
+    "./module1.lua",
+    "./module2.lua",
+  },
 })
 
 -- 使用所有参数的完整示例
-local success, result = luainstaller.bundle({
-    entry = "src/main.lua",              -- 入口脚本
-    output = "build/myapp.exe",          -- 输出路径
-    verbose = true,                      -- 显示详细信息
-    max_dependencies = 50,               -- 最大依赖数
-    manual_add_require = {               -- 手动添加依赖
-        "plugins/extra.lua"
-    },
-    manual_exclude = {                   -- 手动排除依赖
-        "test/mock.lua"
-    },
-    no_wrap = false,                     -- 使用Warp打包
-    disable_dependency_analysis = false  -- 启用依赖分析
+local ok, out = luainstaller.bundle({
+  entry     = "src/main.lua",        -- 入口脚本
+  out       = "build/",              -- 目录模式输出目录；onefile=true 时则为输出文件
+  onefile   = false,                 -- 默认 false（默认输出目录）
+  verbose   = true,                  -- 输出详细信息
+  max_deps  = 50,                    -- 最大依赖数
+  include   = { "plugins/extra.lua" },
+  exclude   = { "test/mock.lua" },
+  depscan   = true,                  -- 默认 true
 })
 
--- 检查打包结果
-if success then
-    print("打包成功: " .. result)  -- result是输出文件路径
+if ok then
+  print("打包成功: " .. out)
 else
-    print("打包失败: " .. result)  -- result是错误信息
+  print("打包失败: " .. out)
 end
 
 -- 仅分析依赖而不打包
-local success, deps = luainstaller.analyze_dependencies(
-    "main.lua",  -- 入口脚本
-    50           -- 最大依赖数(可选, 默认36)
-)
-if success then
-    print("找到 " .. #deps .. " 个依赖")
-    for i, dep in ipairs(deps) do
-        print(i .. ". " .. dep)
-    end
+local ok, deps = luainstaller.analyze("main.lua", {
+  max_deps = 50,      -- 可选，默认 36
+  depscan  = true,    -- 可选，默认 true（若为 false 则不会自动分析）
+})
+if ok then
+  print("找到 " .. #deps .. " 个依赖")
+  for i, dep in ipairs(deps) do
+    print(i .. ". " .. dep)
+  end
+else
+  print("分析失败: " .. deps)
 end
 
 -- 获取版本信息
-print("luainstaller版本: " .. luainstaller.version())
+print("luainstaller 版本: " .. luainstaller.version())
 ```
+
+#### Lua API 参数说明
+
+`luainstaller.bundle(opts)` 的 `opts`：
+
+* `entry`（string，必需）：入口脚本路径
+* `out`（string，可选）：输出路径
+  * `onefile=false`（默认）：输出目录路径
+  * `onefile=true`：输出文件路径
+* `onefile`（boolean，可选，默认 `false`）：单文件模式开关
+* `verbose`（boolean，可选，默认 `false`）：详细日志
+* `max_deps`（number，可选，默认 `36`）：依赖数量上限
+* `include`（string[]，可选，默认 `{}`）：手动追加依赖（可重复）
+* `exclude`（string[]，可选，默认 `{}`）：手动排除依赖（可重复）
+* `depscan`（boolean，可选，默认 `true`）：是否启用依赖分析（`false` 等价于 CLI 的 `--no-depscan`）
