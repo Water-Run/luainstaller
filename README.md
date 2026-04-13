@@ -1,5 +1,7 @@
 # luainstaller
 
+> Temporarily lost interest; development of this project has been suspended.
+
 *[中文](README-zh.md)*
 
 `luainstaller` is a tool that packages Lua projects into **distributable executables**, supporting **Windows** and **Linux**. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.

@@ -1,5 +1,7 @@
 # luainstaller
 
+> 暂时失去兴趣, 此项目暂停开发
+
 *[English](README.md)*  
 
 `luainstaller` 是一个将 Lua 项目打包为**可分发可执行程序**的工具，支持 **Windows** 与 **Linux**，开源于 [GitHub](https://github.com/Water-Run/luainstaller)，遵循 **LGPL** 协议。
