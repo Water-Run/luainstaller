@@ -1,0 +1,128 @@
+luainstaller Coding Style
+=========================
+
+This project is mostly Lua, with a small amount of C allowed when it makes
+packaging or runtime startup simpler. Keep the code direct, portable, and easy
+to audit.
+
+
+General Rules
+-------------
+
+- Prefer small modules with clear responsibility over broad helper files.
+- Keep behavior explicit. Avoid hidden global state except for intentional
+  runtime bootstrap state.
+- Public APIs must return structured results or structured errors where
+  possible.
+- Keep generated files out of the repository unless they are stable fixtures.
+- Code and documentation should match the LuaRocks installation path.
+  The library is `luainstaller`; the command-line tool is `luai`.
+
+
+Lua Style
+---------
+
+- Use simple, idiomatic Lua. Prefer clear tables and local functions.
+- Use four spaces for indentation.
+- Do not align unrelated assignments by adding large spacing blocks.
+- Prefer `local` for every binding that does not intentionally escape.
+- Keep module exports in a single table named `M` unless a file has a strong
+  reason to expose a class-like table.
+- Use explicit option tables for public APIs.
+- Keep CLI parsing small and predictable.
+- Avoid clever metatable use in normal control flow.
+- Preserve compatibility with Lua 5.4 first. Compatibility shims for older Lua
+  versions should be isolated and documented.
+
+Lua files should start with a block header:
+
+```lua
+--[[
+Short module description.
+
+Author:
+    WaterRun
+File:
+    example.lua
+Date:
+    YYYY-MM-DD
+Updated:
+    YYYY-MM-DD
+]]
+```
+
+Document public and non-obvious local functions with Lua comments:
+
+```lua
+-- @description: Resolve a module name to a package path.
+-- @param module_name: string - Module name passed to require.
+-- @param from_script: string - Script path that issued the require.
+-- @return: table|nil - Resolution result, or nil for builtins.
+-- @raise: ModuleNotFoundError when no candidate exists.
+local function resolveModule(module_name, from_script)
+    ...
+end
+```
+
+Use enough documentation for future maintenance, but do not restate obvious
+assignments.
+
+
+C Style
+-------
+
+- Use standard C. Prefer C99-compatible code unless a platform constraint
+  requires stricter C89-compatible code.
+- Opening braces must occupy their own line.
+- Use four spaces for indentation.
+- Keep functions short and named after concrete runtime actions.
+- Avoid compiler-specific extensions in checked-in source.
+- Put platform-specific code behind small, named helper functions.
+- Check allocation, file, and OS API failures. Return readable error messages.
+- Do not hide resource ownership. The function that allocates or opens a
+  resource must either release it or clearly transfer ownership.
+
+C example:
+
+```c
+static int
+run_bundle(lua_State *L, int argc, char **argv)
+{
+    int status;
+
+    status = lua_pcall(L, argc, LUA_MULTRET, 0);
+    if (status != LUA_OK)
+    {
+        return status;
+    }
+
+    return LUA_OK;
+}
+```
+
+
+Generated C
+-----------
+
+- Generated C should be deterministic for the same input manifest.
+- Generated arrays should include explicit lengths; do not rely on NUL
+  termination for embedded Lua source or binary payloads.
+- Keep the generated launcher small:
+  - create Lua state
+  - open standard libraries
+  - install bundle searchers
+  - prepare `arg`
+  - run the entry chunk
+  - report errors
+
+
+Documentation Style
+-------------------
+
+- User documentation should stay practical and avoid promising unsupported
+  platform combinations.
+- Say "same OS, same architecture, same ABI" when describing the first-stage
+  compatibility boundary.
+- Mention `luai` for CLI examples and `require("luainstaller")` for library
+  examples.
+- If behavior is planned but not implemented, label it as a plan.

@@ -1,7 +1,5 @@
 # luainstaller
 
-> 暂时失去兴趣, 此项目暂停开发
-
 *[English](README.md)*  
 
 `luainstaller` 是一个将 Lua 项目打包为**可分发可执行程序**的工具，支持 **Windows** 与 **Linux**，开源于 [GitHub](https://github.com/Water-Run/luainstaller)，遵循 **LGPL** 协议。
@@ -9,6 +7,21 @@
 `luainstaller` 具备依赖分析与单文件打包能力，可在封装程序中包含非纯 Lua 的内容。需要特别说明的是，`luainstaller` 保障的是打包后的二进制文件能在与当前**相同的系统环境**（不含 `lua` 环境本身）下正常运行。
 
 > `luainstaller` 曾以 Python 库形式提供。旧版本开箱即用且跨平台，但仅支持打包纯 Lua 脚本。（见 `deprecated-python-lib` 分支）
+
+---
+
+## 继续开发计划
+
+项目接下来会保持简单，优先补齐一个可验证的最小闭环：在**相同系统、相同架构、相同 ABI** 下，将 Lua 项目打包为开箱即用的可执行程序。也就是说，WinXP 环境构建的产物优先保证在 WinXP 环境运行，Linux/macOS 也遵循同样原则；暂不把跨系统交叉构建作为第一目标。
+
+近期目标：
+
+- 通过 LuaRocks 安装为库，并注册简洁的 `luai` 命令行工具；库调用仍保持 `require("luainstaller")`。
+- 恢复并统一命令行入口，改为更接近 Lua 工具习惯的简洁形式，例如 `luai -c main.lua` 用于打包，`luai -a main.lua` 用于分析，`luai -t main.lua` 用于追踪依赖解析过程。
+- 保留 `analyzer` 作为依赖分析核心，先支持被 `require` 直接发现的 Lua 脚本与 Lua C 模块（`.so` / `.dll` / `.dylib`）。
+- 非纯 Lua 项目的第一阶段实现采用运行时解压策略：打包时收集 native 模块，运行时解压到临时目录并调整 `package.cpath`，再执行入口脚本。
+- 增加代码追踪输出，显示每个 `require` 来自哪个文件、解析到了哪个路径、被纳入包内还是被跳过，方便定位动态依赖和平台 ABI 问题。
+- 外部系统库、复杂 hook、跨平台交叉构建暂不作为第一阶段目标；需要时先通过手动 include 处理。
 
 ---
 
