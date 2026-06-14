@@ -23,5 +23,9 @@ end
 print("{")
 print("  id = " .. student.id .. ",")
 print("  name = " .. quote(student.name) .. ",")
-print("  courses = { " .. quote(table.concat(student.courses, ", ")) .. " },")
+local quoted_courses = {}
+for _, course in ipairs(student.courses) do
+    quoted_courses[#quoted_courses + 1] = quote(course)
+end
+print("  courses = { " .. table.concat(quoted_courses, ", ") .. " },")
 print("}")

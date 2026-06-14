@@ -88,6 +88,36 @@ local function parse_student_options(opts)
     }
 end
 
+local function parse_update_options(opts)
+    local fields = {}
+    if opts.name then
+        fields.name = opts.name
+    end
+    if opts.gender then
+        fields.gender = opts.gender
+    end
+    if opts.class or opts.class_name then
+        fields.class_name = opts.class or opts.class_name
+    end
+    if opts.birth or opts.birth_year then
+        fields.birth_year = opts.birth or opts.birth_year
+    end
+    if opts.phone then
+        fields.phone = opts.phone
+    end
+    if opts.email then
+        fields.email = opts.email
+    end
+    if opts.grades and opts.grades ~= "" then
+        local grades, err = model.parse_grade_expr(opts.grades)
+        if err then
+            return nil, err
+        end
+        fields.grades = grades
+    end
+    return fields
+end
+
 local function print_stats(svc)
     local stats = svc:stats()
     utils.println("Total students: " .. stats.total)
@@ -149,6 +179,23 @@ local function run_command(command, opts)
             error(add_err)
         end
         utils.println("Added student " .. student.id .. ": " .. student.name)
+    elseif command == "update" then
+        local id = tonumber(opts.id or opts.positionals[1])
+        if not id then
+            error("update requires --id")
+        end
+        local fields, err = parse_update_options(opts)
+        if not fields then
+            error(err)
+        end
+        if next(fields) == nil then
+            error("update requires at least one field to change")
+        end
+        local ok, update_err = svc:update(id, fields)
+        if not ok then
+            error(update_err)
+        end
+        utils.println("Updated student " .. id)
     elseif command == "delete" then
         local ok, err = svc:delete(opts.id or opts.positionals[1])
         if not ok then

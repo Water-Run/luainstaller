@@ -63,6 +63,23 @@ local classifiers = {
         if text == "" then
             return "blank", state
         end
+        if state.lua_block then
+            local level = state.lua_block
+            local close_pat = "]" .. string.rep("=", level) .. "]"
+            if text:find(close_pat, 1, false) then
+                state.lua_block = nil
+            end
+            return "comment", state
+        end
+        local eq_part = text:match("^%-%-%[(=*)%[")
+        if eq_part then
+            local level = #eq_part
+            local close_pat = "]" .. string.rep("=", level) .. "]"
+            if not text:find(close_pat, 1, false) then
+                state.lua_block = level
+            end
+            return "comment", state
+        end
         if text:sub(1, 2) == "--" then
             return "comment", state
         end
