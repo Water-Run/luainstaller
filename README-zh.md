@@ -10,21 +10,6 @@
 
 ---
 
-## 继续开发计划
-
-项目接下来会保持简单，优先补齐一个可验证的最小闭环：在**相同系统、相同架构、相同 ABI** 下，将 Lua 项目打包为开箱即用的可执行程序。也就是说，WinXP 环境构建的产物优先保证在 WinXP 环境运行，Linux/macOS 也遵循同样原则；暂不把跨系统交叉构建作为第一目标。
-
-近期目标：
-
-- 通过 LuaRocks 安装为库，并注册简洁的 `luai` 命令行工具；库调用仍保持 `require("luainstaller")`。
-- 恢复并统一命令行入口，改为更接近 Lua 工具习惯的简洁形式，例如 `luai -c main.lua` 用于打包，`luai -a main.lua` 用于分析，`luai -t main.lua` 用于追踪依赖解析过程。
-- 保留 `analyzer` 作为依赖分析核心，先支持被 `require` 直接发现的 Lua 脚本与 Lua C 模块（`.so` / `.dll` / `.dylib`）。
-- 非纯 Lua 项目的第一阶段实现采用运行时解压策略：打包时收集 native 模块，运行时解压到临时目录并调整 `package.cpath`，再执行入口脚本。
-- 增加代码追踪输出，显示每个 `require` 来自哪个文件、解析到了哪个路径、被纳入包内还是被跳过，方便定位动态依赖和平台 ABI 问题。
-- 外部系统库、复杂 hook、跨平台交叉构建暂不作为第一阶段目标；需要时先通过手动 include 处理。
-
----
-
 ## 安装
 
 使用 `luarocks` 安装：
@@ -33,19 +18,11 @@
 luarocks install luainstaller
 ```
 
-### 环境依赖
-
-运行前，请确保以下依赖已安装：
-
-- [luastatic](https://github.com/ers35/luastatic)
-- GCC 兼容的 C 工具链（如 `gcc` / `mingw-w64 gcc`）
-- `windres`（仅 Windows；使用 `--icon` 时需要）
-
 ---
 
 ## 使用
 
-`luainstaller` 既可作为命令行工具使用，也支持在 Lua 脚本中直接调用。
+`luainstaller` 既可作为命令行工具使用，也支持在 Lua 脚本调用。
 
 ---
 

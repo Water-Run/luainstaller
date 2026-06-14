@@ -10,21 +10,6 @@
 
 ---
 
-## Development Plan
-
-The next development stage will keep the project small and focus on a verifiable minimum loop: package Lua projects into ready-to-run executables for the **same operating system, architecture, and ABI** as the build environment. For example, an artifact built on WinXP should primarily target WinXP; Linux and macOS follow the same rule. Cross-system builds are not the first target.
-
-Near-term goals:
-
-- Install through LuaRocks as a library and register the concise `luai` command-line tool. The public library remains available through `require("luainstaller")`.
-- Restore and unify the command-line entry point with concise Lua-style options, such as `luai -c main.lua` for packaging, `luai -a main.lua` for analysis, and `luai -t main.lua` for dependency tracing.
-- Keep `analyzer` as the dependency analysis core, first supporting Lua scripts and Lua C modules (`.so` / `.dll` / `.dylib`) directly discovered through `require`.
-- Handle non-pure-Lua projects with runtime extraction in the first stage: collect native modules at packaging time, extract them to a temporary directory at runtime, update `package.cpath`, then execute the entry script.
-- Add code tracing output that shows where each `require` came from, which path it resolved to, and whether it was bundled or skipped. This should make dynamic dependency and platform ABI issues easier to diagnose.
-- Defer external system library scanning, complex hooks, and cross-platform builds. Use manual includes for those cases first.
-
----
-
 ## Installation
 
 Install via `luarocks`:
@@ -32,14 +17,6 @@ Install via `luarocks`:
 ```bash
 luarocks install luainstaller
 ```
-
-### Environment Dependencies
-
-Before running, ensure the following dependencies are installed:
-
-- [luastatic](https://github.com/ers35/luastatic)
-- A GCC-compatible C toolchain (e.g. `gcc` / `mingw-w64 gcc`)
-- `windres` (Windows only; required when using `--icon`)
 
 ---
 
@@ -60,7 +37,7 @@ luainstaller --help
 ```
 
 ```plaintext
-luainstaller v0.1.0
+luainstaller v1.0.0
 
 Usage:
   luainstaller bundle <entry.lua> [options]

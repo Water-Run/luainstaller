@@ -1,3 +1,4 @@
+rockspec_format = "3.0"
 package = "luainstaller"
 version = "1.0.0-1"
 
@@ -40,8 +41,6 @@ build = {
         ["luainstaller.logger"]   = "src/logger.lua",
         ["luainstaller.analyzer"] = "src/analyzer.lua",
         ["luainstaller.cli"]      = "src/cli.lua",
-        ["luainstaller.executor"] = "src/executor.lua",
-        ["luainstaller.wrapper"]  = "src/wrapper.lua",
     },
     install = {
         bin = {
