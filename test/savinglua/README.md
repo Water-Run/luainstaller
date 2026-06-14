@@ -1,22 +1,76 @@
 # savinglua
 
-This directory is reserved for a high-speed Lua table-structure storage
-database backed by SQLite. The sample should eventually include Lua code and
-native SQLite-facing code.
+This sample is a small SQLite-backed Lua table record store. It is designed as
+a packaging target that exercises Lua modules, LuaRocks dependencies, native
+SQLite bindings, persistent data files, and command-line workflows.
 
-Purpose:
+## Features
 
-- exercise mixed Lua/C project packaging
-- exercise SQLite-backed persistence
-- verify native module discovery
-- verify runtime extraction and `package.cpath` setup
-- provide a realistic benchmark-style sample
+- SQLite schema initialization
+- JSON table record storage through `cjson`
+- native SQLite access through `lsqlite3`
+- key/value put, get, scan, and delete commands
+- prefix scans with deterministic key ordering
+- smoke test with a temporary database
 
-Planned layout:
+## Files
 
-- `src/` for Lua modules
-- `csrc/` for C modules or SQLite binding glue
-- `bench/` for benchmark scripts and generated data
+- `main.lua` - command-line entry point
+- `src/savinglua/store.lua` - SQLite-backed table store
+- `smoke_test.lua` - non-interactive project check
+- `bench/` - benchmark script extension point
+- `csrc/` - local C glue extension point; current native access comes from
+  the `lsqlite3` LuaRocks module
 
-The code is intentionally not initialized yet. The first prototype should store
-Lua table records in SQLite before adding benchmark cases.
+## Dependencies
+
+Install dependencies with LuaRocks if they are not already available:
+
+```sh
+luarocks install lua-cjson
+luarocks install lsqlite3
+```
+
+Check dependency discovery:
+
+```sh
+lua -e 'require("cjson"); require("lsqlite3"); print("savinglua deps ok")'
+```
+
+## Direct Use
+
+Store and read a record:
+
+```sh
+lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}'
+lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 get users:ada
+lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 scan users:
+lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 delete users:ada
+```
+
+## Verification
+
+Run the project smoke test:
+
+```sh
+lua test/savinglua/smoke_test.lua
+```
+
+Run syntax checks:
+
+```sh
+find test/savinglua -name '*.lua' -print0 | xargs -0 -n1 luac -p
+```
+
+Future packaging targets:
+
+```sh
+luai -t test/savinglua/main.lua
+luai -c test/savinglua/main.lua -o build/savinglua
+```
+
+Expected dependency behavior:
+
+- Lua modules: `savinglua.store`
+- LuaRocks/native modules: `cjson`, `lsqlite3`
+- Data file: selected by `--db`, defaulting to `savinglua.sqlite3`

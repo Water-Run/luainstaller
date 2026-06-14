@@ -4,8 +4,16 @@ Smoke test for the Firebird Web SQL Shell sample.
 The test avoids a real Firebird server and validates the packaged-tool core:
 mock SQL driver, CSV export, history, security capability reporting, and the
 embedded Web page.
-]]
 
+Author:
+    WaterRun
+File:
+    smoke_test.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local ROOT = "test/firebird_web_sql"
 package.path = ROOT .. "/?.lua;" .. package.path
 

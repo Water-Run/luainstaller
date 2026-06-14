@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    08_csv_summary.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local csv = arg[1] or "alice,90\nbob,81\ncarol,96\n"
 local total = 0
 local count = 0

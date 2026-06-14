@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    29_lru_cache.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local capacity = 3
 local cache = {}
 local order = {}

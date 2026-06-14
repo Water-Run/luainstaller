@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    19_queue_simulation.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local queue = { first = 1, last = 0 }
 
 local function push(value)

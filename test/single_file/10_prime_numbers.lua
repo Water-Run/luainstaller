@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    10_prime_numbers.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local limit = tonumber(arg[1]) or 50
 local primes = {}
 

@@ -14,8 +14,7 @@ Updated:
 local M = {}
 
 local function load_luaossl()
-    local loader = _G.require
-    local ok, openssl = pcall(loader, "openssl")
+    local ok, openssl = pcall(require, "openssl")
     if ok then
         return openssl
     end

@@ -1,20 +1,71 @@
 # ltokei
 
-This directory is reserved for a Tokei-like source code statistics tool written
-in Lua.
+This sample is a Tokei-like source code statistics tool written in Lua. It is
+designed as a medium-size pure Lua packaging target with recursive directory
+scanning, multiple modules, fixtures, and CLI table output.
 
-Purpose:
+## Features
 
-- exercise medium-size pure Lua packaging
-- exercise recursive directory scanning
-- exercise optional Lua library dependencies
-- provide a realistic CLI application sample
+- recursive source file scanning
+- language detection by file extension
+- line classification for code, blank lines, and comments
+- Lua, C, Markdown, Python, and JavaScript rules
+- deterministic language summary table
+- fixture-backed smoke test
 
-Planned layout:
+## Files
 
-- `src/` for Lua modules
-- `fixtures/` for small source trees used by the sample
+- `main.lua` - command-line entry point
+- `src/ltokei/languages.lua` - language detection and line classification
+- `src/ltokei/scanner.lua` - recursive file scanning and aggregation
+- `src/ltokei/formatter.lua` - plain text table rendering
+- `fixtures/` - small source tree used by the smoke test
+- `smoke_test.lua` - non-interactive project check
 
-The first version should count files, blank lines, comment lines, and code
-lines for a small set of languages. Library dependencies are allowed when they
-make the sample more realistic.
+## Dependency
+
+The sample uses LuaFileSystem for cross-platform recursive file enumeration:
+
+```sh
+luarocks install luafilesystem
+```
+
+## Direct Use
+
+Scan the bundled fixture tree:
+
+```sh
+lua test/ltokei/main.lua test/ltokei/fixtures
+```
+
+Scan the repository:
+
+```sh
+lua test/ltokei/main.lua .
+```
+
+## Verification
+
+Run the project smoke test:
+
+```sh
+lua test/ltokei/smoke_test.lua
+```
+
+Run syntax checks:
+
+```sh
+find test/ltokei -name '*.lua' -print0 | xargs -0 -n1 luac -p
+```
+
+Future packaging targets:
+
+```sh
+luai -t test/ltokei/main.lua
+luai -c test/ltokei/main.lua -o build/ltokei
+```
+
+Expected dependency behavior:
+
+- Lua modules: `ltokei.languages`, `ltokei.scanner`, `ltokei.formatter`
+- LuaRocks/native module: `lfs`

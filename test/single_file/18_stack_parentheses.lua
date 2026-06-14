@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    18_stack_parentheses.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local text = arg[1] or "{[()()]}"
 local opens = { ["("] = ")", ["["] = "]", ["{"] = "}" }
 local closes = { [")"] = true, ["]"] = true, ["}"] = true }

@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    16_gcd_euclid.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local a = tonumber(arg[1]) or 252
 local b = tonumber(arg[2]) or 198
 

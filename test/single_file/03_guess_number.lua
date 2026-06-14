@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    03_guess_number.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local secret = 42
 local guess = tonumber(arg[1])
 

@@ -3,8 +3,16 @@ Smoke test for the student management system sample.
 
 This script exercises the command-mode interface so the sample can be checked
 without interactive input.
-]]
 
+Author:
+    WaterRun
+File:
+    smoke_test.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local ROOT = "test/student_management_system"
 local DATA = os.tmpname() .. ".json"
 local EXPORT = os.tmpname() .. ".csv"

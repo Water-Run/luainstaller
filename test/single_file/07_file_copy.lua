@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    07_file_copy.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local input = arg[1]
 local output = arg[2]
 

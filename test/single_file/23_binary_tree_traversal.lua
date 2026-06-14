@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    23_binary_tree_traversal.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local tree = {
     value = 8,
     left = {

@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    14_binary_search.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local values = { 3, 8, 13, 21, 34, 55, 89 }
 local target = tonumber(arg[1]) or 34
 local lo = 1

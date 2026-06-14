@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    22_frequency_table.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local text = table.concat(arg, " ")
 if text == "" then
     text = "lua makes lua tools pleasant"

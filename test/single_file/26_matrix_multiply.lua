@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    26_matrix_multiply.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local a = {
     { 1, 2, 3 },
     { 4, 5, 6 },

@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    02_calculator.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local a = tonumber(arg[1]) or 12
 local op = arg[2] or "+"
 local b = tonumber(arg[3]) or 8

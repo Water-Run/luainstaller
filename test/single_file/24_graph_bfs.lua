@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    24_graph_bfs.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local graph = {
     A = { "B", "C" },
     B = { "D", "E" },

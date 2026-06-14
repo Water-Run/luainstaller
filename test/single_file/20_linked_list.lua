@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    20_linked_list.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local head = nil
 
 local function prepend(value)

@@ -140,8 +140,7 @@ local function mock_select(sql, max_rows)
 end
 
 local function load_luasql_firebird()
-    local loader = _G.require
-    local ok, luasql = pcall(loader, "luasql.firebird")
+    local ok, luasql = pcall(require, "luasql.firebird")
     if ok then
         return luasql
     end

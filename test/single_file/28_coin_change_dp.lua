@@ -1,3 +1,15 @@
+--[[
+Sample Lua program for luainstaller test coverage.
+
+Author:
+    WaterRun
+File:
+    28_coin_change_dp.lua
+Date:
+    2026-06-14
+Updated:
+    2026-06-14
+]]
 local amount = tonumber(arg[1]) or 11
 local coins = { 1, 2, 5 }
 local dp = { [0] = 0 }
