@@ -15,6 +15,38 @@ Updated:
     2026-02-22
 ]]
 
+local function localFileExists(path)
+    local handle = io.open(path, "rb")
+    if handle then
+        handle:close()
+        return true
+    end
+    return false
+end
+
+local function installSourcePreloads()
+    local script_path = arg and arg[0] or ""
+    local source_dir = script_path:match("^(.*[/\\])[^/\\]+$") or "src/"
+    local function sourcePath(name)
+        return source_dir .. name
+    end
+
+    if package.preload["luainstaller"] or not localFileExists(sourcePath("init.lua")) then
+        return
+    end
+
+    package.preload["luainstaller.analyzer"] = package.preload["luainstaller.analyzer"] or function()
+        return dofile(sourcePath("analyzer.lua"))
+    end
+    package.preload["luainstaller.logger"] = package.preload["luainstaller.logger"] or function()
+        return dofile(sourcePath("logger.lua"))
+    end
+    package.preload["luainstaller"] = function()
+        return dofile(sourcePath("init.lua"))
+    end
+end
+
+installSourcePreloads()
 
 local luainstaller = require("luainstaller")
 local analyzer     = require("luainstaller.analyzer")
