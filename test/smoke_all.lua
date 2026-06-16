@@ -195,6 +195,9 @@ os.exit(cli.main({ %s }))
 end
 
 local function check_cli_contract()
+    local direct_help = run("lua src/cli.lua --help")
+    assert_contains(direct_help, "luai -a <entry.lua>")
+
     local help = run(cli_command({ "--help" }))
     assert_contains(help, "luai -a <entry.lua>")
     assert_contains(help, "luai -t <entry.lua>")
