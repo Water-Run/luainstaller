@@ -122,6 +122,11 @@ that runtime work is same OS, same architecture, same ABI, and same Lua ABI.
 launcher work before returning its current `NotImplementedError`; writing that
 manifest to `.luai/manifest.lua` is still part of the onedir bundler milestone.
 
+The pure Lua runtime milestone is implemented: `luainstaller.runtime` can install
+a bundled module searcher, and `luainstaller.cgen` can generate a Lua bootstrap
+chunk for pure Lua payloads. This bootstrap is the Lua side that future C
+launcher work will embed.
+
 The overall process can be summarized as:
 
 ```plaintext

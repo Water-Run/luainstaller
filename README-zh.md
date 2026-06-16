@@ -117,6 +117,10 @@ end
 
 `bundle(opts)` 现在会先生成供后续 onedir 与 launcher 使用的 manifest 契约，然后返回当前阶段的 `NotImplementedError`；把该 manifest 写入 `.luai/manifest.lua` 仍属于 onedir bundler 里程碑。
 
+纯 Lua runtime 里程碑已实现：`luainstaller.runtime` 可以安装 bundled module
+searcher，`luainstaller.cgen` 可以为纯 Lua payload 生成 Lua bootstrap chunk。
+这段 bootstrap 是后续 C launcher 将要嵌入的 Lua 侧启动逻辑。
+
 可以将其工作过程概括为：
 
 ```plaintext
