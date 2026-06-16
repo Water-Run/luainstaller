@@ -121,6 +121,10 @@ end
 searcher，`luainstaller.cgen` 可以为纯 Lua payload 生成 Lua bootstrap chunk。
 这段 bootstrap 是后续 C launcher 将要嵌入的 Lua 侧启动逻辑。
 
+C launcher template 里程碑也已启动：`luainstaller.launcher` 可以生成
+shared-Lua C 源码，将 Lua bootstrap 嵌入并通过 Lua C API 执行。这是后续
+onedir bundler 会使用的构建基础，还不是完整的 `luai -c` 输出路径。
+
 可以将其工作过程概括为：
 
 ```plaintext

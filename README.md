@@ -127,6 +127,11 @@ a bundled module searcher, and `luainstaller.cgen` can generate a Lua bootstrap
 chunk for pure Lua payloads. This bootstrap is the Lua side that future C
 launcher work will embed.
 
+The C launcher template milestone has also started: `luainstaller.launcher` can
+generate shared-Lua C source that embeds the Lua bootstrap and executes it
+through the Lua C API. This is a build primitive for the later onedir bundler,
+not a finished `luai -c` output path yet.
+
 The overall process can be summarized as:
 
 ```plaintext
