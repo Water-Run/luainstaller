@@ -42,7 +42,7 @@ Current command status:
 | Command | Status | Description |
 |---------|--------|-------------|
 | `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
-| `luai -t <entry.lua>` | implemented | Print coarse trace-style resolution diagnostics. |
+| `luai -t <entry.lua>` | implemented | Print analyzer trace records with classifications and reasons. |
 | `luai -c <entry.lua>` | planned | Validate and plan bundling, then return `NotImplementedError` until the onedir bundler exists. |
 
 Common options:
@@ -92,8 +92,8 @@ Available functions:
 | Function | Status | Return shape |
 |----------|--------|--------------|
 | `luainstaller.analyze(opts)` | implemented | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
-| `luainstaller.trace(opts)` | implemented | `{ ok = true, action = "trace", trace = {} }` |
-| `luainstaller.bundle(opts)` | planned | `{ ok = false, error = { type = "NotImplementedError", ... } }` after validation. |
+| `luainstaller.trace(opts)` | implemented | Real analyzer trace records with requiring file, source line, candidates, classification, and reason. |
+| `luainstaller.bundle(opts)` | planned | Returns `NotImplementedError` with `error.manifest` after validation. |
 
 Common `opts` fields:
 
@@ -117,6 +117,10 @@ resolution decisions → validate bundle options**.
 Runtime launcher generation, manifest writing, onedir output, onefile payloads,
 and native-module extraction are roadmap work. The compatibility boundary for
 that runtime work is same OS, same architecture, same ABI, and same Lua ABI.
+
+`bundle(opts)` now builds the manifest contract used by future onedir and
+launcher work before returning its current `NotImplementedError`; writing that
+manifest to `.luai/manifest.lua` is still part of the onedir bundler milestone.
 
 The overall process can be summarized as:
 

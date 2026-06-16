@@ -92,8 +92,8 @@ end
 | 函数 | 状态 | 返回形态 |
 |------|------|----------|
 | `luainstaller.analyze(opts)` | 已实现 | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
-| `luainstaller.trace(opts)` | 已实现 | `{ ok = true, action = "trace", trace = {} }` |
-| `luainstaller.bundle(opts)` | 计划中 | 校验通过后返回 `{ ok = false, error = { type = "NotImplementedError", ... } }`。 |
+| `luainstaller.trace(opts)` | 已实现 | analyzer 真实 trace 记录，包含引用文件、源码行、候选项、分类和原因。 |
+| `luainstaller.bundle(opts)` | 计划中 | 校验通过后返回带 `error.manifest` 的 `NotImplementedError`。 |
 
 常用 `opts` 字段：
 
@@ -114,6 +114,8 @@ end
 当前工作流程是：**分析入口脚本 → 收集依赖 → 输出解析诊断 → 校验打包选项**。
 
 运行时 launcher 生成、manifest 写入、onedir 输出、onefile payload 和 native 模块解压仍是路线图中的后续工作。后续运行时的兼容性边界是相同 OS、相同架构、相同 ABI 和相同 Lua ABI。
+
+`bundle(opts)` 现在会先生成供后续 onedir 与 launcher 使用的 manifest 契约，然后返回当前阶段的 `NotImplementedError`；把该 manifest 写入 `.luai/manifest.lua` 仍属于 onedir bundler 里程碑。
 
 可以将其工作过程概括为：
 
