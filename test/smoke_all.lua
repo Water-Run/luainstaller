@@ -299,6 +299,7 @@ assert(stripped == "print('ok')")
 
 local previous_arg = _G.arg
 _G.arg = { "outer" }
+local outer_arg = _G.arg
 local payload = {
     entry = {
         id = "__entry__",
@@ -325,7 +326,7 @@ end
 
 runtime.run(payload, { "direct" })
 print = old_print
-assert(_G.arg == previous_arg)
+assert(_G.arg == outer_arg)
 assert(output[1] == "hello direct")
 assert(output[2] == "entry=test/runtime_bundle/main.lua")
 _G.arg = previous_arg
@@ -343,7 +344,7 @@ assert(bootstrap:find("luainstaller generated bootstrap", 1, true))
 
 local chunk = assert(load(bootstrap, "@generated-runtime-bundle"))
 local old_arg = _G.arg
-_G.arg = { "generated.lua", "generated" }
+_G.arg = { [0] = "generated.lua", "generated" }
 local generated_output = {}
 print = function(...)
     local parts = {}
