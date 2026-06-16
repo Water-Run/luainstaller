@@ -185,6 +185,7 @@ local function applyManualInputs(result, opts)
     return {
         scripts   = scripts,
         libraries = libraries,
+        trace     = result.trace or {},
     }
 end
 
@@ -193,7 +194,7 @@ local function dependencyPlan(opts)
     if opts.depscan == false then
         raw = { scripts = {}, libraries = {} }
     else
-        local ok, result = pcall(analyzer.analyzeDependencies, opts.entry, {
+        local ok, result = pcall(analyzer.traceDependencies, opts.entry, {
             max_dependencies = opts.max_deps or opts.max_dependencies or DEFAULT_MAX_DEPS,
         })
         if not ok then
@@ -233,6 +234,7 @@ function M.analyze(opts)
         action       = "analyze",
         entry        = normalized.entry,
         dependencies = dependencies,
+        trace        = dependencies.trace or {},
     }
 end
 
@@ -276,30 +278,12 @@ function M.trace(opts)
         return analyzed
     end
 
-    local trace = {}
-    for _, path in ipairs(analyzed.dependencies.scripts) do
-        trace[#trace + 1] = {
-            requested     = basename(path):gsub("%.lua$", ""),
-            selected_type = "lua",
-            selected_path = path,
-            reason        = "resolved",
-        }
-    end
-    for _, path in ipairs(analyzed.dependencies.libraries) do
-        trace[#trace + 1] = {
-            requested     = basename(path),
-            selected_type = "native",
-            selected_path = path,
-            reason        = "resolved",
-        }
-    end
-
     return {
         ok           = true,
         action       = "trace",
         entry        = analyzed.entry,
         dependencies = analyzed.dependencies,
-        trace        = trace,
+        trace        = analyzed.trace or {},
     }
 end
 

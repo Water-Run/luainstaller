@@ -938,6 +938,105 @@ function ModuleResolver:getSearchedPaths()
     return dirs
 end
 
+--@description: Build the ordered candidate list for a module resolution attempt
+--@param self: ModuleResolver - Resolver instance
+--@param module_name: string - Module name passed to require
+--@param from_script: string - Absolute path of the requiring script
+--@return: table - Ordered candidate records
+function ModuleResolver:buildCandidates(module_name, from_script)
+    local candidates = {}
+
+    if self:isBuiltin(module_name) then
+        return candidates
+    end
+
+    if module_name:sub(1, 2) == "./" or module_name:sub(1, 3) == "../" then
+        local base_dir = pathParent(from_script)
+        local target = normalizePath(base_dir .. "/" .. module_name)
+        local ext = pathExtension(target)
+        local lua_paths = {}
+        local native_paths = {}
+
+        if ext == ".lua" then
+            lua_paths[#lua_paths + 1] = target
+        elseif ext and NATIVE_EXTENSIONS[ext] then
+            native_paths[#native_paths + 1] = target
+        else
+            lua_paths[#lua_paths + 1] = target .. ".lua"
+            lua_paths[#lua_paths + 1] = target .. "/init.lua"
+            native_paths[#native_paths + 1] = target .. (IS_WINDOWS and ".dll" or ".so")
+            native_paths[#native_paths + 1] = target .. ".a"
+            native_paths[#native_paths + 1] = target .. ".dylib"
+        end
+
+        for _, path in ipairs(lua_paths) do
+            candidates[#candidates + 1] = { type = "lua", template = path, path = path }
+        end
+        for _, path in ipairs(native_paths) do
+            candidates[#candidates + 1] = { type = "native", template = path, path = path }
+        end
+        return candidates
+    end
+
+    local module_path = module_name:gsub("%.", "/")
+    for _, tpl in ipairs(self.lua_templates) do
+        candidates[#candidates + 1] = {
+            type     = "lua",
+            template = tpl,
+            path     = tpl:gsub("%?", module_path),
+        }
+    end
+    for _, tpl in ipairs(self.native_templates) do
+        candidates[#candidates + 1] = {
+            type     = "native",
+            template = tpl,
+            path     = tpl:gsub("%?", module_path),
+        }
+    end
+    return candidates
+end
+
+--@description: Inspect a module resolution attempt without throwing
+--@param self: ModuleResolver - Resolver instance
+--@param module_name: string - Module name passed to require
+--@param from_script: string - Absolute path of the requiring script
+--@return: table - Structured resolution inspection
+function ModuleResolver:inspect(module_name, from_script)
+    local candidates = self:buildCandidates(module_name, from_script)
+
+    if self:isBuiltin(module_name) then
+        return {
+            ok             = true,
+            type           = "builtin",
+            classification = "builtin",
+            reason         = "builtin",
+            candidates     = candidates,
+        }
+    end
+
+    for _, candidate in ipairs(candidates) do
+        if fileExists(candidate.path) then
+            return {
+                ok             = true,
+                type           = candidate.type,
+                path           = resolvePath(candidate.path),
+                classification = candidate.type,
+                reason         = "resolved",
+                candidates     = candidates,
+            }
+        end
+    end
+
+    return {
+        ok             = false,
+        type           = "missing",
+        classification = "missing",
+        reason         = "missing",
+        candidates     = candidates,
+        error          = errors.moduleNotFound(module_name, from_script, self:getSearchedPaths()),
+    }
+end
+
 --@description: Resolve a relative module path (starting with ./ or ../)
 --@param self: ModuleResolver - Resolver instance
 --@param module_name: string - Relative module reference
@@ -985,6 +1084,22 @@ end
 --@return: table|nil - Resolution result {type="lua"|"native"|"builtin", path=string|nil}, nil for builtins
 --@raise: ModuleNotFoundError when the module cannot be located
 function ModuleResolver:resolve(module_name, from_script)
+    local inspected = self:inspect(module_name, from_script)
+    if inspected.ok then
+        if inspected.type == "builtin" then
+            return nil
+        end
+        return { type = inspected.type, path = inspected.path }
+    end
+    error(inspected.error)
+end
+
+--@description: Resolve a module name using the original direct resolution algorithm
+--@param self: ModuleResolver - Resolver instance
+--@param module_name: string - Dot-separated or relative module name
+--@param from_script: string - Absolute path of the requiring script
+--@return: table|nil - Resolution result
+function ModuleResolver:resolveLegacy(module_name, from_script)
     if self:isBuiltin(module_name) then
         return nil
     end
@@ -1063,6 +1178,7 @@ function DependencyAnalyzer.new(entry_script, max_dependencies)
     self.dep_count        = 0
     self.native_libs      = {}
     self.native_set       = {}
+    self.trace            = {}
     return self
 end
 
@@ -1087,6 +1203,28 @@ function DependencyAnalyzer:analyze()
         scripts   = self:generateManifest(),
         libraries = self.native_libs,
     }
+end
+
+--@description: Record a structured trace item for one require resolution
+--@param self: DependencyAnalyzer - Analyzer instance
+--@param script_path: string - Absolute requiring script path
+--@param req: table - Require record from the lexer
+--@param inspected: table - Resolution inspection result
+--@return: table - Trace item appended to self.trace
+function DependencyAnalyzer:recordTrace(script_path, req, inspected)
+    local item = {
+        requiring_file = script_path,
+        source_line    = req.line,
+        requested      = req.name,
+        optional       = req.optional == true,
+        candidates     = inspected.candidates or {},
+        selected_path  = inspected.path,
+        selected_type  = inspected.type,
+        classification = inspected.classification,
+        reason         = inspected.reason,
+    }
+    self.trace[#self.trace + 1] = item
+    return item
 end
 
 --@description: Recursively analyze a single script and all its dependencies
@@ -1131,28 +1269,29 @@ function DependencyAnalyzer:analyzeRecursive(script_path)
     local child_seen = {}
 
     for _, req in ipairs(requires) do
-        local ok, result = pcall(self.resolver.resolve, self.resolver, req.name, script_path)
-        if ok then
-            if result == nil then
+        local inspected = self.resolver:inspect(req.name, script_path)
+        local trace_item = self:recordTrace(script_path, req, inspected)
+
+        if inspected.ok then
+            if inspected.type == "builtin" then
                 goto continue_req
             end
-            if result.type == "native" then
-                if not self.native_set[result.path] then
-                    self.native_set[result.path] = true
-                    self.native_libs[#self.native_libs + 1] = result.path
+            if inspected.type == "native" then
+                if not self.native_set[inspected.path] then
+                    self.native_set[inspected.path] = true
+                    self.native_libs[#self.native_libs + 1] = inspected.path
                 end
-            elseif result.type == "lua" then
-                if not child_seen[result.path] then
-                    child_seen[result.path] = true
-                    children[#children + 1] = result.path
-                    self:analyzeRecursive(result.path)
+            elseif inspected.type == "lua" then
+                if not child_seen[inspected.path] then
+                    child_seen[inspected.path] = true
+                    children[#children + 1] = inspected.path
+                    self:analyzeRecursive(inspected.path)
                 end
             end
+        elseif req.optional then
+            trace_item.reason = "optional-missing"
         else
-            if req.optional then
-                goto continue_req
-            end
-            error(result)
+            error(inspected.error)
         end
         ::continue_req::
     end
@@ -1229,6 +1368,23 @@ function M.analyzeDependencies(entry_script, opts)
 
     local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies)
     return da:analyze()
+end
+
+--@description: Analyze dependencies and return trace records for each require decision
+--@param entry_script: string - Path to the entry Lua script
+--@param opts: table|nil - Options: max_dependencies (number|nil), manual_mode (boolean|nil)
+--@return: table - Result table {scripts=list<string>, libraries=list<string>, trace=list<table>}
+function M.traceDependencies(entry_script, opts)
+    opts = opts or {}
+
+    if opts.manual_mode then
+        return { scripts = {}, libraries = {}, trace = {} }
+    end
+
+    local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies)
+    local result = da:analyze()
+    result.trace = da.trace
+    return result
 end
 
 --@description: Print a formatted dependency list for a Lua script to stdout
