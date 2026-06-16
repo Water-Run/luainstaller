@@ -126,9 +126,63 @@ print("analyzer ok")
     assert_contains(run("lua -e " .. shell_quote(script)), "analyzer ok")
 end
 
+local function check_api_contract()
+    local script = [[
+package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
+package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
+package.preload["luainstaller"] = function() return dofile("src/init.lua") end
+local luainstaller = require("luainstaller")
+
+local analyzed = luainstaller.analyze({
+    entry = "test/student_management_system/main.lua",
+    max_deps = 250,
+})
+assert(analyzed.ok == true, analyzed.error and analyzed.error.message)
+assert(analyzed.action == "analyze")
+assert(type(analyzed.dependencies) == "table")
+assert(#analyzed.dependencies.scripts == 5)
+assert(#analyzed.dependencies.libraries == 1)
+
+local manual = luainstaller.analyze({
+    entry = "test/student_management_system/main.lua",
+    depscan = false,
+    include = { "test/student_management_system/model.lua" },
+    exclude = { "model.lua" },
+})
+assert(manual.ok == true, manual.error and manual.error.message)
+assert(#manual.dependencies.scripts == 0)
+
+local traced = luainstaller.trace({
+    entry = "test/student_management_system/main.lua",
+    max_deps = 250,
+})
+assert(traced.ok == true, traced.error and traced.error.message)
+assert(traced.action == "trace")
+assert(type(traced.trace) == "table")
+assert(#traced.trace > 0)
+
+local bundled = luainstaller.bundle({
+    entry = "test/student_management_system/main.lua",
+    mode = "onedir",
+    out = "build/student-manager",
+    max_deps = 250,
+})
+assert(bundled.ok == false)
+assert(bundled.error.type == "NotImplementedError")
+
+local missing = luainstaller.analyze({ entry = "test/no-such-file.lua" })
+assert(missing.ok == false)
+assert(missing.error.type == "ScriptNotFoundError")
+
+print("api contract ok")
+]]
+    assert_contains(run("lua -e " .. shell_quote(script)), "api contract ok")
+end
+
 check_style()
 check_syntax()
 check_samples()
 check_analyzer_visibility()
+check_api_contract()
 
 print("all packaging-target samples passed comprehensive smoke audit")
