@@ -774,7 +774,7 @@ function LuaLexer:extractRequires()
             if self:matchKeyword("pcall") then
                 local ok, mod = pcall(self.parsePcallRequire, self)
                 if ok and mod then
-                    result[#result + 1] = { name = mod, line = self.line }
+                    result[#result + 1] = { name = mod, line = self.line, optional = true }
                     goto next_iter
                 end
             end
@@ -1149,6 +1149,9 @@ function DependencyAnalyzer:analyzeRecursive(script_path)
                 end
             end
         else
+            if req.optional then
+                goto continue_req
+            end
             error(result)
         end
         ::continue_req::
