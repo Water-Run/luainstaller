@@ -22,6 +22,7 @@ package.preload["luainstaller.logger"] = function() return dofile("src/logger.lu
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
 package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
+package.preload["luainstaller.launcher"] = function() return dofile("src/launcher.lua") end
 package.preload["luainstaller"] = function() return dofile("src/init.lua") end
 package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
 ]]
@@ -41,6 +42,15 @@ local function run(command, opts)
         error("command failed: " .. command .. "\n" .. out, 2)
     end
     return out
+end
+
+local function command_ok(command)
+    local ok = os.execute(command .. " > /dev/null 2>&1")
+    return ok == true or ok == 0
+end
+
+local function remove_file(path)
+    os.remove(path)
 end
 
 local function assert_contains(text, pattern)
@@ -370,6 +380,57 @@ print("runtime cgen ok")
     assert_contains(run("lua -e " .. shell_quote(script)), "runtime cgen ok")
 end
 
+local function check_c_launcher()
+    local script = SOURCE_LOADER .. [[
+local launcher = require("luainstaller.launcher")
+local c_source = launcher.generateSource({
+    entry = "test/runtime_bundle/main.lua",
+    dependencies = {
+        scripts = { "test/runtime_bundle/greeter.lua" },
+        libraries = {},
+    },
+})
+
+assert(c_source:match("static const unsigned char luai_bootstrap%[%]"))
+assert(c_source:match("static const size_t luai_bootstrap_size"))
+assert(c_source:match("luaL_newstate"))
+
+local handle = assert(io.open("test/runtime_bundle/generated_launcher.c", "wb"))
+handle:write(c_source)
+handle:close()
+print("c source generated")
+]]
+
+    assert_contains(run("lua -e " .. shell_quote(script)), "c source generated")
+
+    if not command_ok("cc --version") or not command_ok("pkg-config --exists lua") then
+        remove_file("test/runtime_bundle/generated_launcher.c")
+        print("c launcher compile skipped")
+        return
+    end
+
+    local c_path = "test/runtime_bundle/generated_launcher.c"
+    local exe_path = "test/runtime_bundle/generated_launcher"
+    remove_file(exe_path)
+
+    local compile = string.format(
+        "cc %s -o %s %s",
+        shell_quote(c_path),
+        shell_quote(exe_path),
+        "$(pkg-config --cflags --libs lua)"
+    )
+    local ok = os.execute(compile)
+    assert(ok == true or ok == 0, "generated C launcher should compile")
+
+    local output = run(shell_quote(exe_path) .. " launcher")
+    assert_contains(output, "hello launcher")
+    assert_contains(output, "entry=test/runtime_bundle/main.lua")
+
+    remove_file(c_path)
+    remove_file(exe_path)
+    print("c launcher ok")
+end
+
 check_style()
 check_syntax()
 check_samples()
@@ -377,5 +438,6 @@ check_analyzer_visibility()
 check_api_contract()
 check_cli_contract()
 check_runtime_cgen()
+check_c_launcher()
 
 print("all packaging-target samples passed comprehensive smoke audit")
