@@ -16,6 +16,13 @@ local function shell_quote(value)
     return "'" .. value:gsub("'", "'\\''") .. "'"
 end
 
+local SOURCE_LOADER = [[
+package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
+package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
+package.preload["luainstaller"] = function() return dofile("src/init.lua") end
+package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
+]]
+
 local function run(command, opts)
     opts = opts or {}
     local pipe = assert(io.popen(command .. " 2>&1", "r"))
@@ -127,10 +134,7 @@ print("analyzer ok")
 end
 
 local function check_api_contract()
-    local script = [[
-package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
-package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
-package.preload["luainstaller"] = function() return dofile("src/init.lua") end
+    local script = SOURCE_LOADER .. [[
 local luainstaller = require("luainstaller")
 
 local analyzed = luainstaller.analyze({
@@ -179,10 +183,64 @@ print("api contract ok")
     assert_contains(run("lua -e " .. shell_quote(script)), "api contract ok")
 end
 
+local function cli_command(args)
+    local quoted = {}
+    for i = 1, #args do
+        quoted[#quoted + 1] = string.format("%q", args[i])
+    end
+    return "lua -e " .. shell_quote(SOURCE_LOADER .. string.format([[
+local cli = require("luainstaller.cli")
+os.exit(cli.main({ %s }))
+]], table.concat(quoted, ", ")))
+end
+
+local function check_cli_contract()
+    local help = run(cli_command({ "--help" }))
+    assert_contains(help, "luai -a <entry.lua>")
+    assert_contains(help, "luai -t <entry.lua>")
+    assert_contains(help, "luai -c <entry.lua>")
+
+    local analyzed = run(cli_command({
+        "-a",
+        "test/student_management_system/main.lua",
+        "--max-deps",
+        "250",
+    }))
+    assert_contains(analyzed, "success.")
+    assert_contains(analyzed, "script(s)")
+    assert_contains(analyzed, "library(ies)")
+
+    local traced = run(cli_command({
+        "-t",
+        "test/student_management_system/main.lua",
+        "--max-deps",
+        "250",
+    }))
+    assert_contains(traced, "trace.")
+    assert_contains(traced, "resolved")
+
+    local bundled = run(cli_command({
+        "-c",
+        "--onedir",
+        "test/student_management_system/main.lua",
+        "-o",
+        "build/student-manager",
+        "--max-deps",
+        "250",
+    }), {
+        expect_failure = true,
+    })
+    assert_contains(bundled, "NotImplementedError")
+    assert_contains(bundled, "onedir bundling is planned")
+
+    print("cli contract ok")
+end
+
 check_style()
 check_syntax()
 check_samples()
 check_analyzer_visibility()
 check_api_contract()
+check_cli_contract()
 
 print("all packaging-target samples passed comprehensive smoke audit")
