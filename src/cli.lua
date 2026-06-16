@@ -16,8 +16,9 @@ Updated:
 ]]
 
 
-local analyzer = require("luainstaller.analyzer")
-local logger   = require("luainstaller.logger")
+local luainstaller = require("luainstaller")
+local analyzer     = require("luainstaller.analyzer")
+local logger       = require("luainstaller.logger")
 
 
 --@description: Program version string
@@ -28,70 +29,54 @@ local VERSION = "1.0.0"
 --@const: PROJECT_URL
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 
+--@description: Default maximum dependency count
+--@const: DEFAULT_MAX_DEPS
+local DEFAULT_MAX_DEPS = 36
+
 
 --@description: Full help text displayed by the help command
 --@const: HELP_MESSAGE
 local HELP_MESSAGE = string.format([=[
-luainstaller - Package Lua scripts into standalone executables
+luai - Package Lua projects into same-environment executables
 
 Usage:
-    luainstaller                              Show version info
-    luainstaller help                         Show this help message
-    luainstaller engines                      List supported engines
-    luainstaller logs [options]               View operation logs
-    luainstaller analyze <script> [options]   Analyze dependencies
-    luainstaller build <script> [options]     Build executable
+    luai --help
+    luai --version
+    luai -a <entry.lua> [options]
+    luai -t <entry.lua> [options]
+    luai -c <entry.lua> [options]
 
-Commands:
+Actions:
 
-  help
-      Display this help message.
+  -a <entry.lua>
+      Analyze dependencies.
 
-  engines
-      List all supported packaging engines.
+  -t <entry.lua>
+      Trace dependency resolution decisions.
 
-  logs [-limit <n>] [--asc] [-level <level>]
-      Display stored operation logs.
+  -c <entry.lua>
+      Plan a bundle. --onedir is the default output mode. Actual bundling is
+      still being implemented.
 
-      Options:
-          -limit <n>      Limit the number of logs to display
-          --asc           Display in ascending order (default: descending)
-          -level <level>  Filter by level (debug, info, warning, error, success)
+Options:
+  --onedir              Select directory bundle mode (default)
+  --onefile             Select single-file bundle mode (planned)
+  -o, --out <path>      Output path for bundle actions
+  --include <path>      Include an extra Lua file; repeatable
+  --exclude <path>      Exclude a dependency by path or basename; repeatable
+  --no-depscan          Disable automatic dependency scanning
+  --max-deps <n>        Maximum dependency count (default: 36)
+  --verbose             Print more detail
 
-  analyze <entry_script> [-max <n>] [--detail]
-      Perform dependency analysis on the entry script.
+Compatibility commands:
+  logs [options]        View operation logs
+  engines               List legacy engine names
+  analyze <entry.lua>   Compatibility alias for -a
+  build <entry.lua>     Compatibility alias for -c
 
-      Options:
-          -max <n>        Maximum dependency count (default: 36)
-          --detail        Show detailed analysis output
-
-  build <entry_script> [options]
-      Compile Lua script into standalone executable.
-
-      Options:
-          -engine <name>       Packaging engine (default: platform-specific)
-          -require <scripts>   Additional dependency scripts (comma-separated)
-          -max <n>             Maximum dependency count (default: 36)
-          -output <path>       Output executable path
-          --manual             Disable automatic dependency analysis
-          --detail             Show detailed compilation output
-
-Engines:
-    luastatic      - Compile to true native binary (Linux only)
-    srlua          - Default srlua for current platform
-    winsrlua515    - Windows Lua 5.1.5 (64-bit)
-    winsrlua515-32 - Windows Lua 5.1.5 (32-bit)
-    winsrlua548    - Windows Lua 5.4.8
-    linsrlua515    - Linux Lua 5.1.5 (64-bit)
-    linsrlua515-32 - Linux Lua 5.1.5 (32-bit)
-    linsrlua548    - Linux Lua 5.4.8
-
-Examples:
-    luainstaller build hello.lua
-    luainstaller build main.lua -engine srlua -output ./bin/myapp
-    luainstaller build app.lua -require utils.lua,config.lua --manual
-    luainstaller analyze main.lua -max 100 --detail
-    luainstaller logs -limit 20 --asc
+Compatibility:
+  The first runtime promise is same OS, same architecture, same ABI, and same
+  Lua ABI. Generated runtime launchers are not available in this milestone.
 
 Visit: %s
 ]=], PROJECT_URL)
@@ -254,6 +239,142 @@ end
 --@param message: string - Hint text
 local function printHint(message)
     io.write(string.format("  %s\n", message))
+end
+
+local function newOptions()
+    return {
+        include = {},
+        exclude = {},
+        depscan = true,
+        mode    = "onedir",
+        max_deps = DEFAULT_MAX_DEPS,
+        verbose = false,
+    }
+end
+
+local function parsePositiveInteger(value, option_name)
+    local number = tonumber(value)
+    if not number or number <= 0 or number ~= math.floor(number) then
+        return nil, string.format("%s must be a positive integer", option_name)
+    end
+    return number
+end
+
+local function parseActionOptions(parser, action, first_entry)
+    local opts = newOptions()
+    opts.action = action
+    opts.entry  = first_entry
+
+    while parser:hasNext() do
+        local arg = parser:consume()
+        if arg == "--onedir" then
+            opts.mode = "onedir"
+        elseif arg == "--onefile" then
+            opts.mode = "onefile"
+        elseif arg == "-o" or arg == "--out" or arg == "-output" then
+            opts.out = parser:consumeValue(arg)
+        elseif arg == "--include" then
+            opts.include[#opts.include + 1] = parser:consumeValue(arg)
+        elseif arg == "--exclude" then
+            opts.exclude[#opts.exclude + 1] = parser:consumeValue(arg)
+        elseif arg == "--no-depscan" or arg == "--manual" then
+            opts.depscan = false
+        elseif arg == "--max-deps" or arg == "-max" then
+            local number, err = parsePositiveInteger(parser:consumeValue(arg), arg)
+            if not number then
+                return nil, err
+            end
+            opts.max_deps = number
+        elseif arg == "--verbose" or arg == "--detail" then
+            opts.verbose = true
+        elseif arg == "-require" then
+            local val = parser:consumeValue(arg)
+            for req in val:gmatch("[^,]+") do
+                req = req:gsub("^%s+", ""):gsub("%s+$", "")
+                if req ~= "" then
+                    opts.include[#opts.include + 1] = req
+                end
+            end
+        elseif arg == "-engine" then
+            opts.engine = parser:consumeValue(arg)
+        elseif not opts.entry and arg:sub(1, 1) ~= "-" then
+            opts.entry = arg
+        else
+            return nil, string.format("Unknown option for %s: %s", action, arg)
+        end
+    end
+
+    if not opts.entry then
+        return nil, string.format("%s requires an entry script", action)
+    end
+
+    return opts
+end
+
+local function printStructuredError(result)
+    local err = result and result.error or {}
+    local err_type = err.type or "LuaInstallerError"
+    local message = err.message or "operation failed"
+    printError(string.format("%s: %s", err_type, message))
+end
+
+local function renderDependencySummary(result)
+    local deps = result.dependencies or { scripts = {}, libraries = {} }
+    io.write("success.\n")
+    io.write(string.format("%s\n", result.entry))
+    io.write(string.format("%d script(s), %d library(ies)\n", #deps.scripts, #deps.libraries))
+    for i, path in ipairs(deps.scripts) do
+        io.write(string.format("  script %d: %s\n", i, path))
+    end
+    for i, path in ipairs(deps.libraries) do
+        io.write(string.format("  library %d: %s\n", i, path))
+    end
+end
+
+local function renderTrace(result)
+    io.write("trace.\n")
+    io.write(string.format("%s\n", result.entry))
+    for i, item in ipairs(result.trace or {}) do
+        io.write(string.format(
+            "  %d) %s %s %s\n",
+            i,
+            item.selected_type or "unknown",
+            item.reason or "unknown",
+            item.selected_path or "(no path)"
+        ))
+    end
+end
+
+local function cmdAction(parser, action, first_entry)
+    local opts, err = parseActionOptions(parser, action, first_entry)
+    if not opts then
+        printError(err)
+        return 1
+    end
+
+    local result
+    if action == "analyze" then
+        result = luainstaller.analyze(opts)
+        if result.ok then
+            renderDependencySummary(result)
+            return 0
+        end
+    elseif action == "trace" then
+        result = luainstaller.trace(opts)
+        if result.ok then
+            renderTrace(result)
+            return 0
+        end
+    elseif action == "bundle" then
+        result = luainstaller.bundle(opts)
+        if result.ok then
+            io.write("success.\n")
+            return 0
+        end
+    end
+
+    printStructuredError(result)
+    return 1
 end
 
 
@@ -665,12 +786,24 @@ function M.main(args)
         return cmdLogs(parser)
     end
 
+    if command == "-a" then
+        return cmdAction(parser, "analyze")
+    end
+
+    if command == "-t" then
+        return cmdAction(parser, "trace")
+    end
+
+    if command == "-c" then
+        return cmdAction(parser, "bundle")
+    end
+
     if command == "analyze" then
-        return cmdAnalyze(parser)
+        return cmdAction(parser, "analyze")
     end
 
     if command == "build" then
-        return cmdBuild(parser)
+        return cmdAction(parser, "bundle")
     end
 
     if command:match("%.lua$") then
@@ -678,11 +811,11 @@ function M.main(args)
         for i = parser.pos, #parser.args do
             build_args[#build_args + 1] = parser.args[i]
         end
-        return cmdBuild(ArgumentParser.new(build_args))
+        return cmdAction(ArgumentParser.new(build_args), "bundle")
     end
 
     printError(string.format("Unknown command: %s", command))
-    printHint("Run 'luainstaller help' for usage information")
+    printHint("Run 'luai --help' for usage information")
     return 1
 end
 
