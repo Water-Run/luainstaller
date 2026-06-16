@@ -42,6 +42,7 @@ build = {
         ["luainstaller.manifest"] = "src/manifest.lua",
         ["luainstaller.runtime"]  = "src/runtime.lua",
         ["luainstaller.cgen"]     = "src/cgen.lua",
+        ["luainstaller.launcher"] = "src/launcher.lua",
         ["luainstaller.cli"]      = "src/cli.lua",
     },
     install = {
