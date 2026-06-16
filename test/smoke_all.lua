@@ -137,6 +137,15 @@ local function check_api_contract()
     local script = SOURCE_LOADER .. [[
 local luainstaller = require("luainstaller")
 
+local function find_trace(items, requested)
+    for _, item in ipairs(items) do
+        if item.requested == requested then
+            return item
+        end
+    end
+    return nil
+end
+
 local analyzed = luainstaller.analyze({
     entry = "test/student_management_system/main.lua",
     max_deps = 250,
@@ -164,6 +173,27 @@ assert(traced.ok == true, traced.error and traced.error.message)
 assert(traced.action == "trace")
 assert(type(traced.trace) == "table")
 assert(#traced.trace > 0)
+
+local model_trace = assert(find_trace(traced.trace, "model"))
+assert(model_trace.requiring_file:match("student_management_system/main%.lua$"))
+assert(type(model_trace.source_line) == "number")
+assert(model_trace.classification == "lua")
+assert(model_trace.selected_type == "lua")
+assert(model_trace.selected_path:match("student_management_system/model%.lua$"))
+assert(type(model_trace.candidates) == "table")
+assert(#model_trace.candidates > 0)
+assert(model_trace.reason == "resolved")
+
+local firebird_trace = luainstaller.trace({
+    entry = "test/firebird_web_sql/server.lua",
+    max_deps = 250,
+})
+assert(firebird_trace.ok == true, firebird_trace.error and firebird_trace.error.message)
+local optional_firebird = assert(find_trace(firebird_trace.trace, "luasql.firebird"))
+assert(optional_firebird.optional == true)
+assert(optional_firebird.classification == "missing")
+assert(optional_firebird.reason == "optional-missing")
+assert(type(optional_firebird.candidates) == "table")
 
 local bundled = luainstaller.bundle({
     entry = "test/student_management_system/main.lua",
