@@ -31,8 +31,9 @@ Lua Style
 - Use explicit option tables for public APIs.
 - Keep CLI parsing small and predictable.
 - Avoid clever metatable use in normal control flow.
-- Preserve compatibility with Lua 5.4 first. Compatibility shims for older Lua
-  versions should be isolated and documented.
+- The roadmap baseline is Lua 5.5.0. During the transition, keep code runnable
+  under the repository's current verification interpreter unless a change
+  explicitly requires Lua 5.5 features.
 
 Lua files should start with a block header:
 

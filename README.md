@@ -28,89 +28,35 @@ luarocks install luainstaller
 
 ### Command-Line Tool (CLI)
 
-CLI command name: `luainstaller`
-
-Show help:
+CLI command name: `luai`.
 
 ```bash
-luainstaller --help
+luai --help
+luai -a test/student_management_system/main.lua
+luai -t test/student_management_system/main.lua
+luai -c --onedir test/student_management_system/main.lua -o build/student-manager
 ```
 
-```plaintext
-luainstaller v1.0.0
+Current command status:
 
-Usage:
-  luainstaller bundle <entry.lua> [options]
-  luainstaller analyze <entry.lua> [options]
-  luainstaller version
+| Command | Status | Description |
+|---------|--------|-------------|
+| `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
+| `luai -t <entry.lua>` | implemented | Print coarse trace-style resolution diagnostics. |
+| `luai -c <entry.lua>` | planned | Validate and plan bundling, then return `NotImplementedError` until the onedir bundler exists. |
 
-Options:
-  ...
-```
+Common options:
 
-> On Linux, you can also use `man luainstaller` to view the full manual (if the manpage is installed).
-
----
-
-#### `bundle` — Bundling
-
-`bundle` is the most commonly used command, used to package a Lua project into an executable.
-
-**Default mode** (outputs a directory):
-
-```bash
-luainstaller bundle <path_to_lua_entry_file>
-```
-
-```plaintext
-success.
-<entry.lua> => <output_dir>/
-```
-
-By default, `luainstaller` performs **static dependency analysis** starting from the entry `.lua` file and outputs all required runtime files into a directory.
-
-**Single-file mode** (`--onefile`, outputs a single executable):
-
-```bash
-luainstaller bundle <path_to_lua_entry_file> --onefile
-```
-
-```plaintext
-success.
-<entry.lua> => <output_file>
-```
-
-`--onefile` further wraps the directory bundle output into a **single executable file**.
-
-**Optional parameters:**
-
-| Option                  | Description                                                                                                                          | Example                                                    |
-|-------------------------|--------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|
-| `-o, --out <path>`      | Output path: directory in default mode; file when `--onefile` is enabled                                                             | `--out ../dist/` / `--onefile --out ../dist/app.exe`       |
-| `--onefile`             | Generate a single-file executable (disabled by default)                                                                              | `luainstaller bundle main.lua --onefile`                   |
-| `-v, --verbose`         | Print more detailed analysis and bundling logs                                                                                       | `luainstaller bundle main.lua --verbose`                   |
-| `--max-deps <n>`        | Maximum number of dependencies (default: 36)                                                                                         | `luainstaller bundle main.lua --max-deps 100`              |
-| `--include <path>`      | Manually include dependencies (repeatable; for dynamic `require` and other cases static analysis cannot detect)                      | `--include ./require.lua --include ./plugin.lua`           |
-| `--exclude <path>`      | Manually exclude dependencies (repeatable; to remove false positives such as `pcall(require, ...)`; takes priority over `--include`) | `luainstaller bundle main.lua --exclude ./test_utils.lua`  |
-| `--no-depscan`          | Disable dependency scanning, entering fully manual mode (all dependencies must be specified via `--include`)                         | `--no-depscan --include ./a.lua --include ./b.lua`         |
-| `--icon` (Windows only) | Set the application icon (`.ico` file)                                                                                               | `luainstaller bundle main.lua --onefile --icon ./logo.ico` |
-
----
-
-#### `analyze` — Dependency Analysis
-
-Perform dependency analysis only, without bundling:
-
-```bash
-luainstaller analyze <path_to_lua_entry_file>
-```
-
-```plaintext
-success.
-N dependencies found:
-  1) ...
-  2) ...
-```
+| Option | Description |
+|--------|-------------|
+| `--onedir` | Directory bundle mode. This is the default planned output mode. |
+| `--onefile` | Single-file bundle mode, planned after onedir. |
+| `-o, --out <path>` | Output path for bundle planning. |
+| `--include <path>` | Manually include a dependency; repeatable. |
+| `--exclude <path>` | Exclude a dependency by path or basename; repeatable. |
+| `--no-depscan` | Disable automatic dependency scanning. |
+| `--max-deps <n>` | Maximum dependency count, default `36`. |
+| `--verbose` | Request more detailed output where available. |
 
 ---
 
@@ -124,148 +70,53 @@ local luainstaller = require("luainstaller")
 
 ---
 
-#### `bundle` — Bundling
+#### Structured Results
 
-**Function signature**
-
-```lua
-local ok, out = luainstaller.bundle(opts)
-```
-
-Return values: when `ok=true`, `out` is the output path; when `ok=false`, `out` is an error message string.
-
-**Parameters (`opts` table)**
-
-| Parameter  | Type     | Default  | Description                                                                                        |
-|------------|----------|----------|----------------------------------------------------------------------------------------------------|
-| `entry`    | string   | required | Entry script path                                                                                  |
-| `out`      | string   | —        | Output path (directory path when `onefile=false`; file path when `onefile=true`)                   |
-| `onefile`  | boolean  | `false`  | Single-file mode switch                                                                            |
-| `verbose`  | boolean  | `false`  | Whether to output detailed logs                                                                    |
-| `max_deps` | number   | `36`     | Maximum number of dependencies                                                                     |
-| `include`  | string[] | `{}`     | Manually include dependencies (for dynamic `require` and other cases that cannot be auto-detected) |
-| `exclude`  | string[] | `{}`     | Manually exclude dependencies (to remove false positives; takes priority over `include`)           |
-| `depscan`  | boolean  | `true`   | Whether to enable automatic dependency analysis (`false` is equivalent to CLI `--no-depscan`)      |
-| `icon`     | string   | —        | Application icon path (`.ico` file, Windows only)                                                  |
-
-**Examples**
+The public API returns result tables instead of throwing for normal user errors.
 
 ```lua
--- Simplest bundling: outputs a directory by default, automatic dependency scanning
-local ok, out = luainstaller.bundle({ entry = "main.lua" })
-if ok then print("Bundle succeeded: " .. out)
-else      print("Bundle failed: " .. out) end
-
--- Single-file mode
-local ok, out = luainstaller.bundle({
-  entry   = "main.lua",
-  onefile = true,
-  out     = "../dist/app.exe",
+local analyzed = luainstaller.analyze({
+  entry = "test/student_management_system/main.lua",
+  max_deps = 250,
 })
 
--- Manual dependency management
-local ok, out = luainstaller.bundle({
-  entry   = "main.lua",
-  include = { "./lib/plugin.lua", "./lib/config.lua" },  -- add deps that static analysis cannot detect
-  exclude = { "./test/test_utils.lua" },                 -- remove false positive deps
-})
-
--- Fully manual mode: disable automatic analysis, specify all dependencies manually
-local ok, out = luainstaller.bundle({
-  entry   = "main.lua",
-  depscan = false,
-  include = { "./module1.lua", "./module2.lua" },
-})
-
--- Full example with all parameters
-local ok, out = luainstaller.bundle({
-  entry    = "src/main.lua",
-  out      = "build/",
-  onefile  = false,
-  verbose  = true,
-  max_deps = 50,
-  include  = { "plugins/extra.lua" },
-  exclude  = { "test/mock.lua" },
-  depscan  = true,
-  icon     = "./logo.ico",    -- Windows only
-})
-if ok then print("Bundle succeeded: " .. out)
-else      print("Bundle failed: " .. out) end
-```
-
----
-
-#### `analyze` — Dependency Analysis
-
-**Function signature**
-
-```lua
-local ok, deps = luainstaller.analyze(entry, opts)
-```
-
-Return values: when `ok=true`, `deps` is an array of dependency path strings (`string[]`); when `ok=false`, `deps` is an error message string.
-
-**Parameters**
-
-| Parameter       | Type    | Default  | Description                                                                           |
-|-----------------|---------|----------|---------------------------------------------------------------------------------------|
-| `entry`         | string  | required | Entry script path                                                                     |
-| `opts.max_deps` | number  | `36`     | Maximum number of dependencies                                                        |
-| `opts.depscan`  | boolean | `true`   | Whether to enable automatic dependency analysis (`false` disables automatic scanning) |
-
-**Examples**
-
-```lua
--- Basic usage
-local ok, deps = luainstaller.analyze("main.lua")
-if ok then
-  print("Found " .. #deps .. " dependencies")
-  for i, dep in ipairs(deps) do
-    print(string.format("  %d) %s", i, dep))
-  end
+if analyzed.ok then
+  print(#analyzed.dependencies.scripts)
 else
-  print("Analysis failed: " .. deps)
-end
-
--- Full example with all parameters
-local ok, deps = luainstaller.analyze("src/main.lua", {
-  max_deps = 50,
-  depscan  = true,
-})
-if ok then
-  for i, dep in ipairs(deps) do
-    print(string.format("  %d) %s", i, dep))
-  end
-else
-  print("Analysis failed: " .. deps)
+  io.stderr:write(analyzed.error.type .. ": " .. analyzed.error.message .. "\n")
 end
 ```
 
-> `analyze` only performs dependency analysis and produces no bundling artifacts. It is suitable for pre-checking whether all dependencies are complete and whether any false positives exist before performing the actual bundle.
+Available functions:
 
----
+| Function | Status | Return shape |
+|----------|--------|--------------|
+| `luainstaller.analyze(opts)` | implemented | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
+| `luainstaller.trace(opts)` | implemented | `{ ok = true, action = "trace", trace = {} }` |
+| `luainstaller.bundle(opts)` | planned | `{ ok = false, error = { type = "NotImplementedError", ... } }` after validation. |
 
-#### `version` — Get Version
+Common `opts` fields:
 
-```lua
-print("luainstaller version: " .. luainstaller.version())
-```
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `entry` | string | required | Entry script path. |
+| `mode` | string | `"onedir"` | `onedir` or `onefile` for bundle planning. |
+| `out` | string | nil | Output path for bundle planning. |
+| `max_deps` | number | `36` | Maximum dependency count. |
+| `include` | string[] | `{}` | Extra files to include. |
+| `exclude` | string[] | `{}` | Paths or basenames to exclude. |
+| `depscan` | boolean | `true` | Set `false` for manual-only dependencies. |
 
 ---
 
 ## How It Works
 
-The workflow of `luainstaller` can be summarized as: **analyze entry script → collect dependencies → build executable → optionally wrap into a single file**.
+The current workflow is: **analyze entry script → collect dependencies → trace
+resolution decisions → validate bundle options**.
 
-When `bundle` is executed, `luainstaller` first performs **static dependency analysis** starting from the entry `.lua` file. It scans the source code for common reference patterns such as `require(...)`, recursively finding all Lua files the project depends on. For cases that static analysis cannot fully cover — such as runtime module name concatenation or conditional module loading — dependencies can be supplemented manually via `--include` and false positives can be removed via `--exclude`.
-
-Once the dependency set is determined, `luainstaller` organizes the entry script and the collected Lua code into a bundle set ready for packaging. For pure Lua projects, this step typically only involves the scripts themselves; for projects containing non-pure-Lua content, additional files must also be handled to ensure the final artifact runs correctly on the **same system environment**.
-
-In the executable generation stage, `luainstaller` uses **`luastatic`** as its core backend, paired with a **GCC-compatible toolchain** to complete compilation and linking. The fundamental approach is not to rely on a pre-installed `lua` environment on the target machine to run scripts, but instead to construct the Lua program and related content into a directly distributable program. On Windows, if `--icon` is specified, `windres` is additionally used to compile icon resources into the final executable.
-
-By default, `luainstaller` uses **directory output mode**: it generates an output directory containing the executable and required files. When `--onefile` is enabled, it further performs **single-file packaging** on top of this, bundling all runtime content into a single standalone executable for easier distribution and deployment.
-
-Overall, `luainstaller`'s technology stack remains fairly straightforward: the Lua side handles the CLI, dependency analysis, and bundling process control; `luastatic` handles the static integration of the Lua program; the GCC-compatible toolchain handles final compilation and linking; and `windres` handles icon and other resource embedding on Windows.
+Runtime launcher generation, manifest writing, onedir output, onefile payloads,
+and native-module extraction are roadmap work. The compatibility boundary for
+that runtime work is same OS, same architecture, same ABI, and same Lua ABI.
 
 The overall process can be summarized as:
 
@@ -279,18 +130,8 @@ The overall process can be summarized as:
 [Collect Lua files / manual --include / --exclude]
      |
      v
-[Organize bundle content]
+[Validate bundle plan]
      |
      v
-[luastatic + GCC compile & link]
-     |
-     +----------------------+
-     |                      |
-     v                      v
-[Directory mode output]   [--onefile single-file packaging]
-     |                      |
-     +----------+-----------+
-                |
-                v
-      [Distributable executable]
+[Manifest / onedir runtime work in progress]
 ```

@@ -8,13 +8,12 @@ source = {
 }
 
 description = {
-    summary = "Package Lua scripts into standalone executables with multi-engine support",
+    summary = "Package Lua projects into same-environment executables",
     detailed = [[
-        luainstaller provides tools for packaging Lua scripts into standalone
-        executables. Features include static dependency analysis of Lua scripts,
-        native library detection (.a, .so, .dll, .dylib), source bundling, and
-        compilation using luastatic or srlua engines. Supports both Windows and
-        Linux platforms.
+        luainstaller provides tools for analyzing and packaging Lua projects
+        into same-environment executables. The current Lua implementation owns
+        dependency analysis, trace-oriented diagnostics, and bundle planning;
+        runtime launcher generation is developed in later milestones.
     ]],
     homepage = "https://github.com/Water-Run/luainstaller",
     license = "LGPL-3.0-or-later",
@@ -44,7 +43,7 @@ build = {
     },
     install = {
         bin = {
-            ["luainstaller"] = "src/cli.lua",
+            ["luai"] = "src/cli.lua",
         },
     },
 }
