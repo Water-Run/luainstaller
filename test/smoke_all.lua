@@ -20,6 +20,8 @@ local SOURCE_LOADER = [[
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
 package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
+package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
+package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
 package.preload["luainstaller"] = function() return dofile("src/init.lua") end
 package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
 ]]
@@ -287,11 +289,92 @@ local function check_cli_contract()
     print("cli contract ok")
 end
 
+local function check_runtime_cgen()
+    local script = SOURCE_LOADER .. [[
+local runtime = require("luainstaller.runtime")
+local cgen = require("luainstaller.cgen")
+
+local stripped = runtime.stripSource("\239\187\191#!/usr/bin/env lua\nprint('ok')")
+assert(stripped == "print('ok')")
+
+local previous_arg = _G.arg
+_G.arg = { "outer" }
+local payload = {
+    entry = {
+        id = "__entry__",
+        path = "test/runtime_bundle/main.lua",
+        source = "local greeter = require('greeter'); print(greeter.message(arg[1])); print('entry=' .. arg[0])",
+    },
+    modules = {
+        greeter = {
+            path = "test/runtime_bundle/greeter.lua",
+            source = "return { message = function(name) return 'hello ' .. name end }",
+        },
+    },
+}
+
+local output = {}
+local old_print = print
+print = function(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        parts[#parts + 1] = tostring(select(i, ...))
+    end
+    output[#output + 1] = table.concat(parts, "\t")
+end
+
+runtime.run(payload, { "direct" })
+print = old_print
+assert(_G.arg == previous_arg)
+assert(output[1] == "hello direct")
+assert(output[2] == "entry=test/runtime_bundle/main.lua")
+_G.arg = previous_arg
+
+local deps = {
+    scripts = { "test/runtime_bundle/greeter.lua" },
+    libraries = {},
+}
+local bootstrap = cgen.generateBootstrap({
+    entry = "test/runtime_bundle/main.lua",
+    dependencies = deps,
+})
+assert(type(bootstrap) == "string")
+assert(bootstrap:find("luainstaller generated bootstrap", 1, true))
+
+local chunk = assert(load(bootstrap, "@generated-runtime-bundle"))
+local old_arg = _G.arg
+_G.arg = { "generated.lua", "generated" }
+local generated_output = {}
+print = function(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        parts[#parts + 1] = tostring(select(i, ...))
+    end
+    generated_output[#generated_output + 1] = table.concat(parts, "\t")
+end
+chunk()
+print = old_print
+_G.arg = old_arg
+assert(generated_output[1] == "hello generated")
+assert(generated_output[2] == "entry=test/runtime_bundle/main.lua")
+
+local single = cgen.generateBootstrap({
+    entry = "test/single_file/01_hello_luainstaller.lua",
+    dependencies = { scripts = {}, libraries = {} },
+})
+assert(assert(load(single, "@generated-single-file")))
+
+print("runtime cgen ok")
+]]
+    assert_contains(run("lua -e " .. shell_quote(script)), "runtime cgen ok")
+end
+
 check_style()
 check_syntax()
 check_samples()
 check_analyzer_visibility()
 check_api_contract()
 check_cli_contract()
+check_runtime_cgen()
 
 print("all packaging-target samples passed comprehensive smoke audit")
