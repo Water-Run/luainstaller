@@ -17,6 +17,7 @@ Updated:
 
 local analyzer = require("luainstaller.analyzer")
 local logger   = require("luainstaller.logger")
+local manifest = require("luainstaller.manifest")
 
 
 --[[
@@ -306,6 +307,21 @@ function M.bundle(opts)
         return analyzed
     end
 
+    local built_manifest = manifest.build({
+        entry = normalized.entry,
+        mode = normalized.mode,
+        out = normalized.out,
+        dependencies = analyzed.dependencies,
+        trace = analyzed.trace,
+        include = normalized.include,
+        exclude = normalized.exclude,
+        depscan = normalized.depscan,
+        launcher_profile = normalized.launcher_profile,
+    })
+    if not built_manifest.ok then
+        return built_manifest
+    end
+
     return makeError("NotImplementedError", string.format(
         "%s bundling is planned but not yet implemented",
         normalized.mode
@@ -315,6 +331,7 @@ function M.bundle(opts)
         mode         = normalized.mode,
         out          = normalized.out,
         dependencies = analyzed.dependencies,
+        manifest     = built_manifest.manifest,
     })
 end
 

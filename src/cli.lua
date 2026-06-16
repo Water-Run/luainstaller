@@ -41,6 +41,9 @@ local function installSourcePreloads()
     package.preload["luainstaller.logger"] = package.preload["luainstaller.logger"] or function()
         return dofile(sourcePath("logger.lua"))
     end
+    package.preload["luainstaller.manifest"] = package.preload["luainstaller.manifest"] or function()
+        return dofile(sourcePath("manifest.lua"))
+    end
     package.preload["luainstaller"] = function()
         return dofile(sourcePath("init.lua"))
     end
@@ -368,11 +371,13 @@ local function renderTrace(result)
     io.write(string.format("%s\n", result.entry))
     for i, item in ipairs(result.trace or {}) do
         io.write(string.format(
-            "  %d) %s %s %s\n",
+            "  %d) %s %s %s%s%s\n",
             i,
-            item.selected_type or "unknown",
+            item.classification or item.selected_type or "unknown",
             item.reason or "unknown",
-            item.selected_path or "(no path)"
+            item.requested or "(unknown)",
+            item.selected_path and " -> " or "",
+            item.selected_path or ""
         ))
     end
 end
