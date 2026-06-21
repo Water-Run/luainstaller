@@ -4,6 +4,9 @@ This document describes the current Linux `--onedir` implementation, how it
 packages pure Lua and non-pure-Lua projects, how to verify generated bundles,
 and what remains outside the current support boundary.
 
+For lab results across Linux, macOS, and Windows hosts, see
+`docs/CROSS-PLATFORM-TEST-MATRIX.md`.
+
 ## Status
 
 Linux `--onedir` is the first implemented bundle target. It is designed for the

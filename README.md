@@ -143,6 +143,8 @@ shared-library dependency closure are still roadmap work.
 For detailed implementation notes, non-pure-Lua behavior, verification commands,
 and current limitations, see
 [`docs/LINUX-ONEDIR-BUNDLING.md`](docs/LINUX-ONEDIR-BUNDLING.md).
+For lab results across Linux, macOS, and Windows hosts, see
+[`docs/CROSS-PLATFORM-TEST-MATRIX.md`](docs/CROSS-PLATFORM-TEST-MATRIX.md).
 
 The pure Lua runtime milestone is implemented: `luainstaller.runtime` can install
 a bundled module searcher, and `luainstaller.cgen` can generate a Lua bootstrap

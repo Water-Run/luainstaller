@@ -53,14 +53,26 @@ local function isAbsolutePath(path)
     return path:sub(1, 1) == "/" or path:match("^%a:/") ~= nil
 end
 
+local function commandLine(command)
+    if type(io.popen) ~= "function" then
+        return nil
+    end
+    local ok, pipe = pcall(io.popen, command)
+    if not ok or not pipe then
+        return nil
+    end
+    local value = pipe:read("*l")
+    pipe:close()
+    if value and value ~= "" then
+        return value
+    end
+    return nil
+end
+
 local function currentDirectory()
-    local pipe = io.popen(package.config:sub(1, 1) == "\\" and "cd" or "pwd")
-    if pipe then
-        local dir = pipe:read("*l")
-        pipe:close()
-        if dir then
-            return normalizePath(dir)
-        end
+    local dir = commandLine(package.config:sub(1, 1) == "\\" and "cd" or "pwd")
+    if dir then
+        return normalizePath(dir)
     end
     return "."
 end
@@ -120,22 +132,14 @@ local function platformInfo()
     local arch = "unknown"
 
     if sep ~= "\\" then
-        local os_pipe = io.popen("uname -s 2>/dev/null")
-        if os_pipe then
-            local value = os_pipe:read("*l")
-            os_pipe:close()
-            if value and value ~= "" then
-                os_name = value:lower()
-            end
+        local os_value = commandLine("uname -s 2>/dev/null")
+        if os_value then
+            os_name = os_value:lower()
         end
 
-        local arch_pipe = io.popen("uname -m 2>/dev/null")
-        if arch_pipe then
-            local value = arch_pipe:read("*l")
-            arch_pipe:close()
-            if value and value ~= "" then
-                arch = value
-            end
+        local arch_value = commandLine("uname -m 2>/dev/null")
+        if arch_value then
+            arch = arch_value
         end
     end
 

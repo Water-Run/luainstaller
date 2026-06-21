@@ -139,6 +139,8 @@ runtime 复制到 `.luai/native/`，并把检测到的 native Lua C 模块复制
 
 更详细的实现说明、非纯 Lua 打包行为、验证命令和当前限制见
 [`docs/LINUX-ONEDIR-BUNDLING.md`](docs/LINUX-ONEDIR-BUNDLING.md)。
+Linux、macOS 和 Windows 测试环境结果见
+[`docs/CROSS-PLATFORM-TEST-MATRIX.md`](docs/CROSS-PLATFORM-TEST-MATRIX.md)。
 
 纯 Lua runtime 里程碑已实现：`luainstaller.runtime` 可以安装 bundled module
 searcher，`luainstaller.cgen` 可以为纯 Lua payload 生成 Lua bootstrap chunk。

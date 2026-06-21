@@ -72,13 +72,28 @@ local function isAbsolutePath(path)
     return path:sub(1, 1) == "/" or path:match("^%a:/") ~= nil
 end
 
+local function commandOutput(command)
+    if type(io.popen) ~= "function" then
+        return false, "io.popen is not available in this Lua runtime"
+    end
+    local popen_ok, pipe = pcall(io.popen, command .. " 2>&1", "r")
+    if not popen_ok or not pipe then
+        return false, tostring(pipe)
+    end
+    local output = pipe:read("*a") or ""
+    local ok = pipe:close()
+    if ok == true or ok == 0 then
+        return true, output
+    end
+    return false, output
+end
+
 local function currentDirectory()
-    local pipe = io.popen(IS_WINDOWS and "cd" or "pwd")
-    if pipe then
-        local dir = pipe:read("*l")
-        pipe:close()
-        if dir and dir ~= "" then
-            return normalizePath(dir)
+    local ok, dir = commandOutput(IS_WINDOWS and "cd" or "pwd")
+    if ok then
+        local first_line = dir:match("^[^\r\n]+")
+        if first_line and first_line ~= "" then
+            return normalizePath(first_line)
         end
     end
     return "."
@@ -110,16 +125,6 @@ end
 local function shellQuote(value)
     value = tostring(value or "")
     return "'" .. value:gsub("'", "'\\''") .. "'"
-end
-
-local function commandOutput(command)
-    local pipe = assert(io.popen(command .. " 2>&1", "r"))
-    local output = pipe:read("*a") or ""
-    local ok = pipe:close()
-    if ok == true or ok == 0 then
-        return true, output
-    end
-    return false, output
 end
 
 local function ensureDirectory(path)
@@ -294,6 +299,11 @@ local function defaultOut(entry)
     return normalizePath("build/" .. stem(entry))
 end
 
+local function linuxHost()
+    local ok, output = commandOutput("uname -s")
+    return ok and output:match("^Linux") ~= nil
+end
+
 local function unsafeOutputError(path)
     return makeError("InvalidOutputError", "Refusing to overwrite unsafe output directory: " .. tostring(path), {
         path = path,
@@ -348,6 +358,12 @@ end
 function M.bundleOnedir(opts)
     opts = opts or {}
     if IS_WINDOWS then
+        return makeError("UnsupportedPlatformError", "onedir bundling is implemented for Linux in this stage")
+    end
+    if type(io.popen) ~= "function" then
+        return makeError("ToolchainError", "io.popen is required to build onedir bundles")
+    end
+    if not linuxHost() then
         return makeError("UnsupportedPlatformError", "onedir bundling is implemented for Linux in this stage")
     end
 

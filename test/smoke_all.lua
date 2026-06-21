@@ -280,6 +280,53 @@ print("api contract ok")
     assert_contains(run("lua -e " .. shell_quote(script)), "api contract ok")
 end
 
+local function check_manifest_without_popen()
+    local script = SOURCE_LOADER .. [[
+local manifest = require("luainstaller.manifest")
+local saved_popen = io.popen
+io.popen = nil
+local built = manifest.build({
+    entry = os.getenv("PWD") .. "/test/runtime_bundle/main.lua",
+    dependencies = { scripts = {}, libraries = {} },
+    mode = "onefile",
+    out = "build/runtime",
+})
+io.popen = saved_popen
+assert(built.ok == true, built.error and built.error.message)
+assert(type(built.manifest.platform.os) == "string")
+assert(type(built.manifest.platform.arch) == "string")
+print("manifest no popen ok")
+]]
+    assert_contains(run("lua -e " .. shell_quote(script)), "manifest no popen ok")
+end
+
+local function check_bundler_without_popen()
+    local out_dir = make_temp_dir("no-popen-bundler")
+    remove_tree(out_dir)
+    local script = SOURCE_LOADER .. string.format([[
+local bundler = require("luainstaller.bundler")
+local saved_popen = io.popen
+io.popen = nil
+local result = bundler.bundleOnedir({
+    entry = "test/runtime_bundle/main.lua",
+    out = %q,
+    dependencies = { scripts = {}, libraries = {} },
+    trace = {},
+    manifest = {
+        version = 1,
+        launcher = { profile = "shared-lua" },
+        modules = { lua = {}, native = {}, external = {} },
+    },
+})
+io.popen = saved_popen
+assert(result.ok == false)
+assert(result.error.type == "ToolchainError")
+print("bundler no popen ok")
+]], out_dir)
+    assert_contains(run("lua -e " .. shell_quote(script)), "bundler no popen ok")
+    remove_tree(out_dir)
+end
+
 local function cli_command(args)
     local quoted = {}
     for i = 1, #args do
@@ -604,6 +651,8 @@ check_syntax()
 check_samples()
 check_analyzer_visibility()
 check_api_contract()
+check_manifest_without_popen()
+check_bundler_without_popen()
 check_cli_contract()
 check_runtime_cgen()
 check_c_launcher()
