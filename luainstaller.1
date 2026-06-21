@@ -1,26 +1,31 @@
-.TH LUAINSTALLER 1 "June 2026" "luainstaller v1.0.0" "User Commands"
+.TH LUAI 1 "June 2026" "luainstaller v1.0.0" "User Commands"
 .SH NAME
-luainstaller \- bundle Lua projects into distributable executables (Windows/Linux)
+luai \- analyze and package Lua projects into same-environment executables
 
 .SH SYNOPSIS
-.B luainstaller
-.BR bundle " " \fIentry.lua\fR
+.B luai
+.BR \-a " " \fIentry.lua\fR
 .RI [ options ]
 .br
-.B luainstaller
-.BR analyze " " \fIentry.lua\fR
+.B luai
+.BR \-t " " \fIentry.lua\fR
 .RI [ options ]
 .br
-.B luainstaller
-.BR version
+.B luai
+.BR \-c " " \fIentry.lua\fR
+.RI [ options ]
+.br
+.B luai
+.BR \-\-version
 
 .SH DESCRIPTION
-\fBluainstaller\fR is a tool that packages Lua projects into \fBdistributable executables\fR,
-supporting \fBWindows\fR and \fBLinux\fR. It is open-sourced on GitHub and licensed under the
+\fBluainstaller\fR is a tool that analyzes Lua dependencies and packages Lua projects into
+\fBsame-environment executables\fR. The current implemented bundle target is Linux
+\fB--onedir\fR output. It is open-sourced on GitHub and licensed under the
 \fBLGPL\fR. See the repository for source code, releases, and documentation:
 https://github.com/Water-Run/luainstaller
 
-\fBluainstaller\fR provides dependency analysis and single-file bundling capabilities, and can
+\fBluainstaller\fR provides dependency analysis and Linux directory bundling capabilities, and can
 package non-pure-Lua content inside the wrapper program. It is important to note that
 \fBluainstaller\fR guarantees that the packaged binary will run on the same \fBsystem environment\fR
 as yours (excluding the \fBlua\fR environment itself).
@@ -33,110 +38,107 @@ Install via LuaRocks:
 .nf
 luarocks install luainstaller
 .fi
-This installs the \fBluainstaller\fR CLI and the Lua module.
+This installs the \fBluai\fR CLI and the Lua module.
 
 .SH COMMANDS
 .TP
-.B bundle
-Bundle an entry script and its dependencies into a distributable program. By default, output is a
-directory; use \fB--onefile\fR for a single-file executable.
+.B \-a
+Analyze Lua and native module dependencies.
 .TP
-.B analyze
-Analyze dependencies only; no bundling output is produced.
+.B \-t
+Print trace records for dependency resolution decisions.
 .TP
-.B version
-Print the version information.
+.B \-c
+Build a Linux onedir bundle. The \fB--onefile\fR mode is accepted as a planned mode but is not
+implemented yet.
 
 .SH CLI USAGE
-The CLI tool name is \fBluainstaller\fR.
+The CLI tool name is \fBluai\fR.
 
 .SS Help
 .nf
-luainstaller --help
+luai --help
 .fi
 Typical output:
 .nf
-luainstaller v1.0.0
+luai - Package Lua projects into same-environment executables
 
 Usage:
-  luainstaller bundle <entry.lua> [options]
-  luainstaller analyze <entry.lua> [options]
-  luainstaller version
+  luai -a <entry.lua> [options]
+  luai -t <entry.lua> [options]
+  luai -c <entry.lua> [options]
 
 Options:
   ...
 .fi
 
-.SS bundle
-\fBbundle\fR is the most commonly used command, used to package a Lua project into an executable.
+.SS Bundle
 
-Default mode (output a directory):
+Linux onedir mode:
 .nf
-luainstaller bundle \fIentry.lua\fR
+luai -c --onedir \fIentry.lua\fR -o \fIoutput_dir\fR
 .fi
 Typical output:
 .nf
 success.
-\fIentry.lua\fR => \fIoutput_dir\fR/
+\fIoutput_dir\fR/\fIapp\fR
 .fi
 
-By default, \fBluainstaller\fR performs \fBstatic dependency analysis\fR starting from the entry
-\fB.lua\fR file and outputs all required runtime files into a directory.
+\fBluai\fR performs static dependency analysis starting from the entry \fB.lua\fR file, embeds
+Lua sources in a generated launcher, copies detected native Lua C modules into
+\fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
 
-Single-file mode (\fB--onefile\fR, output a single executable):
+Single-file mode is planned:
 .nf
-luainstaller bundle \fIentry.lua\fR --onefile
+luai -c --onefile \fIentry.lua\fR
 .fi
-Typical output:
-.nf
-success.
-\fIentry.lua\fR => \fIoutput_file\fR
-.fi
-\fB--onefile\fR further wraps the directory bundle output into a \fBsingle executable file\fR.
+It currently returns \fBNotImplementedError\fR.
 
 .SS analyze
 Analyze dependencies only:
 .nf
-luainstaller analyze \fIentry.lua\fR
+luai -a \fIentry.lua\fR
 .fi
 Typical output:
 .nf
 success.
-N dependencies found:
-  1) ...
-  2) ...
+\fIentry.lua\fR
+N script(s), M library(ies)
 .fi
 
 .SH OPTIONS
-The following options apply to \fBbundle\fR and/or \fBanalyze\fR as described.
+The following options apply to \fB-a\fR, \fB-t\fR, and/or \fB-c\fR as described.
 
 .TP
 .BI \-o ", " \-\-out " " path
 Output path.
-For \fBbundle\fR: a directory path in default mode, or a file path when \fB--onefile\fR is set.
+For \fB-c --onedir\fR: a directory path.
 Examples:
 .nf
-luainstaller bundle main.lua --out ../dist/
-luainstaller bundle main.lua --onefile --out ../dist/app.exe
+luai -c main.lua --out ../dist/app
 .fi
 
 .TP
+.B \-\-onedir
+Generate a Linux directory bundle. This is the default bundle mode.
+
+.TP
 .B \-\-onefile
-Generate a single-file executable. Default output is a directory.
+Planned single-file executable mode. Not implemented yet.
 
 .TP
 .BI \-v ", " \-\-verbose
 Enable verbose analysis and bundling logs.
 .nf
-luainstaller bundle main.lua --verbose
+luai -c main.lua --verbose
 .fi
 
 .TP
 .BI \-\-max\-deps " " n
 Maximum number of dependencies allowed (default: 36).
 .nf
-luainstaller bundle main.lua --max-deps 100
-luainstaller analyze main.lua --max-deps 50
+luai -c main.lua --max-deps 100
+luai -a main.lua --max-deps 50
 .fi
 
 .TP
@@ -144,7 +146,7 @@ luainstaller analyze main.lua --max-deps 50
 Manually include additional dependencies. May be specified multiple times.
 Use this for dynamic \fBrequire\fR patterns that static analysis cannot detect.
 .nf
-luainstaller bundle main.lua --include ./require.lua --include ./plugin.lua
+luai -c main.lua --include ./require.lua --include ./plugin.lua
 .fi
 
 .TP
@@ -153,7 +155,7 @@ Manually exclude dependencies. May be specified multiple times.
 Use this to remove false positives (for example, \fBpcall(require, ...)\fR patterns); takes priority
 over \fB--include\fR.
 .nf
-luainstaller bundle main.lua --exclude ./test_utils.lua
+luai -c main.lua --exclude ./test_utils.lua
 .fi
 
 .TP
@@ -161,14 +163,7 @@ luainstaller bundle main.lua --exclude ./test_utils.lua
 Disable dependency scanning. This switches to a fully manual mode where you must specify all
 dependencies via \fB--include\fR.
 .nf
-luainstaller bundle main.lua --no-depscan --include ./a.lua --include ./b.lua
-.fi
-
-.TP
-.B \-\-icon " " path (Windows only)
-Set the application icon (\fB.ico\fR file).
-.nf
-luainstaller bundle main.lua --onefile --icon ./logo.ico
+luai -c main.lua --no-depscan --include ./a.lua --include ./b.lua
 .fi
 
 .SH LUA API
@@ -181,12 +176,17 @@ local luainstaller = require("luainstaller")
 .fi
 
 .SS bundle
-Function signature:
+Structured result:
 .nf
-local ok, out = luainstaller.bundle(opts)
+local result = luainstaller.bundle({
+  entry = "main.lua",
+  mode = "onedir",
+  out = "dist/app",
+})
 .fi
-Return values: when \fBok=true\fR, \fBout\fR is the output path; when \fBok=false\fR, \fBout\fR is an
-error message string.
+When \fBresult.ok=true\fR, \fBresult.executable\fR is the generated launcher path and
+\fBresult.manifest\fR is the manifest table. Normal user errors return
+\fB{ ok = false, error = { type = "...", message = "..." } }\fR.
 
 Parameters (\fIopts\fR table):
 
@@ -196,38 +196,32 @@ l l l l.
 Parameter	Type	Default	Description
 _
 \fBentry\fR	string	required	Entry script path
-\fBout\fR	string	\-	Output path (directory when \fBonefile=false\fR; file when \fBonefile=true\fR)
-\fBonefile\fR	boolean	\fBfalse\fR	Single-file mode switch
+\fBmode\fR	string	\fBonedir\fR	Bundle mode; \fBonefile\fR is planned
+\fBout\fR	string	\-	Output directory for \fBonedir\fR
 \fBverbose\fR	boolean	\fBfalse\fR	Whether to output detailed logs
 \fBmax_deps\fR	number	\fB36\fR	Maximum number of dependencies
 \fBinclude\fR	string[]	\fB{}\fR	Manually include dependencies
 \fBexclude\fR	string[]	\fB{}\fR	Manually exclude dependencies (priority over \fBinclude\fR)
 \fBdepscan\fR	boolean	\fBtrue\fR	Enable automatic dependency analysis
-\fBicon\fR	string	\-	Application icon path (\fB.ico\fR file, Windows only)
 .TE
 
 Example:
 .nf
--- Simplest bundling: output directory, automatic dependency scanning
-local ok, out = luainstaller.bundle({ entry = "main.lua" })
-if ok then print("Bundle succeeded: " .. out)
-else      print("Bundle failed: " .. out) end
-
--- Single-file mode
-local ok, out = luainstaller.bundle({
-  entry   = "main.lua",
-  onefile = true,
-  out     = "../dist/app.exe",
-})
+local result = luainstaller.bundle({ entry = "main.lua", out = "../dist/app" })
+if result.ok then
+  print("Bundle succeeded: " .. result.executable)
+else
+  print("Bundle failed: " .. result.error.message)
+end
 .fi
 
 .SS analyze
-Function signature:
+Structured result:
 .nf
-local ok, deps = luainstaller.analyze(entry, opts)
+local result = luainstaller.analyze({ entry = "main.lua" })
 .fi
-Return values: when \fBok=true\fR, \fBdeps\fR is an array of dependency path strings; when
-\fBok=false\fR, \fBdeps\fR is an error message string.
+When \fBresult.ok=true\fR, \fBresult.dependencies.scripts\fR and
+\fBresult.dependencies.libraries\fR contain discovered files.
 
 Parameters:
 
@@ -237,34 +231,24 @@ l l l l.
 Parameter	Type	Default	Description
 _
 \fBentry\fR	string	required	Entry script path
-\fIopts\fR.\fBmax_deps\fR	number	\fB36\fR	Maximum number of dependencies
-\fIopts\fR.\fBdepscan\fR	boolean	\fBtrue\fR	Enable automatic dependency analysis
+\fBmax_deps\fR	number	\fB36\fR	Maximum number of dependencies
+\fBdepscan\fR	boolean	\fBtrue\fR	Enable automatic dependency analysis
 .TE
 
 Example:
 .nf
-local ok, deps = luainstaller.analyze("main.lua")
-if ok then
-  print("Found " .. #deps .. " dependencies")
-  for i, dep in ipairs(deps) do
-    print(string.format("  %d) %s", i, dep))
-  end
+local result = luainstaller.analyze({ entry = "main.lua" })
+if result.ok then
+  print("Found " .. #result.dependencies.scripts .. " Lua dependencies")
 else
-  print("Analysis failed: " .. deps)
+  print("Analysis failed: " .. result.error.message)
 end
-.fi
-.RB "Note: " analyze " only performs dependency analysis and produces no bundling artifacts. It
-is suitable for pre-checking whether all dependencies are complete and whether any false
-positives exist before performing the actual bundle."
-
-.SS version
-.nf
-print("luainstaller version: " .. luainstaller.version())
 .fi
 
 .SH HOW IT WORKS
-The workflow of \fBluainstaller\fR can be summarized as: \fBanalyze entry script\fR \-> \fBcollect
-dependencies\fR \-> \fBbuild executable\fR \-> \fBoptionally wrap into a single file\fR.
+The workflow of \fBluainstaller\fR can be summarized as: \fBanalyze entry script\fR \->
+\fBcollect dependencies\fR \-> \fBtrace resolution decisions\fR \-> \fBbuild a Linux onedir
+bundle\fR.
 
 When \fBbundle\fR is executed, \fBluainstaller\fR first performs \fBstatic dependency analysis\fR
 starting from the entry \fB.lua\fR file. It scans the source code for common reference patterns
@@ -273,28 +257,14 @@ that static analysis cannot fully cover \(em such as runtime module name concate
 conditional module loading \(em dependencies can be supplemented manually via \fB--include\fR and
 false positives can be removed via \fB--exclude\fR.
 
-Once the dependency set is determined, \fBluainstaller\fR organizes the entry script and the
-collected Lua code into a bundle set ready for packaging. For pure Lua projects, this step
-typically only involves the scripts themselves; for projects containing non-pure-Lua content,
-additional files must also be handled to ensure the final artifact runs correctly on the
-\fBsame system environment\fR.
+Once the dependency set is determined, the Linux onedir bundler generates C source containing
+the Lua bootstrap and embedded Lua payload, compiles it with the local shared-Lua toolchain,
+copies detected native Lua C modules into \fB.luai/native/\fR, and writes
+\fB.luai/manifest.lua\fR.
 
-In the executable generation stage, \fBluainstaller\fR uses \fBluastatic\fR as its core backend,
-paired with a \fBGCC-compatible toolchain\fR to complete compilation and linking. The fundamental
-approach is not to rely on a pre-installed \fBlua\fR environment on the target machine to run
-scripts, but instead to construct the Lua program and related content into a directly
-distributable program. On Windows, if \fB--icon\fR is specified, \fBwindres\fR is additionally
-used to compile icon resources into the final executable.
-
-By default, \fBluainstaller\fR uses \fBdirectory output mode\fR: it generates an output directory
-containing the executable and required files. When \fB--onefile\fR is enabled, it further
-performs \fBsingle-file packaging\fR on top of this, bundling all runtime content into a single
-standalone executable for easier distribution and deployment.
-
-Overall, \fBluainstaller\fR's technology stack remains fairly straightforward: the Lua side
-handles the CLI, dependency analysis, and bundling process control; \fBluastatic\fR handles the
-static integration of the Lua program; the GCC-compatible toolchain handles final compilation
-and linking; and \fBwindres\fR handles icon and other resource embedding on Windows.
+The first-stage compatibility promise is same OS, same architecture, same ABI, and same Lua
+ABI. The current implementation does not claim cross-platform output, automatic external
+shared-library closure, or \fB--onefile\fR packaging.
 
 .SH SEE ALSO
 GitHub repository: https://github.com/Water-Run/luainstaller

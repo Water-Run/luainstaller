@@ -16,6 +16,7 @@ Updated:
 
 
 local analyzer = require("luainstaller.analyzer")
+local bundler  = require("luainstaller.bundler")
 local logger   = require("luainstaller.logger")
 local manifest = require("luainstaller.manifest")
 
@@ -322,16 +323,23 @@ function M.bundle(opts)
         return built_manifest
     end
 
-    return makeError("NotImplementedError", string.format(
-        "%s bundling is planned but not yet implemented",
-        normalized.mode
-    ), {
-        action       = "bundle",
-        entry        = normalized.entry,
-        mode         = normalized.mode,
-        out          = normalized.out,
+    if normalized.mode == "onefile" then
+        return makeError("NotImplementedError", "onefile bundling is planned but not yet implemented", {
+            action       = "bundle",
+            entry        = normalized.entry,
+            mode         = normalized.mode,
+            out          = normalized.out,
+            dependencies = analyzed.dependencies,
+            manifest     = built_manifest.manifest,
+        })
+    end
+
+    return bundler.bundleOnedir({
+        entry = normalized.entry,
+        out = normalized.out,
         dependencies = analyzed.dependencies,
-        manifest     = built_manifest.manifest,
+        trace = analyzed.trace,
+        manifest = built_manifest.manifest,
     })
 end
 

@@ -23,6 +23,7 @@ package.preload["luainstaller.manifest"] = function() return dofile("src/manifes
 package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
 package.preload["luainstaller.launcher"] = function() return dofile("src/launcher.lua") end
+package.preload["luainstaller.bundler"] = function() return dofile("src/bundler.lua") end
 package.preload["luainstaller"] = function() return dofile("src/init.lua") end
 package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
 ]]
@@ -51,6 +52,19 @@ end
 
 local function remove_file(path)
     os.remove(path)
+end
+
+local function remove_tree(path)
+    if path and path ~= "" and path:match("^/tmp/luainstaller%-") then
+        run("rm -rf " .. shell_quote(path))
+    end
+end
+
+local function make_temp_dir(name)
+    local path = "/tmp/luainstaller-" .. name .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
+    remove_tree(path)
+    run("mkdir -p " .. shell_quote(path))
+    return path
 end
 
 local function assert_contains(text, pattern)
@@ -210,7 +224,7 @@ assert(type(optional_firebird.candidates) == "table")
 
 local bundled = luainstaller.bundle({
     entry = "test/student_management_system/main.lua",
-    mode = "onedir",
+    mode = "onefile",
     out = "build/student-manager",
     max_deps = 250,
 })
@@ -219,7 +233,7 @@ assert(bundled.error.type == "NotImplementedError")
 assert(type(bundled.error.manifest) == "table")
 local manifest = bundled.error.manifest
 assert(manifest.version == 1)
-assert(manifest.output.mode == "onedir")
+assert(manifest.output.mode == "onefile")
 assert(manifest.entry.source_path:match("student_management_system/main%.lua$"))
 assert(manifest.entry.destination_path:match("^%.luai/lua/"))
 assert(type(manifest.lua.version) == "string")
@@ -237,6 +251,14 @@ assert(#manifest.compatibility >= 4)
 local missing = luainstaller.analyze({ entry = "test/no-such-file.lua" })
 assert(missing.ok == false)
 assert(missing.error.type == "ScriptNotFoundError")
+
+local unsafe = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    out = ".",
+    max_deps = 250,
+})
+assert(unsafe.ok == false)
+assert(unsafe.error.type == "InvalidOutputError")
 
 print("api contract ok")
 ]]
@@ -282,19 +304,19 @@ local function check_cli_contract()
     assert_contains(traced, "trace.")
     assert_contains(traced, "resolved")
 
+    local cli_out = make_temp_dir("cli-onedir")
     local bundled = run(cli_command({
         "-c",
         "--onedir",
         "test/student_management_system/main.lua",
         "-o",
-        "build/student-manager",
+        cli_out,
         "--max-deps",
         "250",
-    }), {
-        expect_failure = true,
-    })
-    assert_contains(bundled, "NotImplementedError")
-    assert_contains(bundled, "onedir bundling is planned")
+    }))
+    assert_contains(bundled, "success.")
+    assert_contains(bundled, cli_out .. "/")
+    remove_tree(cli_out)
 
     print("cli contract ok")
 end
@@ -431,6 +453,91 @@ print("c source generated")
     print("c launcher ok")
 end
 
+local function check_onedir_bundles()
+    local script = SOURCE_LOADER .. [[
+local luainstaller = require("luainstaller")
+
+local function assert_bundle(opts)
+    local result = luainstaller.bundle(opts)
+    assert(result.ok == true, result.error and result.error.message)
+    assert(result.action == "bundle")
+    assert(result.mode == "onedir")
+    assert(type(result.executable) == "string")
+    assert(type(result.manifest) == "table")
+    print(result.executable)
+end
+
+assert_bundle({
+    entry = "test/runtime_bundle/main.lua",
+    out = os.getenv("LUAI_RUNTIME_OUT"),
+    max_deps = 250,
+})
+assert_bundle({
+    entry = "test/student_management_system/main.lua",
+    out = os.getenv("LUAI_STUDENT_OUT"),
+    max_deps = 250,
+})
+assert_bundle({
+    entry = "test/savinglua/main.lua",
+    out = os.getenv("LUAI_SAVINGLUA_OUT"),
+    max_deps = 250,
+})
+assert_bundle({
+    entry = "test/firebird_web_sql/server.lua",
+    out = os.getenv("LUAI_FIREBIRD_OUT"),
+    max_deps = 250,
+})
+]]
+
+    local root = make_temp_dir("onedir")
+    local runtime_out = root .. "/runtime"
+    local student_out = root .. "/student"
+    local savinglua_out = root .. "/savinglua"
+    local firebird_out = root .. "/firebird-web-sql"
+    local env = table.concat({
+        "LUAI_RUNTIME_OUT=" .. shell_quote(runtime_out),
+        "LUAI_STUDENT_OUT=" .. shell_quote(student_out),
+        "LUAI_SAVINGLUA_OUT=" .. shell_quote(savinglua_out),
+        "LUAI_FIREBIRD_OUT=" .. shell_quote(firebird_out),
+    }, " ")
+
+    run(env .. " lua -e " .. shell_quote(script))
+
+    assert_contains(run(shell_quote(runtime_out .. "/runtime") .. " onedir"), "hello onedir")
+
+    local student_data = root .. "/students.json"
+    assert_contains(run(shell_quote(student_out .. "/student") .. " --data " .. shell_quote(student_data) .. " seed"), "Seeded 8 students")
+    assert_contains(run(shell_quote(student_out .. "/student") .. " --data " .. shell_quote(student_data) .. " list --sort average"), "Ada Lovelace")
+
+    local savinglua_db = root .. "/savinglua.sqlite3"
+    assert_contains(run(shell_quote(savinglua_out .. "/savinglua") .. " --db " .. shell_quote(savinglua_db) .. " put users:ada '{\"name\":\"Ada Lovelace\",\"score\":98}'"), "stored users:ada")
+    assert_contains(run(shell_quote(savinglua_out .. "/savinglua") .. " --db " .. shell_quote(savinglua_db) .. " get users:ada"), "Ada Lovelace")
+
+    if command_ok("curl --version") then
+        local port = "19091"
+        local server_smoke = table.concat({
+            "set -e",
+            "EXE=" .. shell_quote(firebird_out .. "/firebird-web-sql"),
+            "LOG=" .. shell_quote(root .. "/firebird.log"),
+            "FIREBIRD_WEB_SQL_PORT=" .. port .. " FIREBIRD_WEB_SQL_TOKEN=testtoken \"$EXE\" >\"$LOG\" 2>&1 &",
+            "PID=$!",
+            "cleanup() { kill \"$PID\" >/dev/null 2>&1 || true; wait \"$PID\" >/dev/null 2>&1 || true; }",
+            "trap cleanup EXIT",
+            "for i in $(seq 1 30); do",
+            "  if curl -fsS http://127.0.0.1:" .. port .. "/api/status -H 'X-Auth-Token: testtoken' | rg '\"ok\":true' >/dev/null; then exit 0; fi",
+            "  sleep 0.2",
+            "  if ! kill -0 \"$PID\" >/dev/null 2>&1; then cat \"$LOG\"; exit 1; fi",
+            "done",
+            "cat \"$LOG\"",
+            "exit 1",
+        }, "\n")
+        run("bash -c " .. shell_quote(server_smoke))
+    end
+
+    remove_tree(root)
+    print("onedir bundles ok")
+end
+
 check_style()
 check_syntax()
 check_samples()
@@ -439,5 +546,6 @@ check_api_contract()
 check_cli_contract()
 check_runtime_cgen()
 check_c_launcher()
+check_onedir_bundles()
 
 print("all packaging-target samples passed comprehensive smoke audit")

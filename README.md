@@ -4,7 +4,11 @@
 
 `luainstaller` is a tool that packages Lua projects into **distributable executables**, supporting **Windows** and **Linux**. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.
 
-`luainstaller` provides dependency analysis and single-file bundling capabilities, and can package non-pure-Lua content inside the wrapper program. It is important to note that `luainstaller` guarantees that the packaged binary will run on the same **system environment** as yours (excluding the `lua` environment itself).
+`luainstaller` provides dependency analysis and Linux directory bundling
+capabilities, and can package non-pure-Lua content inside the wrapper program.
+It is important to note that `luainstaller` guarantees that the packaged binary
+will run on the same **system environment** as yours (excluding the `lua`
+environment itself).
 
 > `luainstaller` was previously provided as a Python library. Older versions were out-of-the-box and cross-platform, but could only bundle pure Lua scripts. (See the `deprecated-python-lib` branch)
 
@@ -43,15 +47,15 @@ Current command status:
 |---------|--------|-------------|
 | `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
 | `luai -t <entry.lua>` | implemented | Print analyzer trace records with classifications and reasons. |
-| `luai -c <entry.lua>` | planned | Validate and plan bundling, then return `NotImplementedError` until the onedir bundler exists. |
+| `luai -c <entry.lua>` | implemented on Linux for `--onedir` | Build a directory bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
 
 Common options:
 
 | Option | Description |
 |--------|-------------|
-| `--onedir` | Directory bundle mode. This is the default planned output mode. |
+| `--onedir` | Directory bundle mode. This is the default output mode on Linux. |
 | `--onefile` | Single-file bundle mode, planned after onedir. |
-| `-o, --out <path>` | Output path for bundle planning. |
+| `-o, --out <path>` | Output path for bundle actions. |
 | `--include <path>` | Manually include a dependency; repeatable. |
 | `--exclude <path>` | Exclude a dependency by path or basename; repeatable. |
 | `--no-depscan` | Disable automatic dependency scanning. |
@@ -93,15 +97,15 @@ Available functions:
 |----------|--------|--------------|
 | `luainstaller.analyze(opts)` | implemented | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
 | `luainstaller.trace(opts)` | implemented | Real analyzer trace records with requiring file, source line, candidates, classification, and reason. |
-| `luainstaller.bundle(opts)` | planned | Returns `NotImplementedError` with `error.manifest` after validation. |
+| `luainstaller.bundle(opts)` | implemented on Linux for `mode = "onedir"` | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`; `onefile` still returns `NotImplementedError`. |
 
 Common `opts` fields:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `entry` | string | required | Entry script path. |
-| `mode` | string | `"onedir"` | `onedir` or `onefile` for bundle planning. |
-| `out` | string | nil | Output path for bundle planning. |
+| `mode` | string | `"onedir"` | `onedir` or `onefile`. |
+| `out` | string | nil | Output directory path for `onedir`. |
 | `max_deps` | number | `36` | Maximum dependency count. |
 | `include` | string[] | `{}` | Extra files to include. |
 | `exclude` | string[] | `{}` | Paths or basenames to exclude. |
@@ -112,25 +116,25 @@ Common `opts` fields:
 ## How It Works
 
 The current workflow is: **analyze entry script → collect dependencies → trace
-resolution decisions → validate bundle options**.
+resolution decisions → build a Linux onedir bundle**.
 
-Runtime launcher generation, manifest writing, onedir output, onefile payloads,
-and native-module extraction are roadmap work. The compatibility boundary for
-that runtime work is same OS, same architecture, same ABI, and same Lua ABI.
+Linux `--onedir` output is implemented. It generates a shared-Lua launcher,
+writes `.luai/manifest.lua`, embeds Lua payloads in the launcher, and copies
+detected native Lua C modules into `.luai/native/`. The compatibility boundary
+is same OS, same architecture, same ABI, and same Lua ABI.
 
-`bundle(opts)` now builds the manifest contract used by future onedir and
-launcher work before returning its current `NotImplementedError`; writing that
-manifest to `.luai/manifest.lua` is still part of the onedir bundler milestone.
+`--onefile` payloads, cross-platform bundle output, and automatic external
+shared-library dependency closure are still roadmap work.
 
 The pure Lua runtime milestone is implemented: `luainstaller.runtime` can install
 a bundled module searcher, and `luainstaller.cgen` can generate a Lua bootstrap
 chunk for pure Lua payloads. This bootstrap is the Lua side that future C
 launcher work will embed.
 
-The C launcher template milestone has also started: `luainstaller.launcher` can
+The C launcher template milestone is implemented: `luainstaller.launcher` can
 generate shared-Lua C source that embeds the Lua bootstrap and executes it
-through the Lua C API. This is a build primitive for the later onedir bundler,
-not a finished `luai -c` output path yet.
+through the Lua C API. The Linux onedir bundler uses this generator to produce
+the executable in the output directory.
 
 The overall process can be summarized as:
 
@@ -144,8 +148,8 @@ The overall process can be summarized as:
 [Collect Lua files / manual --include / --exclude]
      |
      v
-[Validate bundle plan]
+[Generate C launcher / copy native modules / write manifest]
      |
      v
-[Manifest / onedir runtime work in progress]
+[Linux onedir bundle]
 ```

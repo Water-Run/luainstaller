@@ -107,6 +107,26 @@ local function emitPayload(payload)
 end
 
 local RUNTIME_SOURCE = [=[
+local function pathDirname(path)
+  path = tostring(path or ""):gsub("\\", "/")
+  return path:match("^(.*)/[^/]+$") or "."
+end
+
+local function joinPath(left, right)
+  left = tostring(left or "")
+  right = tostring(right or "")
+  if right:sub(1, 1) == "/" or right:match("^%a:/") then return right end
+  if left == "" or left == "." then return right end
+  return left:gsub("/+$", "") .. "/" .. right
+end
+
+local function configureNativePath(native_dir, launcher_path)
+  if not native_dir or native_dir == "" then return end
+  local resolved = joinPath(pathDirname(launcher_path), native_dir)
+  local patterns = resolved .. "/?.so;" .. resolved .. "/?/init.so"
+  package.cpath = patterns .. ";" .. package.cpath
+end
+
 local function stripSource(source)
   source = tostring(source or "")
   if source:sub(1, 3) == "\239\187\191" then source = source:sub(4) end
@@ -168,6 +188,8 @@ function M.generateBootstrap(opts)
     source[#source + 1] = "-- luainstaller generated bootstrap"
     source[#source + 1] = emitPayload(payload)
     source[#source + 1] = RUNTIME_SOURCE
+    source[#source + 1] = "local launcher_path = arg and arg[0] or \"\""
+    source[#source + 1] = "configureNativePath(" .. quote(opts.native_dir or "") .. ", launcher_path)"
     source[#source + 1] = "local run_args = {}"
     source[#source + 1] = "if arg then for i = 1, #arg do run_args[i] = arg[i] end end"
     source[#source + 1] = "return run(payload, run_args)"

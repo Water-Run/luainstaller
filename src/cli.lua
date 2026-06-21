@@ -44,6 +44,15 @@ local function installSourcePreloads()
     package.preload["luainstaller.manifest"] = package.preload["luainstaller.manifest"] or function()
         return dofile(sourcePath("manifest.lua"))
     end
+    package.preload["luainstaller.cgen"] = package.preload["luainstaller.cgen"] or function()
+        return dofile(sourcePath("cgen.lua"))
+    end
+    package.preload["luainstaller.launcher"] = package.preload["luainstaller.launcher"] or function()
+        return dofile(sourcePath("launcher.lua"))
+    end
+    package.preload["luainstaller.bundler"] = package.preload["luainstaller.bundler"] or function()
+        return dofile(sourcePath("bundler.lua"))
+    end
     package.preload["luainstaller"] = function()
         return dofile(sourcePath("init.lua"))
     end
@@ -90,8 +99,8 @@ Actions:
       Trace dependency resolution decisions.
 
   -c <entry.lua>
-      Plan a bundle. --onedir is the default output mode. Actual bundling is
-      still being implemented.
+      Build a bundle. --onedir is the default Linux output mode; --onefile is
+      planned.
 
 Options:
   --onedir              Select directory bundle mode (default)
@@ -111,7 +120,7 @@ Compatibility commands:
 
 Compatibility:
   The first runtime promise is same OS, same architecture, same ABI, and same
-  Lua ABI. Generated runtime launchers are not available in this milestone.
+  Lua ABI. Linux onedir bundles use a shared-Lua launcher generated locally.
 
 Visit: %s
 ]=], PROJECT_URL)
@@ -406,6 +415,9 @@ local function cmdAction(parser, action, first_entry)
         result = luainstaller.bundle(opts)
         if result.ok then
             io.write("success.\n")
+            if result.executable then
+                io.write(string.format("%s\n", result.executable))
+            end
             return 0
         end
     end
@@ -523,7 +535,7 @@ local function cmdAnalyze(parser)
     local entry_script = parser:consume()
     if not entry_script or entry_script:sub(1, 1) == "-" then
         printError("analyze command requires an entry script")
-        printHint("Usage: luainstaller analyze <script> [-max <n>] [--detail]")
+        printHint("Usage: luai -a <script> [--max-deps <n>] [--verbose]")
         return 1
     end
 
@@ -632,7 +644,7 @@ local function cmdBuild(parser)
     local entry_script = parser:consume()
     if not entry_script or entry_script:sub(1, 1) == "-" then
         printError("build command requires an entry script")
-        printHint("Usage: luainstaller build <script> [options]")
+        printHint("Usage: luai -c <script> [options]")
         return 1
     end
 

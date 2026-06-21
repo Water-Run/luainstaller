@@ -300,24 +300,24 @@ Rules:
 
 ### Phase 6: C Launcher Template
 
-- [ ] Add `src/launcher/luai_launcher.c`.
+- [x] Add `src/launcher/luai_launcher.c`.
 - [ ] Add platform helpers for POSIX and Windows.
-- [ ] Implement Lua state creation, selected library opening, `arg`, traceback,
+- [x] Implement Lua state creation, selected library opening, `arg`, traceback,
       and entry execution.
-- [ ] Embed Lua chunks with explicit byte lengths.
+- [x] Embed Lua chunks with explicit byte lengths.
 - [ ] Support static-Lua launcher profile.
-- [ ] Support shared-Lua launcher profile.
+- [x] Support shared-Lua launcher profile.
 - [ ] Avoid new Windows CRT assumptions.
 
 ### Phase 7: `--onedir` Bundler
 
-- [ ] Create `src/bundler.lua`.
-- [ ] Build output directory with executable plus `.luai/`.
+- [x] Create `src/bundler.lua`.
+- [x] Build output directory with executable plus `.luai/`.
 - [ ] Copy Lua payload according to manifest.
-- [ ] Copy native modules to `.luai/native/`.
+- [x] Copy native modules to `.luai/native/`.
 - [ ] Copy `lua55.dll` or platform Lua shared library when needed.
-- [ ] Write `.luai/manifest.lua`.
-- [ ] Prepend `.luai/native` patterns to `package.cpath`.
+- [x] Write `.luai/manifest.lua`.
+- [x] Prepend `.luai/native` patterns to `package.cpath`.
 
 ### Phase 8: Native Module Fixture
 
