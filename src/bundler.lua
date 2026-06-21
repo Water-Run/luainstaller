@@ -198,7 +198,15 @@ local function copyLuaRuntime(exe_path, native_dir)
             output = lua_name,
         })
     end
-    return copyFile(lua_path, normalizePath(native_dir .. "/" .. lua_name))
+    local destination = normalizePath(native_dir .. "/" .. lua_name)
+    local err = copyFile(lua_path, destination)
+    if err then
+        return err
+    end
+    return nil, {
+        source_path = normalizePath(lua_path),
+        destination_path = normalizePath(".luai/native/" .. lua_name),
+    }
 end
 
 local function sortedKeys(tbl)
@@ -399,11 +407,6 @@ function M.bundleOnedir(opts)
         end
     end
 
-    err = writeFile(normalizePath(luai_dir .. "/manifest.lua"), serializeManifest(manifest))
-    if err then
-        return err
-    end
-
     local pkg_ok, pkg_flags = commandOutput("pkg-config --cflags --libs lua")
     if not pkg_ok then
         return makeError("ToolchainError", "pkg-config cannot find lua", {
@@ -430,7 +433,14 @@ function M.bundleOnedir(opts)
 
     commandOutput("chmod +x " .. shellQuote(exe_path))
 
-    err = copyLuaRuntime(exe_path, native_dir)
+    local runtime_record
+    err, runtime_record = copyLuaRuntime(exe_path, native_dir)
+    if err then
+        return err
+    end
+    manifest.launcher.lua_runtime = runtime_record
+
+    err = writeFile(normalizePath(luai_dir .. "/manifest.lua"), serializeManifest(manifest))
     if err then
         return err
     end

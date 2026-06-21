@@ -461,8 +461,8 @@ Actions:
       Trace dependency resolution decisions.
 
   -c <entry.lua>
-      Plan a bundle. --onedir is the default output mode. Actual bundling is
-      still being implemented.
+      Build a bundle. --onedir is the default output mode on Linux and now
+      emits a launcher plus a `.luai` payload directory.
 
 Options:
   --onedir              Select directory bundle mode (default)
@@ -476,7 +476,8 @@ Options:
 
 Compatibility:
   The first runtime promise is same OS, same architecture, same ABI, and same
-  Lua ABI. Generated runtime launchers are not available in this milestone.
+  Lua ABI. Linux generated launchers are available for --onedir; --onefile and
+  non-Linux launchers remain future work.
 
 Visit: %s
 ]=], PROJECT_URL)

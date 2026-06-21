@@ -64,9 +64,9 @@ The bundler reuses the pieces already implemented in earlier milestones:
    trace-derived module path when needed.
 7. Serialize the manifest as Lua table data to `.luai/manifest.lua`.
 
-The first implementation keeps copied native modules flat by basename. This is
-enough for the current Linux sample set because the runtime cpath prepends
-`.luai/native/?.so` and analyzer trace records preserve exact require names.
+The first implementation copies native modules both by basename and, when trace
+data contains the requested module name, by module-name path. This supports
+simple modules such as `cjson` and nested modules such as `socket.core`.
 
 ## API Contract
 

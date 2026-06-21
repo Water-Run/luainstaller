@@ -183,7 +183,9 @@ Run:
 lua test/smoke_all.lua
 ```
 
-Expected: FAIL because `src/runtime.lua` is empty and `src/cgen.lua` does not exist.
+Historical expectation: this failed when the runtime generator had not been
+implemented yet. In the current tree, `src/cgen.lua` exists and
+`lua test/smoke_all.lua` is expected to pass before packaging work is accepted.
 
 - [ ] **Step 5: Commit failing tests**
 

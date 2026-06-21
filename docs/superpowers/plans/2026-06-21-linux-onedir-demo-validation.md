@@ -4,7 +4,7 @@
 
 **Goal:** Implement and verify Linux `--onedir` packaging for pure Lua and native Lua C module examples in the repository's `test/` demo set.
 
-**Architecture:** Add `src/bundler.lua` as the filesystem/toolchain layer that consumes analyzer output and manifest data, generates a C launcher through `luainstaller.launcher`, compiles it with the local Linux Lua toolchain, writes `.luai/manifest.lua`, and copies native modules into `.luai/native/`. Extend `cgen` only where needed to preserve real module names and prepend runtime native search paths.
+**Architecture:** Add `src/bundler.lua` as the filesystem/toolchain layer that consumes analyzer output and manifest data, generates a C launcher through `luainstaller.launcher`, compiles it with the local Linux Lua toolchain, writes `.luai/manifest.lua`, and copies the linked Lua shared runtime plus native modules into `.luai/native/`. Extend `cgen` only where needed to preserve real module names and prepend runtime native search paths.
 
 **Tech Stack:** Lua 5.4-compatible project code, Linux `cc`, `pkg-config lua`, Lua C API, LuaRocks native modules such as `cjson` and `lsqlite3`, smoke tests in `test/smoke_all.lua`.
 
@@ -12,7 +12,7 @@
 
 ## File Map
 
-- Modify `test/smoke_all.lua`: add failing onedir bundle tests for pure Lua, `cjson`, and `lsqlite3` samples.
+- Modify `test/smoke_all.lua`: add failing onedir bundle tests for pure Lua, `cjson`, and `lsqlite3` samples, plus launcher runtime-library checks.
 - Modify `src/cgen.lua`: accept explicit `module_names` and `native_dir` options for generated bootstrap behavior.
 - Create/modify `src/bundler.lua`: implement Linux onedir creation, manifest writing, native copies, C generation, and compilation.
 - Modify `src/init.lua`: call `luainstaller.bundler` for `mode = "onedir"` and preserve `NotImplementedError` for `onefile`.
@@ -42,6 +42,8 @@
 - [x] Create the output layout: executable path plus `.luai/native/` and `.luai/manifest.lua`.
 - [x] Generate C source through `launcher.generateSource()` with `native_dir = ".luai/native"`.
 - [x] Compile with `cc <generated.c> -o <exe> $(pkg-config --cflags --libs lua)`.
+- [x] Link the launcher with `$ORIGIN/.luai/native` as runtime library search path.
+- [x] Copy the linked Lua shared runtime into `.luai/native/` and record it in the manifest.
 - [x] Copy native modules listed in the manifest into `.luai/native/`.
 - [x] Return `{ ok = true, action = "bundle", mode = "onedir", executable = ... }`.
 

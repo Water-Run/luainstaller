@@ -13,19 +13,19 @@ The test programs are grouped by packaging difficulty.
 
 - `single_file/`
   Simple one-file programs. These are basic beginner-level programming tasks
-  and should be the first smoke tests for `luai -c`.
+  and are useful first smoke tests for `luai -c`.
 - `student_management_system/`
   A classic larger beginner project: a student management system with
-  persistent file storage. It is planned to use `cjson` for structured storage.
+  persistent file storage through `cjson`.
 - `firebird_web_sql/`
-  An interactive web-based remote SQL shell target. It is intended to use a
-  Firebird database driver and the Pegasus web library.
+  An interactive web-based remote SQL shell target using Pegasus, `cjson`,
+  socket modules, and optional Firebird/LuaSQL support.
 - `savinglua/`
   A high-speed Lua table-structure storage database target backed by SQLite.
-  This area is expected to include Lua and native SQLite-facing code.
+  This exercises `cjson`, `lsqlite3`, and persistent data files.
 - `ltokei/`
   A Lua implementation of a Tokei-like code statistics tool. It may introduce
-  normal Lua library dependencies.
+  normal Lua library dependencies such as `lfs`.
 
 ## How To Use
 
@@ -36,7 +36,7 @@ lua test/single_file/01_hello_luainstaller.lua
 lua test/student_management_system/main.lua
 ```
 
-Use the future CLI shape for packaging experiments:
+Use the current CLI for packaging experiments:
 
 ```sh
 luai -a test/single_file/01_hello_luainstaller.lua
@@ -44,8 +44,10 @@ luai -t test/student_management_system/main.lua
 luai -c test/student_management_system/main.lua -o build/student-manager
 ```
 
-Current code may not yet match the future `luai` interface. These examples
-document the target structure and expected workflows.
+Linux `--onedir` packaging is implemented. The smoke suite packages and runs
+selected examples, including native Lua C module targets, and verifies that the
+generated bundles can run without a separate `lua` command in a same-ABI
+environment.
 
 ## Test Growth Rules
 

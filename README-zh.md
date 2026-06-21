@@ -6,7 +6,8 @@
 
 `luainstaller` 具备依赖分析与 Linux 目录打包能力，可在封装程序中包含非纯
 Lua 的内容。需要特别说明的是，`luainstaller` 保障的是打包后的二进制文件能
-在与当前**相同的系统环境**（不含 `lua` 环境本身）下正常运行。
+在与当前**相同的系统环境**下正常运行。Linux onedir 目录包不需要目标环境
+额外提供 `lua` 命令，但仍要求系统 ABI 和 native library 兼容。
 
 > `luainstaller` 曾以 Python 库形式提供。旧版本开箱即用且跨平台，但仅支持打包纯 Lua 脚本。（见 `deprecated-python-lib` 分支）
 
@@ -123,6 +124,9 @@ runtime 复制到 `.luai/native/`，并把检测到的 native Lua C 模块复制
 
 `--onefile` payload、跨平台打包输出和自动外部 shared library 依赖闭包仍是
 路线图中的后续工作。
+
+更详细的实现说明、非纯 Lua 打包行为、验证命令和当前限制见
+[`docs/LINUX-ONEDIR-BUNDLING.md`](docs/LINUX-ONEDIR-BUNDLING.md)。
 
 纯 Lua runtime 里程碑已实现：`luainstaller.runtime` 可以安装 bundled module
 searcher，`luainstaller.cgen` 可以为纯 Lua payload 生成 Lua bootstrap chunk。

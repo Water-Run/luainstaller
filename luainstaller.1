@@ -28,7 +28,8 @@ https://github.com/Water-Run/luainstaller
 \fBluainstaller\fR provides dependency analysis and Linux directory bundling capabilities, and can
 package non-pure-Lua content inside the wrapper program. It is important to note that
 \fBluainstaller\fR guarantees that the packaged binary will run on the same \fBsystem environment\fR
-as yours (excluding the \fBlua\fR environment itself).
+as yours. Linux onedir bundles do not require a separate \fBlua\fR command, but system ABI and
+native library compatibility still matter.
 
 \fBluainstaller\fR can be used as a CLI tool and (when installed via LuaRocks) as a Lua module via
 \fBrequire("luainstaller")\fR.
@@ -268,6 +269,8 @@ shared-library closure, or \fB--onefile\fR packaging.
 
 .SH SEE ALSO
 GitHub repository: https://github.com/Water-Run/luainstaller
+.br
+Detailed Linux onedir documentation: docs/LINUX-ONEDIR-BUNDLING.md
 
 .SH LICENSE
 LGPL

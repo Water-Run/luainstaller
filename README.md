@@ -7,8 +7,9 @@
 `luainstaller` provides dependency analysis and Linux directory bundling
 capabilities, and can package non-pure-Lua content inside the wrapper program.
 It is important to note that `luainstaller` guarantees that the packaged binary
-will run on the same **system environment** as yours (excluding the `lua`
-environment itself).
+will run on the same **system environment** as yours. A separate `lua` command
+is not required for Linux onedir bundles, but system ABI and native library
+compatibility still matter.
 
 > `luainstaller` was previously provided as a Python library. Older versions were out-of-the-box and cross-platform, but could only bundle pure Lua scripts. (See the `deprecated-python-lib` branch)
 
@@ -126,6 +127,10 @@ architecture, same ABI, and same Lua ABI.
 
 `--onefile` payloads, cross-platform bundle output, and automatic external
 shared-library dependency closure are still roadmap work.
+
+For detailed implementation notes, non-pure-Lua behavior, verification commands,
+and current limitations, see
+[`docs/LINUX-ONEDIR-BUNDLING.md`](docs/LINUX-ONEDIR-BUNDLING.md).
 
 The pure Lua runtime milestone is implemented: `luainstaller.runtime` can install
 a bundled module searcher, and `luainstaller.cgen` can generate a Lua bootstrap

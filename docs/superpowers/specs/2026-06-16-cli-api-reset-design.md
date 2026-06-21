@@ -4,8 +4,7 @@ Date: 2026-06-16
 
 ## Purpose
 
-Move `luainstaller` from the legacy `luainstaller analyze/build` interface
-toward the roadmap contract:
+Move the original verbose command interface toward the roadmap contract:
 
 - CLI command: `luai`
 - Library import: `require("luainstaller")`
@@ -219,16 +218,17 @@ Minimum verification for this milestone:
 - `lua src/cli.lua -c --onedir test/student_management_system/main.lua -o build/student-manager`
 - `luarocks make luainstaller-1.0.0-1.rockspec`
 
-Expected result for the final `-c` command during this milestone may be a
-structured not-implemented failure, as long as parsing, validation, and messaging
-are correct and tests assert that behavior explicitly.
+Historical note: during this milestone, `-c` was allowed to return a structured
+not-implemented failure while parsing and validation settled. Current Linux
+`--onedir` builds are implemented and covered by smoke tests; only `--onefile`
+keeps the explicit not-implemented contract.
 
 ## Open Decisions
 
 The implementation plan must decide:
 
-- Whether to remove legacy `luainstaller analyze/build` commands immediately or
-  keep short-term compatibility aliases.
+- Whether to remove the original verbose command aliases immediately or keep
+  short-term compatibility aliases.
 - Whether the Lua 5.5.0 rockspec dependency can be enforced now, given the local
   environment currently reports Lua 5.4.8.
 - How much trace detail to expose before the full traceable analyzer phase.

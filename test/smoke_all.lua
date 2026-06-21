@@ -515,6 +515,9 @@ assert_bundle({
 
     local runtime_liblua = run("find " .. shell_quote(runtime_out .. "/.luai/native") .. " -maxdepth 1 -type f -name 'liblua*.so*' | sort")
     assert_contains(runtime_liblua, "liblua")
+    local manifest = assert(loadfile(runtime_out .. "/.luai/manifest.lua"))()
+    assert(type(manifest.launcher.lua_runtime) == "table")
+    assert(manifest.launcher.lua_runtime.destination_path:match("^%.luai/native/liblua"))
     if command_ok("readelf --version") then
         local dynamic = command_output("readelf -d " .. shell_quote(runtime_out .. "/runtime"))
         assert_contains(dynamic, "$ORIGIN/.luai/native")
