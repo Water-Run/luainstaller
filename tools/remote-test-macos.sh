@@ -9,11 +9,34 @@ LUA_PREFIX=${LUA_PREFIX:-"/tmp/luainstaller-mac-lua-posix"}
 LUAROCKS_PREFIX=${LUAROCKS_PREFIX:-"/tmp/luainstaller-mac-luarocks"}
 ROCKTREE=${ROCKTREE:-"/tmp/luainstaller-mac-rocktree"}
 PREFIX=${PREFIX:-"/tmp/luainstaller-mac-prefix"}
+SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
 PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+LSQLITE3_ZIP=lsqlite3_v096.zip
+SQLITE_ZIP=sqlite-amalgamation-3530200.zip
+LSQLITE3_URL='https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6'
+SQLITE_URL='https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip'
+
+stage_source() {
+    name=$1
+    url=$2
+    mkdir -p "$SOURCE_CACHE"
+    if [ ! -s "$SOURCE_CACHE/$name" ]; then
+        curl -fL --connect-timeout 20 --max-time 180 -o "$SOURCE_CACHE/$name" "$url"
+    fi
+}
+
+stage_macos_sources() {
+    stage_source "$LSQLITE3_ZIP" "$LSQLITE3_URL"
+    stage_source "$SQLITE_ZIP" "$SQLITE_URL"
+    scp -P "$BASTION_PORT" "$SOURCE_CACHE/$LSQLITE3_ZIP" "$SOURCE_CACHE/$SQLITE_ZIP" "$BASTION:/tmp/" >/dev/null
+    ssh -p "$BASTION_PORT" "$BASTION" "scp /tmp/$LSQLITE3_ZIP /tmp/$SQLITE_ZIP $MAC_HOST:/tmp/" >/dev/null
+}
 
 remote_sh() {
     ssh -p "$BASTION_PORT" "$BASTION" "ssh $MAC_HOST 'sh -s'"
 }
+
+stage_macos_sources
 
 remote_sh <<EOF
 set -eu
@@ -53,7 +76,24 @@ if ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/l
     "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install luasocket >/tmp/luainstaller-macos-luasocket.log 2>&1
     "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install pegasus >/tmp/luainstaller-macos-pegasus.log 2>&1
 fi
-LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("cjson"); require("lfs"); require("socket.core"); require("pegasus"); print("mac native deps ok")'
+if ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("lsqlite3")' >/tmp/luainstaller-macos-lsqlite-check.log 2>&1; then
+    rm -rf /tmp/luainstaller-mac-lsqlite-build
+    mkdir -p /tmp/luainstaller-mac-lsqlite-build "\$ROCKTREE/lib/lua/5.4"
+    cd /tmp/luainstaller-mac-lsqlite-build
+    cp "/tmp/$LSQLITE3_ZIP" ./lsqlite3.zip
+    cp "/tmp/$SQLITE_ZIP" ./sqlite.zip
+    unzip -q lsqlite3.zip -d lsqlite3-src
+    unzip -q sqlite.zip
+    LSQLITE_DIR=\$(find lsqlite3-src -name lsqlite3.c -exec dirname {} \\; | head -n 1)
+    SQLITE_DIR=\$(find . -name sqlite3.c -exec dirname {} \\; | head -n 1)
+    cc -bundle -undefined dynamic_lookup \
+        -I"\$LUA_PREFIX/include" \
+        -I"\$SQLITE_DIR" \
+        -DLSQLITE_VERSION=\\"0.9.6\\" \
+        "\$LSQLITE_DIR/lsqlite3.c" "\$SQLITE_DIR/sqlite3.c" \
+        -o "\$ROCKTREE/lib/lua/5.4/lsqlite3.so"
+fi
+LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("cjson"); require("lfs"); require("socket.core"); require("pegasus"); require("lsqlite3"); print("mac native deps ok")'
 EOF
 
 tar --exclude=.git -C "$PROJECT_ROOT" -cf - . \
@@ -90,6 +130,11 @@ rm -rf /tmp/luainstaller-mac-student /tmp/macos-students.json
 bundle test/student_management_system/main.lua /tmp/luainstaller-mac-student
 env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json seed | grep "Seeded 8 students"
 env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json list --sort average | grep "Ada Lovelace"
+
+rm -rf /tmp/luainstaller-mac-savinglua /tmp/macos-savinglua.sqlite3
+bundle test/savinglua/main.lua /tmp/luainstaller-mac-savinglua
+env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}' | grep "stored users:ada"
+env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 get users:ada | grep "Ada Lovelace"
 
 rm -rf /tmp/luainstaller-mac-ltokei
 bundle test/ltokei/main.lua /tmp/luainstaller-mac-ltokei

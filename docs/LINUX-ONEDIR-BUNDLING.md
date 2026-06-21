@@ -22,8 +22,10 @@ The generated bundle does not require a separate `lua` command on the target
 environment. The linked Lua shared runtime is copied into the bundle and found
 through the launcher's `$ORIGIN/.luai/native` runtime search path.
 
-`--onefile`, cross-platform output, Windows output, and automatic external
-shared-library closure are not implemented in this stage.
+`--onefile`, Windows output, cross-building, and automatic external
+shared-library closure are not implemented in this stage. macOS has a separate
+same-platform `--onedir` path that links against a static Lua prefix; this
+document focuses on the Linux shared-Lua implementation.
 
 ## Output Layout
 
@@ -234,7 +236,8 @@ lua -e 'local m = dofile("/tmp/savinglua-bundle/.luai/manifest.lua"); print(m.la
 
 Current limitations are explicit:
 
-- Linux only.
+- This document covers Linux only. macOS `--onedir` has a separate static-Lua
+  profile.
 - `--onefile` is not implemented.
 - Native module external dependencies are not closed automatically. For example,
   an `.so` may still depend on system `libsqlite3.so.0`, `libssl.so.3`, or other
@@ -245,12 +248,12 @@ Current limitations are explicit:
   dependencies static analysis cannot see.
 - Optional probes through `pcall(require, "...")` are traced as optional missing
   modules when unresolved.
-- The generated launcher uses a shared Lua profile. Static Lua linking is still
-  roadmap work.
+- The Linux generated launcher uses a shared Lua profile. Static Lua linking is
+  used by the macOS profile and remains outside this Linux document.
 - The source installer is not a replacement for the build toolchain. Hosts
   without Lua headers or Lua `pkg-config` metadata can run analysis but cannot
   compile the C launcher.
-- Windows and macOS output are not implemented in this stage.
+- Windows output is not implemented in this stage.
 
 ## Onefile Direction
 

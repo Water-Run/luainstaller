@@ -8,13 +8,13 @@ for branch `codex/linux-onedir-demo-validation`.
 ## Current Support Boundary
 
 `luainstaller` currently implements dependency analysis on any host with a
-compatible Lua runtime and Linux `--onedir` bundle output on Linux hosts with a
-working local C/Lua toolchain.
+compatible Lua runtime, Linux `--onedir` bundle output on Linux hosts with a
+working local C/Lua toolchain, and macOS `--onedir` bundle output on macOS hosts
+when a matching static Lua prefix is supplied.
 
-macOS and Windows bundle output are intentionally rejected with
-`UnsupportedPlatformError` in this stage. They are still useful test targets for
-source installation, CLI parsing, analyzer behavior, and clear unsupported
-platform diagnostics.
+Windows bundle output is intentionally rejected with `UnsupportedPlatformError`
+in this stage. Windows is still a useful test target for source-tree CLI
+parsing, analyzer behavior, and clear unsupported platform diagnostics.
 
 ## Environment Results
 
@@ -23,7 +23,7 @@ platform diagnostics.
 | local workstation | Linux x86_64 | available | Full smoke, LuaRocks install, source install, and no-system-`lua` container bundle runtime passed. |
 | `192.168.10.40` | Linux x86_64 | available | Full smoke passed after installing sample native modules. Source-installed `luai` built and ran a pure Lua bundle. |
 | `192.168.5.19` | Linux aarch64 | unavailable | Source install and `luai -a` passed. `luai -c --onedir` cleanly failed with `ToolchainError` because Lua headers / Lua `pkg-config` metadata are not installed. |
-| `yymac06` | macOS arm64 | temporary `/tmp` LuaRocks | Temporary user-local Lua 5.4.8 and LuaRocks were built. Pure Lua, `student_management_system`, `ltokei`, and `firebird_web_sql` `--onedir` bundles build and run from clean `env -i` runtimes. `savinglua` remains pending because `lsqlite3` needs a bundled SQLite build on this host. |
+| `yymac06` | macOS arm64 | temporary `/tmp` LuaRocks plus local SQLite source cache | Temporary user-local Lua 5.4.8 and LuaRocks were built. Pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles build and run from clean `env -i` runtimes. |
 | `192.168.69.130` | Windows 10 x64 | unavailable | Temporary cross-compiled Lua 5.4.8 was copied in. Source-tree CLI syntax, `--version`, and `-a` passed. `-c --onedir` cleanly failed with `UnsupportedPlatformError`. |
 
 ## Fixes From This Loop
@@ -64,8 +64,16 @@ sh tools/remote-test-macos.sh
 
 The script builds or reuses temporary user-local Lua and LuaRocks under `/tmp`,
 source-installs `luai`, builds the pure Lua, `student_management_system`,
-`ltokei`, and `firebird_web_sql` demos, and runs the resulting executables under
-`env -i PATH=/usr/bin:/bin`.
+`savinglua`, `ltokei`, and `firebird_web_sql` demos, and runs the resulting
+executables under `env -i PATH=/usr/bin:/bin`.
+
+For `savinglua`, the script does not rely on the host `/usr/lib/libsqlite3.dylib`
+or on LuaRocks being able to build a working `lsqlite3` module. It downloads
+`lsqlite3_v096.zip` and SQLite amalgamation `sqlite-amalgamation-3530200.zip`
+into a local cache, copies them through the bastion host, and compiles
+`lsqlite3.so` on macOS with the SQLite amalgamation included in the module.
+That keeps the packaged demo independent from the target machine's SQLite
+runtime symbol exports.
 
 Windows with a temporary Lua:
 
@@ -81,8 +89,6 @@ Windows bundle output is implemented.
 
 ## Remaining Work
 
-- Add a macOS `lsqlite3` build that links or bundles a SQLite implementation so
-  `savinglua` can join the macOS clean-runtime matrix.
 - Implement Windows bundle output with `.exe` launcher generation, `lua*.dll`
   placement, companion DLL discovery, and Windows path handling.
 - Add a native Windows source installer or package installer once a supported

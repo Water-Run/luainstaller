@@ -2,14 +2,14 @@
 
 *[中文](README-zh.md)*
 
-`luainstaller` is a tool that packages Lua projects into **distributable executables**, supporting **Windows** and **Linux**. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.
+`luainstaller` is a tool that packages Lua projects into **distributable executables**. Linux and macOS `--onedir` output are implemented; Windows output is in progress. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.
 
-`luainstaller` provides dependency analysis and Linux directory bundling
+`luainstaller` provides dependency analysis and same-platform directory bundling
 capabilities, and can package non-pure-Lua content inside the wrapper program.
 It is important to note that `luainstaller` guarantees that the packaged binary
 will run on the same **system environment** as yours. A separate `lua` command
-is not required for Linux onedir bundles, but system ABI and native library
-compatibility still matter.
+is not required for Linux or macOS onedir bundles, but system ABI and native
+library compatibility still matter.
 
 > `luainstaller` was previously provided as a Python library. Older versions were out-of-the-box and cross-platform, but could only bundle pure Lua scripts. (See the `deprecated-python-lib` branch)
 
@@ -31,9 +31,10 @@ export PATH="$HOME/.local/bin:$PATH"
 luai --help
 ```
 
-This source installer only needs a `lua` command. Building Linux `--onedir`
-bundles still requires the local C toolchain and Lua development metadata, such
-as `cc`, Lua headers, and `pkg-config` data for Lua.
+This source installer only needs a `lua` command. Building `--onedir` bundles
+still requires the local C toolchain and Lua development metadata. Linux uses
+`cc`, Lua headers, and `pkg-config` data for Lua. macOS uses `cc` plus a
+matching Lua prefix that provides Lua headers and `liblua.a`.
 
 ---
 
@@ -60,13 +61,13 @@ Current command status:
 |---------|--------|-------------|
 | `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
 | `luai -t <entry.lua>` | implemented | Print analyzer trace records with classifications and reasons. |
-| `luai -c <entry.lua>` | implemented on Linux for `--onedir` | Build a directory bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
+| `luai -c <entry.lua>` | implemented on Linux and macOS for `--onedir` | Build a directory bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
 
 Common options:
 
 | Option | Description |
 |--------|-------------|
-| `--onedir` | Directory bundle mode. This is the default output mode on Linux. |
+| `--onedir` | Directory bundle mode. This is the default output mode on Linux and macOS. |
 | `--onefile` | Single-file bundle mode, planned after onedir. |
 | `-o, --out <path>` | Output path for bundle actions. |
 | `--include <path>` | Manually include a dependency; repeatable. |
@@ -110,7 +111,7 @@ Available functions:
 |----------|--------|--------------|
 | `luainstaller.analyze(opts)` | implemented | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
 | `luainstaller.trace(opts)` | implemented | Real analyzer trace records with requiring file, source line, candidates, classification, and reason. |
-| `luainstaller.bundle(opts)` | implemented on Linux for `mode = "onedir"` | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`; `onefile` still returns `NotImplementedError`. |
+| `luainstaller.bundle(opts)` | implemented on Linux and macOS for `mode = "onedir"` | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`; `onefile` still returns `NotImplementedError`. |
 
 Common `opts` fields:
 
@@ -129,16 +130,18 @@ Common `opts` fields:
 ## How It Works
 
 The current workflow is: **analyze entry script → collect dependencies → trace
-resolution decisions → build a Linux onedir bundle**.
+resolution decisions → build a same-platform onedir bundle**.
 
-Linux `--onedir` output is implemented. It generates a shared-Lua launcher,
-writes `.luai/manifest.lua`, embeds Lua payloads in the launcher, copies the
-linked Lua shared runtime into `.luai/native/`, and copies detected native Lua C
-modules into `.luai/native/`. The compatibility boundary is same OS, same
-architecture, same ABI, and same Lua ABI.
+Linux and macOS `--onedir` output are implemented. The bundler generates a C
+launcher, writes `.luai/manifest.lua`, embeds Lua payloads in the launcher, and
+copies detected native Lua C modules into `.luai/native/`. Linux uses a
+shared-Lua launcher and copies the linked Lua shared runtime. macOS links the
+launcher against a static `liblua.a` from the selected Lua prefix. The
+compatibility boundary is same OS, same architecture, same ABI, and same Lua
+ABI.
 
-`--onefile` payloads, cross-platform bundle output, and automatic external
-shared-library dependency closure are still roadmap work.
+`--onefile` payloads, Windows bundle output, cross-building, and automatic
+external shared-library dependency closure are still roadmap work.
 
 For detailed implementation notes, non-pure-Lua behavior, verification commands,
 and current limitations, see
@@ -168,8 +171,8 @@ The overall process can be summarized as:
 [Collect Lua files / manual --include / --exclude]
      |
      v
-[Generate C launcher / copy Lua runtime and native modules / write manifest]
+[Generate C launcher / copy native modules / write manifest]
      |
      v
-[Linux onedir bundle]
+[Linux or macOS onedir bundle]
 ```

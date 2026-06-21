@@ -20,16 +20,16 @@ luai \- analyze and package Lua projects into same-environment executables
 
 .SH DESCRIPTION
 \fBluainstaller\fR is a tool that analyzes Lua dependencies and packages Lua projects into
-\fBsame-environment executables\fR. The current implemented bundle target is Linux
-\fB--onedir\fR output. It is open-sourced on GitHub and licensed under the
+\fBsame-environment executables\fR. The current implemented bundle targets are Linux and
+macOS \fB--onedir\fR output. It is open-sourced on GitHub and licensed under the
 \fBLGPL\fR. See the repository for source code, releases, and documentation:
 https://github.com/Water-Run/luainstaller
 
-\fBluainstaller\fR provides dependency analysis and Linux directory bundling capabilities, and can
+\fBluainstaller\fR provides dependency analysis and same-platform directory bundling capabilities, and can
 package non-pure-Lua content inside the wrapper program. It is important to note that
 \fBluainstaller\fR guarantees that the packaged binary will run on the same \fBsystem environment\fR
-as yours. Linux onedir bundles do not require a separate \fBlua\fR command, but system ABI and
-native library compatibility still matter.
+as yours. Linux and macOS onedir bundles do not require a separate \fBlua\fR command, but
+system ABI and native library compatibility still matter.
 
 \fBluainstaller\fR can be used as a CLI tool and (when installed via LuaRocks) as a Lua module via
 \fBrequire("luainstaller")\fR.
@@ -47,9 +47,10 @@ sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 luai --help
 .fi
-The source installer only requires a \fBlua\fR command. Building Linux
-\fB--onedir\fR bundles still requires the local C toolchain and Lua development
-metadata such as \fBcc\fR, Lua headers, and Lua \fBpkg-config\fR data.
+The source installer only requires a \fBlua\fR command. Building \fB--onedir\fR bundles
+still requires the local C toolchain and Lua development metadata. Linux uses \fBcc\fR,
+Lua headers, and Lua \fBpkg-config\fR data. macOS uses \fBcc\fR plus a matching Lua
+prefix that provides Lua headers and \fBliblua.a\fR.
 
 .SH COMMANDS
 .TP
@@ -60,7 +61,7 @@ Analyze Lua and native module dependencies.
 Print trace records for dependency resolution decisions.
 .TP
 .B \-c
-Build a Linux onedir bundle. The \fB--onefile\fR mode is accepted as a planned mode but is not
+Build a Linux or macOS onedir bundle. The \fB--onefile\fR mode is accepted as a planned mode but is not
 implemented yet.
 
 .SH CLI USAGE
@@ -85,7 +86,7 @@ Options:
 
 .SS Bundle
 
-Linux onedir mode:
+Onedir mode:
 .nf
 luai -c --onedir \fIentry.lua\fR -o \fIoutput_dir\fR
 .fi
@@ -131,7 +132,7 @@ luai -c main.lua --out ../dist/app
 
 .TP
 .B \-\-onedir
-Generate a Linux directory bundle. This is the default bundle mode.
+Generate a Linux or macOS directory bundle. This is the default bundle mode.
 
 .TP
 .B \-\-onefile
@@ -258,7 +259,7 @@ end
 
 .SH HOW IT WORKS
 The workflow of \fBluainstaller\fR can be summarized as: \fBanalyze entry script\fR \->
-\fBcollect dependencies\fR \-> \fBtrace resolution decisions\fR \-> \fBbuild a Linux onedir
+\fBcollect dependencies\fR \-> \fBtrace resolution decisions\fR \-> \fBbuild a same-platform onedir
 bundle\fR.
 
 When \fBbundle\fR is executed, \fBluainstaller\fR first performs \fBstatic dependency analysis\fR
@@ -268,14 +269,15 @@ that static analysis cannot fully cover \(em such as runtime module name concate
 conditional module loading \(em dependencies can be supplemented manually via \fB--include\fR and
 false positives can be removed via \fB--exclude\fR.
 
-Once the dependency set is determined, the Linux onedir bundler generates C source containing
-the Lua bootstrap and embedded Lua payload, compiles it with the local shared-Lua toolchain,
-copies the linked Lua shared runtime plus detected native Lua C modules into
-\fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
+Once the dependency set is determined, the onedir bundler generates C source containing
+the Lua bootstrap and embedded Lua payload, compiles it with the local toolchain,
+copies detected native Lua C modules into \fB.luai/native/\fR, and writes
+\fB.luai/manifest.lua\fR. Linux uses a shared-Lua launcher and copies the linked Lua
+shared runtime; macOS links against a static \fBliblua.a\fR from the selected Lua prefix.
 
 The first-stage compatibility promise is same OS, same architecture, same ABI, and same Lua
 ABI. The current implementation does not claim cross-platform output, automatic external
-shared-library closure, or \fB--onefile\fR packaging.
+shared-library closure, Windows output, or \fB--onefile\fR packaging.
 
 .SH SEE ALSO
 GitHub repository: https://github.com/Water-Run/luainstaller
