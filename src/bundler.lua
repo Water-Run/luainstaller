@@ -12,6 +12,7 @@ Updated:
 ]]
 
 local launcher = require("luainstaller.launcher")
+local platform = require("luainstaller.platform")
 
 local M = {}
 
@@ -144,6 +145,29 @@ local function removeTree(path)
         return makeError("FilesystemError", "Cannot remove directory: " .. tostring(path), {
             output = output,
             path = path,
+        })
+    end
+    return nil
+end
+
+local function fileExists(path)
+    local file = io.open(path, "rb")
+    if not file then
+        return false
+    end
+    file:close()
+    return true
+end
+
+local function validateLuaPrefix(prefix)
+    if type(prefix) ~= "string" or prefix == "" then
+        return makeError("ToolchainError", "Lua prefix is required for this onedir target")
+    end
+    local include = normalizePath(prefix .. "/include/lua.h")
+    local liblua = normalizePath(prefix .. "/lib/liblua.a")
+    if not fileExists(include) or not fileExists(liblua) then
+        return makeError("ToolchainError", "Lua prefix must contain include/lua.h and lib/liblua.a", {
+            lua_prefix = prefix,
         })
     end
     return nil
@@ -357,14 +381,28 @@ end
 
 function M.bundleOnedir(opts)
     opts = opts or {}
-    if IS_WINDOWS then
-        return makeError("UnsupportedPlatformError", "onedir bundling is implemented for Linux in this stage")
-    end
     if type(io.popen) ~= "function" then
         return makeError("ToolchainError", "io.popen is required to build onedir bundles")
     end
-    if not linuxHost() then
-        return makeError("UnsupportedPlatformError", "onedir bundling is implemented for Linux in this stage")
+
+    local profile = platform.profile({
+        target_os = opts.target_os,
+        lua_prefix = opts.lua_prefix,
+    })
+    if profile.target_os == "windows" then
+        return makeError("UnsupportedPlatformError", "windows onedir bundling is not implemented yet")
+    end
+    if profile.target_os == "macos" then
+        local prefix_err = validateLuaPrefix(profile.lua_prefix)
+        if prefix_err then
+            return prefix_err
+        end
+    elseif profile.target_os == "linux" then
+        if not linuxHost() then
+            return makeError("UnsupportedPlatformError", "linux onedir bundling requires a Linux host")
+        end
+    else
+        return makeError("UnsupportedPlatformError", "unsupported onedir target: " .. tostring(profile.target_os))
     end
 
     local manifest = opts.manifest
