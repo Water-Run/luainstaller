@@ -20,16 +20,16 @@ luai \- analyze and package Lua projects into same-environment executables
 
 .SH DESCRIPTION
 \fBluainstaller\fR is a tool that analyzes Lua dependencies and packages Lua projects into
-\fBsame-environment executables\fR. The current implemented bundle targets are Linux and
-macOS \fB--onedir\fR output. It is open-sourced on GitHub and licensed under the
+\fBsame-environment executables\fR. The current implemented bundle targets are Linux,
+macOS, and Windows \fB--onedir\fR output. It is open-sourced on GitHub and licensed under the
 \fBLGPL\fR. See the repository for source code, releases, and documentation:
 https://github.com/Water-Run/luainstaller
 
 \fBluainstaller\fR provides dependency analysis and same-platform directory bundling capabilities, and can
 package non-pure-Lua content inside the wrapper program. It is important to note that
 \fBluainstaller\fR guarantees that the packaged binary will run on the same \fBsystem environment\fR
-as yours. Linux and macOS onedir bundles do not require a separate \fBlua\fR command, but
-system ABI and native library compatibility still matter.
+as yours. Linux, macOS, and Windows onedir bundles do not require a separate \fBlua\fR
+command, but system ABI and native library compatibility still matter.
 
 \fBluainstaller\fR can be used as a CLI tool and (when installed via LuaRocks) as a Lua module via
 \fBrequire("luainstaller")\fR.
@@ -50,7 +50,8 @@ luai --help
 The source installer only requires a \fBlua\fR command. Building \fB--onedir\fR bundles
 still requires the local C toolchain and Lua development metadata. Linux uses \fBcc\fR,
 Lua headers, and Lua \fBpkg-config\fR data. macOS uses \fBcc\fR plus a matching Lua
-prefix that provides Lua headers and \fBliblua.a\fR.
+prefix that provides Lua headers and \fBliblua.a\fR. Windows uses MinGW on a Linux
+build host plus a Windows Lua prefix that provides Lua headers and \fBlua54.dll\fR.
 
 .SH COMMANDS
 .TP
@@ -61,7 +62,7 @@ Analyze Lua and native module dependencies.
 Print trace records for dependency resolution decisions.
 .TP
 .B \-c
-Build a Linux or macOS onedir bundle. The \fB--onefile\fR mode is accepted as a planned mode but is not
+Build a Linux, macOS, or Windows onedir bundle. The \fB--onefile\fR mode is accepted as a planned mode but is not
 implemented yet.
 
 .SH CLI USAGE
@@ -132,11 +133,22 @@ luai -c main.lua --out ../dist/app
 
 .TP
 .B \-\-onedir
-Generate a Linux or macOS directory bundle. This is the default bundle mode.
+Generate a Linux, macOS, or Windows directory bundle. This is the default bundle mode.
 
 .TP
 .B \-\-onefile
 Planned single-file executable mode. Not implemented yet.
+
+.TP
+.BI \-\-target\-os " " os
+Select the target profile. Supported values are \fBlinux\fR, \fBmacos\fR, and
+\fBwindows\fR. If omitted, the host OS is used.
+
+.TP
+.BI \-\-lua\-prefix " " path
+Lua prefix used by targets that need explicit headers or runtime files. macOS
+expects \fBinclude/lua.h\fR and \fBlib/liblua.a\fR. Windows expects
+\fBinclude/lua.h\fR and \fBbin/lua54.dll\fR or \fBlua54.dll\fR.
 
 .TP
 .BI \-v ", " \-\-verbose
@@ -210,6 +222,8 @@ _
 \fBentry\fR	string	required	Entry script path
 \fBmode\fR	string	\fBonedir\fR	Bundle mode; \fBonefile\fR is planned
 \fBout\fR	string	\-	Output directory for \fBonedir\fR
+\fBtarget_os\fR	string	host OS	Target profile: \fBlinux\fR, \fBmacos\fR, or \fBwindows\fR
+\fBlua_prefix\fR	string	\fBLUAI_LUA_PREFIX\fR	Lua headers/runtime prefix for macOS and Windows
 \fBverbose\fR	boolean	\fBfalse\fR	Whether to output detailed logs
 \fBmax_deps\fR	number	\fB36\fR	Maximum number of dependencies
 \fBinclude\fR	string[]	\fB{}\fR	Manually include dependencies
@@ -274,10 +288,12 @@ the Lua bootstrap and embedded Lua payload, compiles it with the local toolchain
 copies detected native Lua C modules into \fB.luai/native/\fR, and writes
 \fB.luai/manifest.lua\fR. Linux uses a shared-Lua launcher and copies the linked Lua
 shared runtime; macOS links against a static \fBliblua.a\fR from the selected Lua prefix.
+Windows uses \fBx86_64-w64-mingw32-gcc\fR, emits a \fB.exe\fR, and copies
+\fBlua54.dll\fR beside the launcher and into \fB.luai/native/\fR.
 
 The first-stage compatibility promise is same OS, same architecture, same ABI, and same Lua
 ABI. The current implementation does not claim cross-platform output, automatic external
-shared-library closure, Windows output, or \fB--onefile\fR packaging.
+shared-library closure, or \fB--onefile\fR packaging.
 
 .SH SEE ALSO
 GitHub repository: https://github.com/Water-Run/luainstaller

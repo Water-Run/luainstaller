@@ -52,11 +52,19 @@ export PATH="$HOME/.local/bin:$PATH"
 luai -a test/single_file/01_hello_luainstaller.lua
 ```
 
-Linux `--onedir` packaging is implemented. The smoke suite packages and runs
-selected examples, including native Lua C module targets, and verifies that the
-generated bundles can run without a separate `lua` command in a same-ABI
-environment. It also verifies LuaRocks-installed CLI bundling and source
-installation without relying on LuaRocks.
+Linux, macOS, and Windows `--onedir` packaging are implemented for the selected
+sample matrix. The smoke suite packages and runs selected Linux examples,
+including native Lua C module targets, and verifies that the generated bundles
+can run without a separate `lua` command in a same-ABI environment. Remote
+scripts extend the same coverage to macOS and Windows:
+
+```sh
+sh tools/remote-test-linux.sh
+sh tools/remote-test-macos.sh
+sh tools/remote-test-windows.sh
+```
+
+The source-install checks also verify deployment when LuaRocks is unavailable.
 
 ## Test Growth Rules
 

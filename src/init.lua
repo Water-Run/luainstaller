@@ -337,6 +337,8 @@ function M.bundle(opts)
     return bundler.bundleOnedir({
         entry = normalized.entry,
         out = normalized.out,
+        target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
+        lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
         dependencies = analyzed.dependencies,
         trace = analyzed.trace,
         manifest = built_manifest.manifest,

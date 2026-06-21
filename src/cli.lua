@@ -111,6 +111,8 @@ Options:
   -o, --out <path>      Output path for bundle actions
   --include <path>      Include an extra Lua file; repeatable
   --exclude <path>      Exclude a dependency by path or basename; repeatable
+  --target-os <os>      Target profile: linux, macos, or windows
+  --lua-prefix <path>   Lua prefix for targets that require one
   --no-depscan          Disable automatic dependency scanning
   --max-deps <n>        Maximum dependency count (default: 36)
   --verbose             Print more detail
@@ -123,7 +125,8 @@ Compatibility commands:
 
 Compatibility:
   The first runtime promise is same OS, same architecture, same ABI, and same
-  Lua ABI. Linux onedir bundles use a shared-Lua launcher generated locally.
+  Lua ABI. Linux uses a shared-Lua launcher. macOS uses a static Lua prefix.
+  Windows currently uses a MinGW-built launcher and a bundled Lua DLL.
 
 Visit: %s
 ]=], PROJECT_URL)
@@ -324,6 +327,10 @@ local function parseActionOptions(parser, action, first_entry)
             opts.include[#opts.include + 1] = parser:consumeValue(arg)
         elseif arg == "--exclude" then
             opts.exclude[#opts.exclude + 1] = parser:consumeValue(arg)
+        elseif arg == "--target-os" then
+            opts.target_os = parser:consumeValue(arg)
+        elseif arg == "--lua-prefix" then
+            opts.lua_prefix = parser:consumeValue(arg)
         elseif arg == "--no-depscan" or arg == "--manual" then
             opts.depscan = false
         elseif arg == "--max-deps" or arg == "-max" then

@@ -15,8 +15,8 @@ experiments, and implementation direction.
 - `src/launcher.lua` generates C source that embeds the bootstrap as explicit
   byte arrays.
 - `src/launcher/luai_launcher.c` is the shared-Lua C launcher template.
-- `src/bundler.lua` implements the Linux `--onedir` filesystem and toolchain
-  layer.
+- `src/bundler.lua` implements the `--onedir` filesystem and toolchain layer for
+  Linux, macOS, and the Windows MinGW profile.
 - `src/init.lua` is the structured public Lua API boundary.
 - `src/cli.lua` provides the installed `luai` command and compatibility aliases.
 - `luainstaller-1.0.0-1.rockspec` installs the `luai` executable and all current
@@ -52,12 +52,14 @@ References:
 - Container clean-run check: a `python:3.11-slim` container without a `lua`
   command loaded the copied `liblua-5.4.so` from `.luai/native/`.
 
-## Implemented First-Stage Shape
+## Implemented Onedir Shape
 
-The first implemented bundle target is Linux `--onedir`:
+The first implemented bundle target was Linux `--onedir`, and the same manifest
+and launcher pipeline now also covers macOS and Windows profiles:
 
 ```sh
 luai -c --onedir test/savinglua/main.lua -o /tmp/savinglua-bundle
+luai -c --onedir test/runtime_bundle/main.lua -o /tmp/win-runtime --target-os windows --lua-prefix /tmp/luainstaller-win-lua
 ```
 
 The generated directory contains:
@@ -74,9 +76,15 @@ app/
             launcher.c
 ```
 
-The executable is linked with `$ORIGIN/.luai/native` as a runtime library search
-path. The bundler copies the linked Lua shared runtime and detected native Lua C
-modules into `.luai/native/`.
+Linux executables are linked with `$ORIGIN/.luai/native` as a runtime library
+search path. The bundler copies the linked Lua shared runtime and detected
+native Lua C modules into `.luai/native/`.
+
+macOS links against `liblua.a` from a selected Lua prefix and uses
+`@loader_path/.luai/native` for native Lua C modules. Windows is currently built
+from Linux with `x86_64-w64-mingw32-gcc`; it emits a `.exe`, copies `lua54.dll`
+beside the launcher and into `.luai/native/`, and copies native Lua module DLLs
+such as `cjson.dll`, `lsqlite3.dll`, `lfs.dll`, and `socket/core.dll`.
 
 ## Current Verification Targets
 
@@ -87,9 +95,9 @@ modules into `.luai/native/`.
   optional `luaossl`.
 - `test/ltokei/main.lua`: `lfs`.
 
-The full smoke runner packages and runs these targets where practical. Separate
-container checks verified packaged output in an environment with no `lua`
-command.
+The full smoke runner packages and runs these targets on Linux. Remote scripts
+verify the same selected matrix on macOS and Windows, including target
+environments with no installed `lua` command or LuaRocks.
 
 ## Main Risks
 
@@ -100,8 +108,9 @@ command.
   `libssl.so.3`, or `libcrypto.so.3`.
 - Optional dependencies should remain visible in trace output without turning
   intentional capability probes into hard failures.
-- Cross-distribution output is not promised. The current boundary is same OS,
-  architecture, C ABI, Lua ABI, and compatible system libraries.
+- Cross-distribution and general cross-building output are not promised. The
+  current boundary is same OS family, architecture, C ABI, Lua ABI, and
+  compatible system libraries or native DLLs.
 - Windows XP and old-system support remain build profiles requiring separate
   toolchains and real smoke runs.
 

@@ -380,6 +380,30 @@ print("macos profile toolchain ok")
     assert_contains(run("lua -e " .. shell_quote(script)), "macos profile toolchain ok")
 end
 
+local function check_windows_profile_reaches_toolchain()
+    local script = SOURCE_LOADER .. [[
+local bundler = require("luainstaller.bundler")
+local result = bundler.bundleOnedir({
+    entry = "test/runtime_bundle/main.lua",
+    out = "/tmp/luainstaller-windows-profile-smoke",
+    target_os = "windows",
+    lua_prefix = "/tmp/luainstaller-missing-windows-lua-prefix",
+    dependencies = { scripts = {}, libraries = {} },
+    trace = {},
+    manifest = {
+        version = 1,
+        launcher = { profile = "shared-lua" },
+        modules = { lua = {}, native = {}, external = {} },
+    },
+})
+assert(result.ok == false)
+assert(result.error.type == "ToolchainError")
+assert(tostring(result.error.message):find("Windows Lua prefix", 1, true))
+print("windows profile toolchain ok")
+]]
+    assert_contains(run("lua -e " .. shell_quote(script)), "windows profile toolchain ok")
+end
+
 local function cli_command(args)
     local quoted = {}
     for i = 1, #args do
@@ -708,6 +732,7 @@ check_manifest_without_popen()
 check_bundler_without_popen()
 check_platform_profiles()
 check_macos_profile_reaches_toolchain()
+check_windows_profile_reaches_toolchain()
 check_cli_contract()
 check_runtime_cgen()
 check_c_launcher()

@@ -10,11 +10,13 @@ for branch `codex/linux-onedir-demo-validation`.
 `luainstaller` currently implements dependency analysis on any host with a
 compatible Lua runtime, Linux `--onedir` bundle output on Linux hosts with a
 working local C/Lua toolchain, and macOS `--onedir` bundle output on macOS hosts
-when a matching static Lua prefix is supplied.
+when a matching static Lua prefix is supplied. Windows `--onedir` bundle output
+is implemented as a profiled build from Linux using MinGW and a Windows Lua
+prefix.
 
-Windows bundle output is intentionally rejected with `UnsupportedPlatformError`
-in this stage. Windows is still a useful test target for source-tree CLI
-parsing, analyzer behavior, and clear unsupported platform diagnostics.
+The tested runtime promise is still same OS family, same architecture, same Lua
+ABI, and compatible native module DLLs. General cross-building and automatic
+external dependency closure remain outside this stage.
 
 ## Environment Results
 
@@ -24,7 +26,7 @@ parsing, analyzer behavior, and clear unsupported platform diagnostics.
 | `192.168.10.40` | Linux x86_64 | available | Full smoke passed after installing sample native modules. Source-installed `luai` built and ran a pure Lua bundle. |
 | `192.168.5.19` | Linux aarch64 | unavailable | Source install and `luai -a` passed. `luai -c --onedir` cleanly failed with `ToolchainError` because Lua headers / Lua `pkg-config` metadata are not installed. |
 | `yymac06` | macOS arm64 | temporary `/tmp` LuaRocks plus local SQLite source cache | Temporary user-local Lua 5.4.8 and LuaRocks were built. Pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles build and run from clean `env -i` runtimes. |
-| `192.168.69.130` | Windows 10 x64 | unavailable | Temporary cross-compiled Lua 5.4.8 was copied in. Source-tree CLI syntax, `--version`, and `-a` passed. `-c --onedir` cleanly failed with `UnsupportedPlatformError`. |
+| `192.168.69.130` | Windows 10 x64 | unavailable on target | Linux-built Windows Lua 5.4.8, MinGW-built native DLLs, and bundled pure Lua dependencies were used to build pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles. The bundles run on the Windows host from a cleaned PowerShell environment without installed Lua or LuaRocks. |
 
 ## Fixes From This Loop
 
@@ -35,6 +37,9 @@ parsing, analyzer behavior, and clear unsupported platform diagnostics.
   execute commands.
 - `luainstaller.bundler` now rejects non-Linux POSIX hosts before attempting the
   Linux filesystem/toolchain flow.
+- `luainstaller.bundler` now supports `--target-os windows` from Linux with
+  MinGW, copies `lua54.dll` beside the launcher and into `.luai/native/`, and
+  preserves Windows native module paths such as `socket/core.dll`.
 - `test/smoke_all.lua` covers the no-`io.popen` manifest and bundler contracts.
 
 ## Reproduction Commands
@@ -56,6 +61,18 @@ sh tools/install-source.sh --prefix /tmp/luainstaller-source-prefix
 /tmp/luainstaller-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
 ```
 
+Remote Linux hosts:
+
+```sh
+sh tools/remote-test-linux.sh
+```
+
+The script copies the current checkout to `192.168.10.40` and `192.168.5.19`.
+The x86_64 host runs the full smoke suite plus a source-installed pure Lua
+bundle from `env -i`. The aarch64 host verifies source install and analysis in a
+LuaRocks-unavailable environment, then accepts either a runnable bundle or the
+expected `ToolchainError` when Lua headers / `pkg-config` metadata are absent.
+
 macOS with a user-local Lua:
 
 ```sh
@@ -75,23 +92,22 @@ into a local cache, copies them through the bastion host, and compiles
 That keeps the packaged demo independent from the target machine's SQLite
 runtime symbol exports.
 
-Windows with a temporary Lua:
+Windows with MinGW-built Lua and native DLLs:
 
-```powershell
-$env:LUA_PATH = 'src/?.lua;src/?/init.lua;;'
-& $lua src\cli.lua --version
-& $lua src\cli.lua -a test\runtime_bundle\main.lua --max-deps 120
-& $lua src\cli.lua -c --onedir test\runtime_bundle\main.lua -o $env:TEMP\luainstaller-win-runtime --max-deps 120
+```sh
+sh tools/remote-test-windows.sh
 ```
 
-The final Windows command must fail with `UnsupportedPlatformError` until
-Windows bundle output is implemented.
+The script builds Lua 5.4.8 for Windows with MinGW, cross-compiles `cjson`,
+`lfs`, `lsqlite3`, `socket.core`, and `mime.core` DLLs, copies Pegasus,
+LuaSocket Lua modules, and `mimetypes`, then builds and verifies all selected
+Windows bundles under Wine and on `192.168.69.130`.
 
 ## Remaining Work
 
-- Implement Windows bundle output with `.exe` launcher generation, `lua*.dll`
-  placement, companion DLL discovery, and Windows path handling.
-- Add a native Windows source installer or package installer once a supported
-  Windows runtime/toolchain profile is selected.
-- Add CI or lab automation that can rerun this matrix without manually copying
-  temporary Lua runtimes.
+- Add a native Windows source installer or package installer for users who want
+  to run the CLI directly on Windows instead of cross-building from Linux.
+- Add general external DLL dependency closure for native modules beyond the
+  explicitly built test set.
+- Add CI or lab automation that can rerun this matrix without manually managed
+  SSH hosts.
