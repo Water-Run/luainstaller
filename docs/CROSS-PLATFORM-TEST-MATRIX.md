@@ -23,7 +23,7 @@ platform diagnostics.
 | local workstation | Linux x86_64 | available | Full smoke, LuaRocks install, source install, and no-system-`lua` container bundle runtime passed. |
 | `192.168.10.40` | Linux x86_64 | available | Full smoke passed after installing sample native modules. Source-installed `luai` built and ran a pure Lua bundle. |
 | `192.168.5.19` | Linux aarch64 | unavailable | Source install and `luai -a` passed. `luai -c --onedir` cleanly failed with `ToolchainError` because Lua headers / Lua `pkg-config` metadata are not installed. |
-| `yymac06` | macOS arm64 | unavailable | Temporary user-local Lua 5.4.8 was built. Source install and `luai -a` passed. `luai -c --onedir` cleanly failed with `UnsupportedPlatformError`. |
+| `yymac06` | macOS arm64 | unavailable | Temporary user-local Lua 5.4.8 was built. Source install and `luai -a` passed. Pure Lua `--onedir` bundle now builds and runs from a clean `env -i` runtime. Native module demos remain pending. |
 | `192.168.69.130` | Windows 10 x64 | unavailable | Temporary cross-compiled Lua 5.4.8 was copied in. Source-tree CLI syntax, `--version`, and `-a` passed. `-c --onedir` cleanly failed with `UnsupportedPlatformError`. |
 
 ## Fixes From This Loop
@@ -59,14 +59,13 @@ sh tools/install-source.sh --prefix /tmp/luainstaller-source-prefix
 macOS with a user-local Lua:
 
 ```sh
-sh tools/install-source.sh --lua /tmp/luainstaller-mac-lua-posix/bin/lua --prefix /tmp/luainstaller-mac-prefix
-/tmp/luainstaller-mac-prefix/bin/luai --version
-/tmp/luainstaller-mac-prefix/bin/luai -a /tmp/luainstaller-mac-current/test/runtime_bundle/main.lua --max-deps 120
-/tmp/luainstaller-mac-prefix/bin/luai -c --onedir /tmp/luainstaller-mac-current/test/runtime_bundle/main.lua -o /tmp/luainstaller-mac-runtime --max-deps 120
+sh tools/remote-test-macos.sh
 ```
 
-The final macOS command must fail with `UnsupportedPlatformError` until macOS
-bundle output is implemented.
+The script builds or reuses a temporary user-local Lua at
+`/tmp/luainstaller-mac-lua-posix`, source-installs `luai`, builds
+`test/runtime_bundle/main.lua`, and runs the resulting executable under
+`env -i PATH=/usr/bin:/bin`.
 
 Windows with a temporary Lua:
 
@@ -82,8 +81,7 @@ Windows bundle output is implemented.
 
 ## Remaining Work
 
-- Implement macOS bundle output with `@loader_path`, `.dylib` install-name
-  handling, and a macOS launcher build path.
+- Extend macOS bundle output from pure Lua to native Lua C module demos.
 - Implement Windows bundle output with `.exe` launcher generation, `lua*.dll`
   placement, companion DLL discovery, and Windows path handling.
 - Add a native Windows source installer or package installer once a supported

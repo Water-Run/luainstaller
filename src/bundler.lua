@@ -461,22 +461,36 @@ function M.bundleOnedir(opts)
         end
     end
 
-    local pkg_ok, pkg_flags = commandOutput("pkg-config --cflags --libs lua")
-    if not pkg_ok then
-        return makeError("ToolchainError", "pkg-config cannot find lua", {
-            output = pkg_flags,
-        })
-    end
+    local compile_cmd
+    if profile.target_os == "macos" then
+        compile_cmd = table.concat({
+            "cc",
+            shellQuote(c_path),
+            "-I" .. shellQuote(profile.lua_prefix .. "/include"),
+            "-o",
+            shellQuote(exe_path),
+            "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
+            shellQuote(profile.lua_prefix .. "/lib/liblua.a"),
+            "-lm",
+        }, " ")
+    else
+        local pkg_ok, pkg_flags = commandOutput("pkg-config --cflags --libs lua")
+        if not pkg_ok then
+            return makeError("ToolchainError", "pkg-config cannot find lua", {
+                output = pkg_flags,
+            })
+        end
 
-    local cleaned_pkg_flags = (pkg_flags:gsub("%s+$", ""))
-    local compile_cmd = table.concat({
-        "cc",
-        shellQuote(c_path),
-        "-o",
-        shellQuote(exe_path),
-        "-Wl,-rpath," .. shellQuote("$ORIGIN/.luai/native"),
-        cleaned_pkg_flags,
-    }, " ")
+        local cleaned_pkg_flags = (pkg_flags:gsub("%s+$", ""))
+        compile_cmd = table.concat({
+            "cc",
+            shellQuote(c_path),
+            "-o",
+            shellQuote(exe_path),
+            "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
+            cleaned_pkg_flags,
+        }, " ")
+    end
     local compile_ok, compile_output = commandOutput(compile_cmd)
     if not compile_ok then
         return makeError("CompilationFailedError", "C launcher compilation failed", {
@@ -487,12 +501,20 @@ function M.bundleOnedir(opts)
 
     commandOutput("chmod +x " .. shellQuote(exe_path))
 
-    local runtime_record
-    err, runtime_record = copyLuaRuntime(exe_path, native_dir)
-    if err then
-        return err
+    if profile.target_os == "macos" then
+        manifest.launcher.lua_runtime = {
+            source_path = normalizePath(profile.lua_prefix .. "/lib/liblua.a"),
+            destination_path = nil,
+            link_mode = "static",
+        }
+    else
+        local runtime_record
+        err, runtime_record = copyLuaRuntime(exe_path, native_dir)
+        if err then
+            return err
+        end
+        manifest.launcher.lua_runtime = runtime_record
     end
-    manifest.launcher.lua_runtime = runtime_record
 
     err = writeFile(normalizePath(luai_dir .. "/manifest.lua"), serializeManifest(manifest))
     if err then

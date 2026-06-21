@@ -123,7 +123,14 @@ end
 local function configureNativePath(native_dir, launcher_path)
   if not native_dir or native_dir == "" then return end
   local resolved = joinPath(pathDirname(launcher_path), native_dir)
-  local patterns = resolved .. "/?.so;" .. resolved .. "/?/init.so"
+  local patterns = table.concat({
+    resolved .. "/?.so",
+    resolved .. "/?/init.so",
+    resolved .. "/?.dylib",
+    resolved .. "/?/init.dylib",
+    resolved .. "/?.dll",
+    resolved .. "/?/init.dll",
+  }, ";")
   package.cpath = patterns .. ";" .. package.cpath
 end
 
