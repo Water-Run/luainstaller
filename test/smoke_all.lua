@@ -20,6 +20,7 @@ local SOURCE_LOADER = [[
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
 package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
+package.preload["luainstaller.platform"] = function() return dofile("src/platform.lua") end
 package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
 package.preload["luainstaller.launcher"] = function() return dofile("src/launcher.lua") end
@@ -325,6 +326,34 @@ print("bundler no popen ok")
 ]], out_dir)
     assert_contains(run("lua -e " .. shell_quote(script)), "bundler no popen ok")
     remove_tree(out_dir)
+end
+
+local function check_platform_profiles()
+    local script = SOURCE_LOADER .. [[
+local platform = require("luainstaller.platform")
+local host = platform.detectHost()
+assert(host.os == "linux" or host.os == "macos" or host.os == "windows" or host.os == "unknown")
+assert(type(host.arch) == "string")
+
+local linux = platform.profile({ target_os = "linux" })
+assert(linux.executable_suffix == "")
+assert(linux.native_extensions[1] == ".so")
+assert(linux.loader_rpath == "$ORIGIN/.luai/native")
+
+local macos = platform.profile({ target_os = "macos", lua_prefix = "/tmp/lua" })
+assert(macos.executable_suffix == "")
+assert(macos.native_extensions[1] == ".so")
+assert(macos.native_extensions[2] == ".dylib")
+assert(macos.loader_rpath == "@loader_path/.luai/native")
+assert(macos.lua_prefix == "/tmp/lua")
+
+local windows = platform.profile({ target_os = "windows" })
+assert(windows.executable_suffix == ".exe")
+assert(windows.native_extensions[1] == ".dll")
+assert(windows.loader_rpath == nil)
+print("platform profiles ok")
+]]
+    assert_contains(run("lua -e " .. shell_quote(script)), "platform profiles ok")
 end
 
 local function cli_command(args)
@@ -653,6 +682,7 @@ check_analyzer_visibility()
 check_api_contract()
 check_manifest_without_popen()
 check_bundler_without_popen()
+check_platform_profiles()
 check_cli_contract()
 check_runtime_cgen()
 check_c_launcher()
