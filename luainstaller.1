@@ -40,6 +40,16 @@ Install via LuaRocks:
 luarocks install luainstaller
 .fi
 This installs the \fBluai\fR CLI and the Lua module.
+.PP
+Install from a source checkout when LuaRocks is unavailable:
+.nf
+sh tools/install-source.sh --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+luai --help
+.fi
+The source installer only requires a \fBlua\fR command. Building Linux
+\fB--onedir\fR bundles still requires the local C toolchain and Lua development
+metadata such as \fBcc\fR, Lua headers, and Lua \fBpkg-config\fR data.
 
 .SH COMMANDS
 .TP

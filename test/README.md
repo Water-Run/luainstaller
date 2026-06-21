@@ -44,10 +44,19 @@ luai -t test/student_management_system/main.lua
 luai -c test/student_management_system/main.lua -o build/student-manager
 ```
 
+When LuaRocks is unavailable, install the CLI from the source tree:
+
+```sh
+sh tools/install-source.sh --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+luai -a test/single_file/01_hello_luainstaller.lua
+```
+
 Linux `--onedir` packaging is implemented. The smoke suite packages and runs
 selected examples, including native Lua C module targets, and verifies that the
 generated bundles can run without a separate `lua` command in a same-ABI
-environment.
+environment. It also verifies LuaRocks-installed CLI bundling and source
+installation without relying on LuaRocks.
 
 ## Test Growth Rules
 

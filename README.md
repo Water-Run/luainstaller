@@ -23,6 +23,18 @@ Install via `luarocks`:
 luarocks install luainstaller
 ```
 
+Install from a source checkout when LuaRocks is unavailable:
+
+```bash
+sh tools/install-source.sh --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+luai --help
+```
+
+This source installer only needs a `lua` command. Building Linux `--onedir`
+bundles still requires the local C toolchain and Lua development metadata, such
+as `cc`, Lua headers, and `pkg-config` data for Lua.
+
 ---
 
 ## Usage

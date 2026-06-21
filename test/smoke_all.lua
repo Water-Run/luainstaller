@@ -77,6 +77,11 @@ local function make_temp_dir(name)
     return path
 end
 
+local function current_lua_version()
+    local version = run("lua -e " .. shell_quote("local v = _VERSION:match('(%d+%.%d+)'); assert(v); print(v)"))
+    return (version:gsub("%s+$", ""))
+end
+
 local function assert_contains(text, pattern)
     if not tostring(text):find(pattern, 1, true) then
         error("expected output to contain " .. pattern .. "\nactual:\n" .. tostring(text), 2)
@@ -558,6 +563,42 @@ assert_bundle({
     print("onedir bundles ok")
 end
 
+local function check_installed_cli_bundle()
+    if not command_ok("luarocks --version") then
+        print("installed cli bundle skipped: luarocks unavailable")
+        return
+    end
+
+    local root = make_temp_dir("installed-cli")
+    local tree = root .. "/tree"
+    local out_dir = root .. "/runtime"
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.0.0-1.rockspec")
+    run("cd /tmp && " .. shell_quote(tree .. "/bin/luai") .. " -c --onedir "
+        .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
+        .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
+    assert_contains(run(shell_quote(out_dir .. "/runtime") .. " installed"), "hello installed")
+    remove_tree(root)
+    print("installed cli bundle ok")
+end
+
+local function check_source_install_bundle()
+    local root = make_temp_dir("source-install")
+    local prefix = root .. "/prefix"
+    local out_dir = root .. "/runtime"
+    run("sh tools/install-source.sh --prefix " .. shell_quote(prefix))
+    assert_contains(run(shell_quote(prefix .. "/bin/luai") .. " --version"), "Version 1.0.0")
+    run("cd /tmp && " .. shell_quote(prefix .. "/bin/luai") .. " -c --onedir "
+        .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
+        .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
+    assert_contains(run(shell_quote(out_dir .. "/runtime") .. " source-install"), "hello source-install")
+    local lua_version = current_lua_version()
+    run("LUA_PATH=" .. shell_quote(prefix .. "/share/lua/" .. lua_version .. "/?.lua;"
+        .. prefix .. "/share/lua/" .. lua_version .. "/?/init.lua;;")
+        .. " lua -e 'local launcher = require(\"luainstaller.launcher\"); assert(type(launcher.generateSource) == \"function\")'")
+    remove_tree(root)
+    print("source install bundle ok")
+end
+
 check_style()
 check_syntax()
 check_samples()
@@ -567,5 +608,7 @@ check_cli_contract()
 check_runtime_cgen()
 check_c_launcher()
 check_onedir_bundles()
+check_installed_cli_bundle()
+check_source_install_bundle()
 
 print("all packaging-target samples passed comprehensive smoke audit")

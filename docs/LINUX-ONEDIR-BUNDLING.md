@@ -182,6 +182,24 @@ Additional clean-environment verification was run in a container without a
 
 ## Commands
 
+Install with LuaRocks:
+
+```sh
+luarocks install luainstaller
+```
+
+Install from source when LuaRocks is unavailable:
+
+```sh
+sh tools/install-source.sh --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+luai --help
+```
+
+The source installer copies the Lua modules into the selected prefix and writes
+a `luai` wrapper that sets `LUA_PATH` before invoking Lua. It does not install
+native Lua modules, Lua headers, or compiler metadata.
+
 Build a bundle:
 
 ```sh
@@ -226,6 +244,9 @@ Current limitations are explicit:
   modules when unresolved.
 - The generated launcher uses a shared Lua profile. Static Lua linking is still
   roadmap work.
+- The source installer is not a replacement for the build toolchain. Hosts
+  without Lua headers or Lua `pkg-config` metadata can run analysis but cannot
+  compile the C launcher.
 - Windows and macOS output are not implemented in this stage.
 
 ## Onefile Direction
