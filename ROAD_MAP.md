@@ -315,7 +315,7 @@ Rules:
 - [x] Build output directory with executable plus `.luai/`.
 - [ ] Copy Lua payload according to manifest.
 - [x] Copy native modules to `.luai/native/`.
-- [ ] Copy `lua55.dll` or platform Lua shared library when needed.
+- [x] Copy `lua55.dll` or platform Lua shared library when needed.
 - [x] Write `.luai/manifest.lua`.
 - [x] Prepend `.luai/native` patterns to `package.cpath`.
 

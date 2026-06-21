@@ -50,6 +50,16 @@ local function command_ok(command)
     return ok == true or ok == 0
 end
 
+local function command_output(command)
+    local pipe = assert(io.popen(command .. " 2>&1", "r"))
+    local out = pipe:read("*a") or ""
+    local ok = pipe:close()
+    if not ok then
+        error("command failed: " .. command .. "\n" .. out, 2)
+    end
+    return out
+end
+
 local function remove_file(path)
     os.remove(path)
 end
@@ -502,6 +512,13 @@ assert_bundle({
     }, " ")
 
     run(env .. " lua -e " .. shell_quote(script))
+
+    local runtime_liblua = run("find " .. shell_quote(runtime_out .. "/.luai/native") .. " -maxdepth 1 -type f -name 'liblua*.so*' | sort")
+    assert_contains(runtime_liblua, "liblua")
+    if command_ok("readelf --version") then
+        local dynamic = command_output("readelf -d " .. shell_quote(runtime_out .. "/runtime"))
+        assert_contains(dynamic, "$ORIGIN/.luai/native")
+    end
 
     assert_contains(run(shell_quote(runtime_out .. "/runtime") .. " onedir"), "hello onedir")
 

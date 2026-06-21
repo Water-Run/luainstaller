@@ -85,8 +85,8 @@ success.
 .fi
 
 \fBluai\fR performs static dependency analysis starting from the entry \fB.lua\fR file, embeds
-Lua sources in a generated launcher, copies detected native Lua C modules into
-\fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
+Lua sources in a generated launcher, copies the linked Lua shared runtime and detected native
+Lua C modules into \fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
 
 Single-file mode is planned:
 .nf
@@ -259,8 +259,8 @@ false positives can be removed via \fB--exclude\fR.
 
 Once the dependency set is determined, the Linux onedir bundler generates C source containing
 the Lua bootstrap and embedded Lua payload, compiles it with the local shared-Lua toolchain,
-copies detected native Lua C modules into \fB.luai/native/\fR, and writes
-\fB.luai/manifest.lua\fR.
+copies the linked Lua shared runtime plus detected native Lua C modules into
+\fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
 
 The first-stage compatibility promise is same OS, same architecture, same ABI, and same Lua
 ABI. The current implementation does not claim cross-platform output, automatic external

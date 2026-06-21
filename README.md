@@ -119,9 +119,10 @@ The current workflow is: **analyze entry script → collect dependencies → tra
 resolution decisions → build a Linux onedir bundle**.
 
 Linux `--onedir` output is implemented. It generates a shared-Lua launcher,
-writes `.luai/manifest.lua`, embeds Lua payloads in the launcher, and copies
-detected native Lua C modules into `.luai/native/`. The compatibility boundary
-is same OS, same architecture, same ABI, and same Lua ABI.
+writes `.luai/manifest.lua`, embeds Lua payloads in the launcher, copies the
+linked Lua shared runtime into `.luai/native/`, and copies detected native Lua C
+modules into `.luai/native/`. The compatibility boundary is same OS, same
+architecture, same ABI, and same Lua ABI.
 
 `--onefile` payloads, cross-platform bundle output, and automatic external
 shared-library dependency closure are still roadmap work.
@@ -148,7 +149,7 @@ The overall process can be summarized as:
 [Collect Lua files / manual --include / --exclude]
      |
      v
-[Generate C launcher / copy native modules / write manifest]
+[Generate C launcher / copy Lua runtime and native modules / write manifest]
      |
      v
 [Linux onedir bundle]

@@ -19,6 +19,8 @@ In scope:
 - Implement Linux `--onedir` bundle output.
 - Generate a launcher executable from the existing C launcher generator.
 - Embed Lua sources in the launcher through the existing Lua bootstrap path.
+- Copy the linked Lua shared runtime into `.luai/native/` so the bundle does
+  not require a separate `lua` installation in same-ABI environments.
 - Copy detected native Lua C modules into `.luai/native/`.
 - Write `.luai/manifest.lua`.
 - Make bundled programs prefer `.luai/native/` through `package.cpath`.
@@ -55,9 +57,12 @@ The bundler reuses the pieces already implemented in earlier milestones:
    as `savinglua.store` load correctly.
 3. Generate C source with a bootstrap that prepends `.luai/native/?.so` and
    `.luai/native/?/init.so` to `package.cpath`.
-4. Compile the launcher with `cc` and `pkg-config --cflags --libs lua`.
-5. Copy native Lua C modules into `.luai/native/`, preserving the basename.
-6. Serialize the manifest as Lua table data to `.luai/manifest.lua`.
+4. Compile the launcher with `cc`, `pkg-config --cflags --libs lua`, and an
+   `$ORIGIN/.luai/native` runtime library search path.
+5. Copy the linked Lua shared runtime into `.luai/native/`.
+6. Copy native Lua C modules into `.luai/native/`, preserving the basename and
+   trace-derived module path when needed.
+7. Serialize the manifest as Lua table data to `.luai/manifest.lua`.
 
 The first implementation keeps copied native modules flat by basename. This is
 enough for the current Linux sample set because the runtime cpath prepends

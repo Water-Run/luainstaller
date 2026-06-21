@@ -172,6 +172,35 @@ local function copyFile(source, destination)
     return nil
 end
 
+local function findLinkedLuaRuntime(exe_path)
+    local ok, output = commandOutput("ldd " .. shellQuote(exe_path))
+    if not ok then
+        return nil, output
+    end
+    for line in output:gmatch("[^\n]+") do
+        local name, path = line:match("^%s*(liblua[^%s]*)%s+=>%s+([^%s]+)")
+        if name and path and path ~= "not" then
+            return path, name
+        end
+        path = line:match("^%s*(/[^%s]*liblua[^%s]*)")
+        if path then
+            return path, basename(path)
+        end
+    end
+    return nil, output
+end
+
+local function copyLuaRuntime(exe_path, native_dir)
+    local lua_path, lua_name = findLinkedLuaRuntime(exe_path)
+    if not lua_path then
+        return makeError("LuaRuntimeNotFoundError", "Cannot locate linked Lua shared library", {
+            executable = exe_path,
+            output = lua_name,
+        })
+    end
+    return copyFile(lua_path, normalizePath(native_dir .. "/" .. lua_name))
+end
+
 local function sortedKeys(tbl)
     local keys = {}
     for key in pairs(tbl) do
@@ -388,6 +417,7 @@ function M.bundleOnedir(opts)
         shellQuote(c_path),
         "-o",
         shellQuote(exe_path),
+        "-Wl,-rpath," .. shellQuote("$ORIGIN/.luai/native"),
         cleaned_pkg_flags,
     }, " ")
     local compile_ok, compile_output = commandOutput(compile_cmd)
@@ -399,6 +429,11 @@ function M.bundleOnedir(opts)
     end
 
     commandOutput("chmod +x " .. shellQuote(exe_path))
+
+    err = copyLuaRuntime(exe_path, native_dir)
+    if err then
+        return err
+    end
 
     return {
         ok = true,

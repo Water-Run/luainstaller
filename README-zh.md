@@ -117,9 +117,9 @@ end
 onedir 目录包**。
 
 Linux `--onedir` 输出已经实现。它会生成 shared-Lua launcher，写入
-`.luai/manifest.lua`，将 Lua payload 嵌入 launcher，并把检测到的 native Lua
-C 模块复制到 `.luai/native/`。兼容性边界是相同 OS、相同架构、相同 ABI 和
-相同 Lua ABI。
+`.luai/manifest.lua`，将 Lua payload 嵌入 launcher，把链接到的 Lua shared
+runtime 复制到 `.luai/native/`，并把检测到的 native Lua C 模块复制到
+`.luai/native/`。兼容性边界是相同 OS、相同架构、相同 ABI 和相同 Lua ABI。
 
 `--onefile` payload、跨平台打包输出和自动外部 shared library 依赖闭包仍是
 路线图中的后续工作。
@@ -144,7 +144,7 @@ Linux onedir bundler 用来生成输出目录可执行程序的构建基础。
 [收集 Lua 文件 / 手动 include / 排除 exclude]
      |
      v
-[生成 C launcher / 复制 native 模块 / 写入 manifest]
+[生成 C launcher / 复制 Lua runtime 和 native 模块 / 写入 manifest]
      |
      v
 [Linux onedir 目录包]
