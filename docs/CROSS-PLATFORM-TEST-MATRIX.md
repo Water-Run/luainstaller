@@ -96,7 +96,7 @@ runtime symbol exports.
 Windows with MinGW-built Lua and native DLLs:
 
 ```sh
-sh tools/remote-test-windows.sh
+WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ```
 
 The script builds Lua 5.4.8 for Windows with MinGW, cross-compiles `cjson`,
@@ -104,6 +104,7 @@ The script builds Lua 5.4.8 for Windows with MinGW, cross-compiles `cjson`,
 LuaSocket Lua modules, and `mimetypes`, then builds and verifies all selected
 Windows `--onedir` bundles plus pure Lua and `student_management_system`
 `--onefile` bundles under Wine and on `192.168.69.130`.
+Set `SSH_OPTS` to override the default lab automation SSH options.
 
 ## Remaining Work
 
@@ -111,5 +112,3 @@ Windows `--onedir` bundles plus pure Lua and `student_management_system`
   to run the CLI directly on Windows instead of cross-building from Linux.
 - Add general external DLL dependency closure for native modules beyond the
   explicitly built test set.
-- Add CI or lab automation that can rerun this matrix without manually managed
-  SSH hosts.

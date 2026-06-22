@@ -90,6 +90,11 @@ local function basename(path)
     return path:match("[^/]+$") or path
 end
 
+local function dirname(path)
+    path = normalizePath(path)
+    return path:match("^(.+)/[^/]+$") or "."
+end
+
 local function readFile(path)
     local handle = io.open(path, "rb")
     if not handle then
@@ -115,6 +120,27 @@ local function fileHash(path)
         return nil
     end
     return fnv1a32(content)
+end
+
+local function relativePathUnder(path, base)
+    path = normalizePath(path)
+    base = normalizePath(base)
+    local prefix = base == "/" and "/" or (base .. "/")
+    if path:sub(1, #prefix) == prefix then
+        return path:sub(#prefix + 1)
+    end
+    return nil
+end
+
+local function safeExternalPath(path)
+    path = normalizePath(path)
+    path = path:gsub("^/", "")
+    path = path:gsub(":", "")
+    path = path:gsub("[^%w%._%-%/]", "_")
+    if path == "" then
+        return basename(path)
+    end
+    return normalizePath("external/" .. path)
 end
 
 local function luaInfo()
@@ -149,18 +175,27 @@ local function platformInfo()
     }
 end
 
-local function fileEntry(path, destination_root)
+local function fileEntry(path, destination_root, entry_dir, preserve_relative)
     local source = absolutePath(path)
+    local relative
+    if preserve_relative then
+        relative = entry_dir and relativePathUnder(source, entry_dir) or nil
+        if not relative then
+            relative = safeExternalPath(source)
+        end
+    else
+        relative = basename(source)
+    end
     return {
         source_path = source,
-        destination_path = normalizePath(destination_root .. "/" .. basename(source)),
+        destination_path = normalizePath(destination_root .. "/" .. relative),
         content_hash = fileHash(source),
     }
 end
 
-local function appendFileEntries(target, paths, destination_root)
+local function appendFileEntries(target, paths, destination_root, entry_dir, preserve_relative)
     for _, path in ipairs(paths or {}) do
-        target[#target + 1] = fileEntry(path, destination_root)
+        target[#target + 1] = fileEntry(path, destination_root, entry_dir, preserve_relative)
     end
 end
 
@@ -196,6 +231,7 @@ function M.build(opts)
     opts = opts or {}
     local dependencies = opts.dependencies or { scripts = {}, libraries = {} }
     local entry_path = absolutePath(opts.entry)
+    local entry_dir = dirname(entry_path)
     local manifest = {
         version = 1,
         hash_algorithm = HASH_ALGORITHM,
@@ -232,8 +268,8 @@ function M.build(opts)
         },
     }
 
-    appendFileEntries(manifest.modules.lua, dependencies.scripts, ".luai/lua")
-    appendFileEntries(manifest.modules.native, dependencies.libraries, ".luai/native")
+    appendFileEntries(manifest.modules.lua, dependencies.scripts, ".luai/lua", entry_dir, true)
+    appendFileEntries(manifest.modules.native, dependencies.libraries, ".luai/native", entry_dir, false)
 
     local duplicate = checkDuplicateDestinations(manifest)
     if duplicate then

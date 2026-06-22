@@ -2,7 +2,7 @@
 set -eu
 
 WINDOWS_HOST=${WINDOWS_HOST:-"WaterRun@192.168.69.130"}
-WINDOWS_PASSWORD=${WINDOWS_PASSWORD:-"2288"}
+SSH_OPTS=${SSH_OPTS:-"-o StrictHostKeyChecking=no"}
 REMOTE_TEMP=${REMOTE_TEMP:-"C:/Users/WaterRun/AppData/Local/Temp"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
 WIN_PREFIX=${WIN_PREFIX:-"/tmp/luainstaller-win-lua"}
@@ -20,6 +20,15 @@ need_cmd() {
         echo "missing command: $1" >&2
         exit 1
     }
+}
+
+require_env() {
+    name=$1
+    eval "value=\${$name:-}"
+    if [ -z "$value" ]; then
+        echo "missing required environment variable: $name" >&2
+        exit 1
+    fi
 }
 
 stage_source() {
@@ -182,7 +191,7 @@ build_bundles() {
 }
 
 verify_with_wine() {
-    rm -f /tmp/luainstaller-win-students.json /tmp/luainstaller-win-savinglua.sqlite3
+    rm -f /tmp/luainstaller-win-students.json /tmp/luainstaller-win-students-onefile.json /tmp/luainstaller-win-savinglua.sqlite3
     wine "$WIN_OUT/runtime/runtime.exe" wine-clean | grep "hello wine-clean"
     wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json seed | grep "Seeded 8 students"
     wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json list --sort average | grep "Ada Lovelace"
@@ -295,9 +304,9 @@ try {
 
 Write-Output 'windows remote bundles ok'
 PS1
-    sshpass -p "$WINDOWS_PASSWORD" scp -o StrictHostKeyChecking=no "$archive" "$WINDOWS_HOST:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
-    sshpass -p "$WINDOWS_PASSWORD" scp -o StrictHostKeyChecking=no "$runner" "$WINDOWS_HOST:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
-    sshpass -p "$WINDOWS_PASSWORD" ssh -o StrictHostKeyChecking=no "$WINDOWS_HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\WaterRun\\AppData\\Local\\Temp\\luainstaller-run-windows-bundles.ps1"
+    SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$archive" "$WINDOWS_HOST:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
+    SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$runner" "$WINDOWS_HOST:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
+    SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh $SSH_OPTS "$WINDOWS_HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\WaterRun\\AppData\\Local\\Temp\\luainstaller-run-windows-bundles.ps1"
 }
 
 need_cmd curl
@@ -308,6 +317,7 @@ need_cmd sshpass
 need_cmd x86_64-w64-mingw32-gcc
 need_cmd x86_64-w64-mingw32-ar
 need_cmd x86_64-w64-mingw32-ranlib
+require_env WINDOWS_PASSWORD
 
 stage_source "$LUA_TARBALL" "https://www.lua.org/ftp/$LUA_TARBALL"
 stage_source "$LSQLITE3_ZIP" 'https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6'

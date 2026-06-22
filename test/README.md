@@ -61,8 +61,11 @@ environment. Remote scripts extend the same coverage to macOS and Windows:
 ```sh
 sh tools/remote-test-linux.sh
 sh tools/remote-test-macos.sh
-sh tools/remote-test-windows.sh
+WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ```
+
+The Windows script requires `WINDOWS_PASSWORD` in the environment and accepts
+`SSH_OPTS` when the default lab SSH options need to be overridden.
 
 The source-install checks also verify deployment when LuaRocks is unavailable.
 

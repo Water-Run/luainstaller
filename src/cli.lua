@@ -128,7 +128,7 @@ Options:
 
 Compatibility commands:
   logs [options]        View operation logs
-  engines               List legacy engine names
+  engines               List legacy engine names kept for compatibility
   analyze <entry.lua>   Compatibility alias for -a
   build <entry.lua>     Compatibility alias for -c
 
@@ -382,7 +382,21 @@ local function printStructuredError(result)
     printError(string.format("%s: %s", err_type, message))
 end
 
-local function renderDependencySummary(result)
+local function renderVerboseTrace(result)
+    io.write(string.format("trace records: %d\n", #(result.trace or {})))
+    for i, item in ipairs(result.trace or {}) do
+        io.write(string.format(
+            "  trace %d: %s %s%s%s\n",
+            i,
+            item.requested or "(unknown)",
+            item.reason or "unknown",
+            item.selected_path and " -> " or "",
+            item.selected_path or ""
+        ))
+    end
+end
+
+local function renderDependencySummary(result, verbose)
     local deps = result.dependencies or { scripts = {}, libraries = {} }
     io.write("success.\n")
     io.write(string.format("%s\n", result.entry))
@@ -392,6 +406,9 @@ local function renderDependencySummary(result)
     end
     for i, path in ipairs(deps.libraries) do
         io.write(string.format("  library %d: %s\n", i, path))
+    end
+    if verbose then
+        renderVerboseTrace(result)
     end
 end
 
@@ -432,7 +449,7 @@ local function cmdAction(parser, action, first_entry)
     if action == "analyze" then
         result = luainstaller.analyze(opts)
         if result.ok then
-            renderDependencySummary(result)
+            renderDependencySummary(result, opts.verbose)
             return 0
         end
     elseif action == "trace" then
@@ -447,6 +464,13 @@ local function cmdAction(parser, action, first_entry)
             io.write("success.\n")
             if result.executable then
                 io.write(string.format("%s\n", result.executable))
+            end
+            if opts.verbose then
+                local manifest = result.manifest or {}
+                local modules = manifest.modules or {}
+                io.write(string.format("mode: %s\n", result.mode or opts.mode or "unknown"))
+                io.write(string.format("lua modules: %d\n", #(modules.lua or {})))
+                io.write(string.format("native modules: %d\n", #(modules.native or {})))
             end
             return 0
         end
@@ -465,7 +489,8 @@ end
 --@local: true
 --@return: number - Exit code
 local function cmdEngines()
-    io.write("Supported engines:\n")
+    io.write("Legacy engine names:\n")
+    io.write("  current bundler ignores -engine; use --require-engine for dependency discovery\n")
     io.write(string.rep("=", 50) .. "\n")
 
     local engine_list = {

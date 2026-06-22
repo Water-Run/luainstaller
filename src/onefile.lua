@@ -145,6 +145,11 @@ local function removeTree(path)
     return nil
 end
 
+local function removeFile(path)
+    os.remove(path)
+    return nil
+end
+
 local function writeFile(path, content)
     local err = ensureDirectory(dirname(path))
     if err then
@@ -211,6 +216,21 @@ local function unsafeOutputError(path)
     })
 end
 
+local function pathExists(path)
+    local ok = commandOutput("test -e " .. shellQuote(path))
+    return ok == true
+end
+
+local function directoryExists(path)
+    local ok = commandOutput("test -d " .. shellQuote(path))
+    return ok == true
+end
+
+local function isSymlink(path)
+    local ok = commandOutput("test -L " .. shellQuote(path))
+    return ok == true
+end
+
 local function validateOutputPath(path)
     local normalized = normalizePath(path)
     if normalized == "/" or normalized == "." or normalized == "" then
@@ -218,6 +238,14 @@ local function validateOutputPath(path)
     end
     if normalized == currentDirectory() then
         return unsafeOutputError(path)
+    end
+    if isSymlink(normalized) then
+        return unsafeOutputError(path)
+    end
+    if pathExists(normalized) and directoryExists(normalized) then
+        return makeError("InvalidOutputError", "Onefile output path is an existing directory: " .. tostring(path), {
+            path = path,
+        })
     end
     return nil
 end
@@ -363,6 +391,34 @@ static int luai_file_matches_hash(const char *path, size_t expected_size, const 
     return strcmp(actual, expected_hash) == 0;
 }
 
+static int luai_remove_unsafe_existing(const char *path) {
+#ifdef _WIN32
+    DWORD attrs = GetFileAttributesA(path);
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+            return RemoveDirectoryA(path) ? 0 : -1;
+        }
+        return DeleteFileA(path) ? 0 : -1;
+    }
+#else
+    struct stat st;
+    if (lstat(path, &st) == 0 && S_ISLNK(st.st_mode)) {
+        return unlink(path);
+    }
+#endif
+    return 0;
+}
+
+static int luai_apply_mode(const char *path, int executable) {
+#ifndef _WIN32
+    if (executable && chmod(path, 0700) != 0) return -1;
+#else
+    (void)path;
+    (void)executable;
+#endif
+    return 0;
+}
+
 static int luai_join(char *out, size_t out_size, const char *left, const char *right) {
     int n = snprintf(out, out_size, "%s%s%s", left, L_SEP, right);
     return n >= 0 && (size_t)n < out_size ? 0 : -1;
@@ -371,7 +427,8 @@ static int luai_join(char *out, size_t out_size, const char *left, const char *r
 static int luai_write_file(const char *path, const unsigned char *data, size_t size, int executable, const char *hash) {
     char parent[4096];
     FILE *file;
-    if (luai_file_matches_hash(path, size, hash)) return 0;
+    if (luai_remove_unsafe_existing(path) != 0) return -1;
+    if (luai_file_matches_hash(path, size, hash)) return luai_apply_mode(path, executable);
     if (luai_parent_dir(parent, sizeof(parent), path) != 0) return -1;
     if (luai_mkdir_p(parent) != 0) return -1;
     file = fopen(path, "wb");
@@ -381,12 +438,7 @@ static int luai_write_file(const char *path, const unsigned char *data, size_t s
         return -1;
     }
     if (fclose(file) != 0) return -1;
-#ifndef _WIN32
-    if (executable) chmod(path, 0700);
-#else
-    (void)executable;
-#endif
-    return 0;
+    return luai_apply_mode(path, executable);
 }
 
 static const char *luai_temp_root(void) {
@@ -613,7 +665,7 @@ function M.bundleOnefile(opts)
     end
 
     err = ensureDirectory(dirname(out_path))
-        or removeTree(out_path)
+        or removeFile(out_path)
         or compileExtractor(c_path, out_path, profile)
     removeTree(build_dir)
     removeTree(dirname(stage_dir))

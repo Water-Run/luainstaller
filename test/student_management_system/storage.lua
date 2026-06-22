@@ -24,6 +24,16 @@ local function empty_data()
     }
 end
 
+local function replacement_backup_path(path)
+    for i = 1, 1000 do
+        local candidate = string.format("%s.replace-backup-%d", path, i)
+        if not utils.file_exists(candidate) then
+            return candidate
+        end
+    end
+    return path .. ".replace-backup"
+end
+
 -- @description: Load JSON data from disk.
 -- @param path: string - JSON file path.
 -- @return: table - Data document.
@@ -56,6 +66,33 @@ function M.save(path, data)
     local tmp = path .. ".tmp"
     utils.write_file(tmp, content .. "\n")
     local ok, err = os.rename(tmp, path)
+    if not ok and utils.file_exists(path) then
+        local backup = replacement_backup_path(path)
+        local backup_ok, backup_err = os.rename(path, backup)
+        if not backup_ok then
+            os.remove(tmp)
+            error("failed to prepare storage replacement: " .. tostring(backup_err))
+        end
+        ok, err = os.rename(tmp, path)
+        if ok then
+            os.remove(backup)
+            return
+        end
+        local restore_ok, restore_err = os.rename(backup, path)
+        if not restore_ok then
+            local original = utils.read_file(backup)
+            if original then
+                utils.write_file(path, original)
+                os.remove(backup)
+                restore_ok = true
+            end
+        end
+        os.remove(tmp)
+        if not restore_ok then
+            error("failed to replace storage file: " .. tostring(err) .. "; failed to restore original: " .. tostring(restore_err))
+        end
+        error("failed to replace storage file: " .. tostring(err))
+    end
     if not ok then
         os.remove(tmp)
         error("failed to replace storage file: " .. tostring(err))

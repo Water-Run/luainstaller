@@ -186,7 +186,7 @@ function M.clearLogs()
     return logger.clearLogs()
 end
 
---@description: Return the names of all supported compilation engines
+--@description: Return legacy compilation engine names kept for compatibility
 --@return: table - List of engine name strings
 --@usage: local engines = luainstaller.getEngines()
 function M.getEngines()

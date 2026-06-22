@@ -52,9 +52,79 @@ local function write_file(path, content)
     file:close()
 end
 
+local function check_windows_replace_semantics()
+    package.path = ROOT .. "/?.lua;" .. package.path
+    local storage = require("storage")
+    local path = os.tmpname() .. ".windows-replace.json"
+    write_file(path, '{"version":1,"next_id":1,"students":[]}\n')
+
+    local original_rename = os.rename
+    os.rename = function(src, dst)
+        if dst == path then
+            local existing = io.open(dst, "rb")
+            if existing then
+                existing:close()
+                return nil, "File exists"
+            end
+        end
+        return original_rename(src, dst)
+    end
+
+    local ok, err = pcall(function()
+        storage.save(path, {
+            version = 1,
+            next_id = 2,
+            students = {
+                { id = 1, name = "Ada Lovelace" },
+            },
+        })
+    end)
+    os.rename = original_rename
+    os.remove(path)
+    os.remove(path .. ".tmp")
+    if not ok then
+        error(err, 2)
+    end
+
+    write_file(path, '{"version":1,"next_id":1,"students":[]}\n')
+    local calls = 0
+    os.rename = function(src, dst)
+        if src == path .. ".tmp" and dst == path then
+            calls = calls + 1
+            return nil, calls == 1 and "File exists" or "replacement failed"
+        end
+        return original_rename(src, dst)
+    end
+    local replace_ok = pcall(function()
+        storage.save(path, {
+            version = 1,
+            next_id = 3,
+            students = {
+                { id = 2, name = "Grace Hopper" },
+            },
+        })
+    end)
+    os.rename = original_rename
+    local file = io.open(path, "rb")
+    local preserved = file and (file:read("*a") or "") or nil
+    if file then
+        file:close()
+    end
+    os.remove(path)
+    os.remove(path .. ".tmp")
+    if replace_ok then
+        error("forced replacement failure should not succeed", 2)
+    end
+    if preserved ~= '{"version":1,"next_id":1,"students":[]}\n' then
+        error("failed replacement must preserve the original storage file", 2)
+    end
+end
+
 os.remove(DATA)
 os.remove(EXPORT)
 os.remove(IMPORT)
+
+check_windows_replace_semantics()
 
 assert_contains(run("seed"), "Seeded 8 students")
 assert_contains(run("list --sort average"), "Ada Lovelace")
