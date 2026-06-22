@@ -34,7 +34,7 @@ focuses on the Linux shared-Lua onedir implementation.
 For:
 
 ```sh
-luai -c --onedir test/savinglua/main.lua -o dist/savinglua
+luai b --dir test/savinglua/main.lua -o dist/savinglua
 ```
 
 the output layout is:
@@ -201,16 +201,18 @@ Install from source when LuaRocks is unavailable:
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 luai --help
+luainstaller -v
 ```
 
-The source installer copies the Lua modules into the selected prefix and writes
-a `luai` wrapper that sets `LUA_PATH` before invoking Lua. It does not install
-native Lua modules, Lua headers, or compiler metadata.
+The source installer copies the Lua modules into the selected prefix, writes
+`luai` and `luainstaller` wrappers that set `LUA_PATH` before invoking Lua, and
+installs `luai(1)` / `luainstaller(1)` man pages. It does not install native Lua
+modules, Lua headers, or compiler metadata.
 
 Build a bundle:
 
 ```sh
-luai -c --onedir test/savinglua/main.lua -o /tmp/savinglua-bundle --max-deps 250
+luai b --dir test/savinglua/main.lua -o /tmp/savinglua-bundle --max-deps 250
 ```
 
 Run it:
@@ -249,8 +251,8 @@ Current limitations are explicit:
 - Bundles are not cross-distribution artifacts. The tested promise is same OS,
   architecture, ABI, Lua ABI, and compatible system libraries.
 - Dynamic `require(variable)` is rejected by the static analyzer. Use
-  `--require-engine runtime` for path-sensitive build-time tracing, or
-  `--include` / `--require-engine manual` for dependencies that need explicit
+  `-r runtime` for path-sensitive build-time tracing, or
+  `--include` / `-r manual` for dependencies that need explicit
   control.
 - Optional probes through `pcall(require, "...")` are traced as optional missing
   modules when unresolved.

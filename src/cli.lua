@@ -92,45 +92,50 @@ local DEFAULT_MAX_DEPS = 36
 --@description: Full help text displayed by the help command
 --@const: HELP_MESSAGE
 local HELP_MESSAGE = string.format([=[
-luai - Package Lua projects into same-environment executables
+luai / luainstaller - Package Lua projects into same-environment executables
 
 Usage:
     luai --help
     luai --version
-    luai -a <entry.lua> [options]
-    luai -t <entry.lua> [options]
-    luai -c <entry.lua> [options]
+    luai a <entry.lua> [options]
+    luai t <entry.lua> [options]
+    luai b <entry.lua> [options]
+
+Command names:
+  luai, luainstaller
 
 Actions:
 
-  -a <entry.lua>
+  a <entry.lua>
       Analyze dependencies.
 
-  -t <entry.lua>
+  t <entry.lua>
       Trace dependency resolution decisions.
 
-  -c <entry.lua>
-      Build a bundle. --onedir is the default output mode; --onefile builds a
+  b <entry.lua>
+      Build a bundle. --dir is the default output mode; --file builds a
       self-extracting executable.
 
 Options:
-  --onedir              Select directory bundle mode (default)
-  --onefile             Select self-extracting single-file bundle mode
+  --dir, --onedir       Select directory bundle mode (default)
+  --file, --onefile     Select self-extracting single-file bundle mode
   -o, --out <path>      Output path for bundle actions
   --include <path>      Include an extra Lua file; repeatable
   --exclude <path>      Exclude a dependency by path or basename; repeatable
   --target-os <os>      Target profile: linux, macos, or windows
   --lua-prefix <path>   Lua prefix for targets that require one
-  --require-engine <e>  Dependency engine: static, manual, or runtime
+  -r, --require-engine <e>
+                        Dependency engine: static, manual, or runtime
   --no-depscan          Disable automatic dependency scanning
   --max-deps <n>        Maximum dependency count (default: 36)
   --verbose             Print more detail
 
 Compatibility commands:
-  logs [options]        View operation logs
-  engines               List legacy engine names kept for compatibility
-  analyze <entry.lua>   Compatibility alias for -a
-  build <entry.lua>     Compatibility alias for -c
+  -a, analyze <entry.lua>  Compatibility alias for a
+  -t, trace <entry.lua>    Compatibility alias for t
+  -c, build <entry.lua>    Compatibility alias for b
+  logs [options]           View operation logs
+  engines                  List legacy engine names kept for compatibility
 
 Compatibility:
   The first runtime promise is same OS, same architecture, same ABI, and same
@@ -265,8 +270,7 @@ end
 --@description: Print the version banner to stdout
 --@local: true
 local function printVersion()
-    io.write(string.format("luainstaller by WaterRun. Version %s.\n", VERSION))
-    io.write(string.format("Visit: %s :-)\n", PROJECT_URL))
+    io.write(string.format("luainstaller %s  LGPL 3.0 by WaterRun\n", VERSION))
 end
 
 
@@ -319,9 +323,9 @@ local function parseActionOptions(parser, action, first_entry)
 
     while parser:hasNext() do
         local arg = parser:consume()
-        if arg == "--onedir" then
+        if arg == "--dir" or arg == "--onedir" then
             opts.mode = "onedir"
-        elseif arg == "--onefile" then
+        elseif arg == "--file" or arg == "--onefile" then
             opts.mode = "onefile"
         elseif arg == "-o" or arg == "--out" or arg == "-output" then
             opts.out = parser:consumeValue(arg)
@@ -333,7 +337,7 @@ local function parseActionOptions(parser, action, first_entry)
             opts.target_os = parser:consumeValue(arg)
         elseif arg == "--lua-prefix" then
             opts.lua_prefix = parser:consumeValue(arg)
-        elseif arg == "--require-engine" then
+        elseif arg == "-r" or arg == "--require-engine" then
             opts.require_engine = parser:consumeValue(arg)
         elseif arg == "--no-depscan" or arg == "--manual" then
             opts.depscan = false
@@ -360,7 +364,7 @@ local function parseActionOptions(parser, action, first_entry)
                 end
             end
         elseif arg == "-engine" then
-            opts.engine = parser:consumeValue(arg)
+            opts.require_engine = parser:consumeValue(arg)
         elseif not opts.entry and arg:sub(1, 1) ~= "-" then
             opts.entry = arg
         else
@@ -618,33 +622,33 @@ function M.main(args)
 
     local command = parser:consume()
 
-    if command == "help" or command == "-h" or command == "--help" then
+    if command == "h" or command == "help" or command == "-h" or command == "--help" then
         printHelp()
         return 0
     end
 
-    if command == "version" or command == "-v" or command == "--version" then
+    if command == "v" or command == "version" or command == "-v" or command == "--version" then
         printVersion()
         return 0
     end
 
-    if command == "engines" then
+    if command == "eng" or command == "engines" then
         return cmdEngines()
     end
 
-    if command == "logs" then
+    if command == "log" or command == "logs" then
         return cmdLogs(parser)
     end
 
-    if command == "-a" then
+    if command == "a" or command == "-a" then
         return cmdAction(parser, "analyze")
     end
 
-    if command == "-t" then
+    if command == "t" or command == "-t" or command == "trace" then
         return cmdAction(parser, "trace")
     end
 
-    if command == "-c" then
+    if command == "b" or command == "-b" or command == "-c" then
         return cmdAction(parser, "bundle")
     end
 
@@ -652,7 +656,7 @@ function M.main(args)
         return cmdAction(parser, "analyze")
     end
 
-    if command == "build" then
+    if command == "bundle" or command == "build" or command == "pack" then
         return cmdAction(parser, "bundle")
     end
 

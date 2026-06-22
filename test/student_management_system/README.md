@@ -100,9 +100,9 @@ find test/student_management_system -maxdepth 1 -name '*.lua' -print0 | xargs -0
 Future packaging targets:
 
 ```sh
-luai -a test/student_management_system/main.lua
-luai -t test/student_management_system/main.lua
-luai -c test/student_management_system/main.lua -o build/student-manager
+luai a test/student_management_system/main.lua
+luai t test/student_management_system/main.lua
+luai b test/student_management_system/main.lua -o build/student-manager
 ```
 
 Expected dependency behavior:

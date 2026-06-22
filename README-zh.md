@@ -27,13 +27,15 @@ luarocks install luainstaller
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 luai --help
+luainstaller -v
 ```
 
-源码安装器只要求存在 `lua` 命令。构建 `--onedir` 或 `--onefile` 包仍需要本机 C
-工具链和 Lua 开发元数据。Linux 使用 `cc`、Lua headers 以及 Lua 的
-`pkg-config` 数据；macOS 使用 `cc` 以及包含 Lua headers 和 `liblua.a` 的
-匹配 Lua prefix；Windows 由 Linux 主机通过 MinGW 构建，并使用包含 Lua
-headers 与 `lua54.dll` 的 Windows Lua prefix。
+源码安装器只要求存在 `lua` 命令，并会安装两个 CLI 名称以及 `luai(1)` 和
+`luainstaller(1)` man page。构建 `--onedir` 或 `--onefile` 包仍需要本机 C 工具链和
+Lua 开发元数据。Linux 使用 `cc`、Lua headers 以及 Lua 的 `pkg-config` 数据；
+macOS 使用 `cc` 以及包含 Lua headers 和 `liblua.a` 的匹配 Lua prefix；Windows 由
+Linux 主机通过 MinGW 构建，并使用包含 Lua headers 与 `lua54.dll` 的 Windows Lua
+prefix。
 
 ---
 
@@ -45,36 +47,39 @@ headers 与 `lua54.dll` 的 Windows Lua prefix。
 
 ### 命令行工具（CLI）
 
-CLI 命令名称：`luai`。
+CLI 命令名称：`luai` 与 `luainstaller`。
 
 ```bash
 luai --help
-luai -a test/student_management_system/main.lua
-luai -t test/student_management_system/main.lua
-luai -c --onedir test/student_management_system/main.lua -o build/student-manager
-luai -c --onefile test/runtime_bundle/main.lua -o build/runtime-onefile
+luai a test/student_management_system/main.lua
+luai t test/student_management_system/main.lua
+luai b --dir test/student_management_system/main.lua -o build/student-manager
+luai b --file test/runtime_bundle/main.lua -o build/runtime-onefile
+luainstaller -v
 ```
 
 当前命令状态：
 
 | 命令 | 状态 | 说明 |
 |------|------|------|
-| `luai -a <entry.lua>` | 已实现 | 分析 Lua 与 native 模块依赖。 |
-| `luai -t <entry.lua>` | 已实现 | 输出 analyzer trace 记录，以及相同 OS、架构、ABI 和 Lua ABI 边界的兼容性诊断。 |
-| `luai -c <entry.lua>` | 已在所选样例矩阵中实现并验证 Linux、macOS 和 Windows `--onedir` 与 `--onefile` | 构建目录包或自解压单文件包，包含 launcher、manifest、嵌入的 Lua payload 和复制的 native Lua C 模块。 |
+| `luai a <entry.lua>` | 已实现 | 分析 Lua 与 native 模块依赖。 |
+| `luai t <entry.lua>` | 已实现 | 输出 analyzer trace 记录，以及相同 OS、架构、ABI 和 Lua ABI 边界的兼容性诊断。 |
+| `luai b <entry.lua>` | 已在所选样例矩阵中实现并验证 Linux、macOS 和 Windows `--dir` 与 `--file` | 构建目录包或自解压单文件包，包含 launcher、manifest、嵌入的 Lua payload 和复制的 native Lua C 模块。 |
+
+旧脚本仍可继续使用兼容别名：`-a`/`analyze`、`-t`/`trace`、`-c`/`build`。
 
 常用选项：
 
 | 参数 | 说明 |
 |------|------|
-| `--onedir` | 目录打包模式，当前默认输出模式。 |
-| `--onefile` | 自解压单文件模式。 |
+| `--dir, --onedir` | 目录打包模式，当前默认输出模式。 |
+| `--file, --onefile` | 自解压单文件模式。 |
 | `-o, --out <path>` | 打包动作输出路径。 |
 | `--include <path>` | 手动追加依赖，可重复。 |
 | `--exclude <path>` | 按路径或文件名排除依赖，可重复。 |
 | `--target-os <os>` | 选择目标 profile：`linux`、`macos` 或 `windows`。 |
 | `--lua-prefix <path>` | 为需要显式 Lua headers/runtime 的目标指定 Lua prefix。 |
-| `--require-engine <engine>` | 依赖发现引擎：`static`、`manual` 或 `runtime`。 |
+| `-r, --require-engine <engine>` | 依赖发现引擎：`static`、`manual` 或 `runtime`。 |
 | `--no-depscan` | 禁用自动依赖扫描。 |
 | `--max-deps <n>` | 依赖数量上限，默认 `36`。 |
 | `--verbose` | 在可用位置输出更多细节。 |

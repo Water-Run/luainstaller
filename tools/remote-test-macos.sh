@@ -111,13 +111,13 @@ DEPS_LUA_CPATH="\$ROCKTREE/lib/lua/5.4/?.so;\$ROCKTREE/lib/lua/5.4/?/init.so;;"
 bundle() {
     entry=\$1
     out=\$2
-    LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" LUAI_LUA_PREFIX="\$LUA_PREFIX" "\$PREFIX/bin/luai" -c --onedir "\$entry" -o "\$out" --max-deps 250
+    LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" LUAI_LUA_PREFIX="\$LUA_PREFIX" "\$PREFIX/bin/luainstaller" b --dir "\$entry" -o "\$out" --max-deps 250
 }
 
 bundle_onefile() {
     entry=\$1
     out=\$2
-    LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" LUAI_LUA_PREFIX="\$LUA_PREFIX" "\$PREFIX/bin/luai" -c --onefile "\$entry" -o "\$out" --max-deps 250
+    LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" LUAI_LUA_PREFIX="\$LUA_PREFIX" "\$PREFIX/bin/luainstaller" b --file "\$entry" -o "\$out" --max-deps 250
 }
 
 exe_path() {

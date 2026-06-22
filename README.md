@@ -29,14 +29,16 @@ Install from a source checkout when LuaRocks is unavailable:
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 luai --help
+luainstaller -v
 ```
 
-This source installer only needs a `lua` command. Building `--onedir` or `--onefile` bundles
-still requires the local C toolchain and Lua development metadata. Linux uses
-`cc`, Lua headers, and `pkg-config` data for Lua. macOS uses `cc` plus a
-matching Lua prefix that provides Lua headers and `liblua.a`. Windows bundles
-are built from a Linux host with MinGW and a Windows Lua prefix containing Lua
-headers plus `lua54.dll`.
+This source installer only needs a `lua` command and installs both CLI names
+plus `luai(1)` and `luainstaller(1)` man pages. Building `--onedir` or
+`--onefile` bundles still requires the local C toolchain and Lua development
+metadata. Linux uses `cc`, Lua headers, and `pkg-config` data for Lua. macOS
+uses `cc` plus a matching Lua prefix that provides Lua headers and `liblua.a`.
+Windows bundles are built from a Linux host with MinGW and a Windows Lua prefix
+containing Lua headers plus `lua54.dll`.
 
 ---
 
@@ -48,36 +50,39 @@ headers plus `lua54.dll`.
 
 ### Command-Line Tool (CLI)
 
-CLI command name: `luai`.
+CLI command names: `luai` and `luainstaller`.
 
 ```bash
 luai --help
-luai -a test/student_management_system/main.lua
-luai -t test/student_management_system/main.lua
-luai -c --onedir test/student_management_system/main.lua -o build/student-manager
-luai -c --onefile test/runtime_bundle/main.lua -o build/runtime-onefile
+luai a test/student_management_system/main.lua
+luai t test/student_management_system/main.lua
+luai b --dir test/student_management_system/main.lua -o build/student-manager
+luai b --file test/runtime_bundle/main.lua -o build/runtime-onefile
+luainstaller -v
 ```
 
 Current command status:
 
 | Command | Status | Description |
 |---------|--------|-------------|
-| `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
-| `luai -t <entry.lua>` | implemented | Print analyzer trace records plus compatibility diagnostics for the same OS, architecture, ABI, and Lua ABI boundary. |
-| `luai -c <entry.lua>` | implemented for Linux, macOS, and Windows `--onedir` and `--onefile` in the verified sample matrix | Build a directory bundle or self-extracting onefile bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
+| `luai a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
+| `luai t <entry.lua>` | implemented | Print analyzer trace records plus compatibility diagnostics for the same OS, architecture, ABI, and Lua ABI boundary. |
+| `luai b <entry.lua>` | implemented for Linux, macOS, and Windows `--dir` and `--file` in the verified sample matrix | Build a directory bundle or self-extracting onefile bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
+
+Compatibility aliases are kept for existing scripts: `-a`/`analyze`, `-t`/`trace`, and `-c`/`build`.
 
 Common options:
 
 | Option | Description |
 |--------|-------------|
-| `--onedir` | Directory bundle mode. This is the default output mode. |
-| `--onefile` | Self-extracting single-file bundle mode. |
+| `--dir, --onedir` | Directory bundle mode. This is the default output mode. |
+| `--file, --onefile` | Self-extracting single-file bundle mode. |
 | `-o, --out <path>` | Output path for bundle actions. |
 | `--include <path>` | Manually include a dependency; repeatable. |
 | `--exclude <path>` | Exclude a dependency by path or basename; repeatable. |
 | `--target-os <os>` | Select a target profile: `linux`, `macos`, or `windows`. |
 | `--lua-prefix <path>` | Lua prefix used by targets that need explicit headers/runtime files. |
-| `--require-engine <engine>` | Dependency discovery engine: `static`, `manual`, or `runtime`. |
+| `-r, --require-engine <engine>` | Dependency discovery engine: `static`, `manual`, or `runtime`. |
 | `--no-depscan` | Disable automatic dependency scanning. |
 | `--max-deps <n>` | Maximum dependency count, default `36`. |
 | `--verbose` | Request more detailed output where available. |

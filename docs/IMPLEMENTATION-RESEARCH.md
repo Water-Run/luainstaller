@@ -18,9 +18,10 @@ experiments, and implementation direction.
 - `src/bundler.lua` implements the `--onedir` filesystem and toolchain layer for
   Linux, macOS, and the Windows MinGW profile.
 - `src/init.lua` is the structured public Lua API boundary.
-- `src/cli.lua` provides the installed `luai` command and compatibility aliases.
-- `luainstaller-1.0.0-1.rockspec` installs the `luai` executable and all current
-  Lua modules.
+- `src/cli.lua` provides the installed `luai` and `luainstaller` commands plus
+  compatibility aliases.
+- `luainstaller-1.0.0-1.rockspec` installs both executables and all current Lua
+  modules.
 
 ## External Reference Map
 
@@ -58,8 +59,8 @@ The first implemented bundle target was Linux `--onedir`, and the same manifest
 and launcher pipeline now also covers macOS and Windows profiles:
 
 ```sh
-luai -c --onedir test/savinglua/main.lua -o /tmp/savinglua-bundle
-luai -c --onedir test/runtime_bundle/main.lua -o /tmp/win-runtime --target-os windows --lua-prefix /tmp/luainstaller-win-lua
+luai b --dir test/savinglua/main.lua -o /tmp/savinglua-bundle
+luai b --dir test/runtime_bundle/main.lua -o /tmp/win-runtime --target-os windows --lua-prefix /tmp/luainstaller-win-lua
 ```
 
 The generated directory contains:

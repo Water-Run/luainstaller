@@ -13,7 +13,7 @@ The test programs are grouped by packaging difficulty.
 
 - `single_file/`
   Simple one-file programs. These are basic beginner-level programming tasks
-  and are useful first smoke tests for `luai -c`.
+  and are useful first smoke tests for `luai b`.
 - `student_management_system/`
   A classic larger beginner project: a student management system with
   persistent file storage through `cjson`.
@@ -39,9 +39,9 @@ lua test/student_management_system/main.lua
 Use the current CLI for packaging experiments:
 
 ```sh
-luai -a test/single_file/01_hello_luainstaller.lua
-luai -t test/student_management_system/main.lua
-luai -c test/student_management_system/main.lua -o build/student-manager
+luai a test/single_file/01_hello_luainstaller.lua
+luai t test/student_management_system/main.lua
+luai b test/student_management_system/main.lua -o build/student-manager
 ```
 
 When LuaRocks is unavailable, install the CLI from the source tree:
@@ -49,7 +49,8 @@ When LuaRocks is unavailable, install the CLI from the source tree:
 ```sh
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
-luai -a test/single_file/01_hello_luainstaller.lua
+luai a test/single_file/01_hello_luainstaller.lua
+luainstaller -v
 ```
 
 Linux, macOS, and Windows `--onedir` and `--onefile` packaging are implemented

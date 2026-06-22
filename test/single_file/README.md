@@ -8,7 +8,7 @@ Start here:
 
 ```sh
 lua test/single_file/01_hello_luainstaller.lua
-luai -c test/single_file/01_hello_luainstaller.lua
+luai b test/single_file/01_hello_luainstaller.lua
 ```
 
 ## Coverage

@@ -54,6 +54,7 @@ build = {
     install = {
         bin = {
             ["luai"] = "src/cli.lua",
+            ["luainstaller"] = "src/cli.lua",
         },
     },
 }

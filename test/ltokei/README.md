@@ -61,8 +61,8 @@ find test/ltokei -name '*.lua' -print0 | xargs -0 -n1 luac -p
 Future packaging targets:
 
 ```sh
-luai -t test/ltokei/main.lua
-luai -c test/ltokei/main.lua -o build/ltokei
+luai t test/ltokei/main.lua
+luai b test/ltokei/main.lua -o build/ltokei
 ```
 
 Expected dependency behavior:

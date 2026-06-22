@@ -65,8 +65,8 @@ find test/savinglua -name '*.lua' -print0 | xargs -0 -n1 luac -p
 Future packaging targets:
 
 ```sh
-luai -t test/savinglua/main.lua
-luai -c test/savinglua/main.lua -o build/savinglua
+luai t test/savinglua/main.lua
+luai b test/savinglua/main.lua -o build/savinglua
 ```
 
 Expected dependency behavior:

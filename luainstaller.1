@@ -1,18 +1,18 @@
 .TH LUAI 1 "June 2026" "luainstaller v1.0.0" "User Commands"
 .SH NAME
-luai \- analyze and package Lua projects into same-environment executables
+luai, luainstaller \- analyze and package Lua projects into same-environment executables
 
 .SH SYNOPSIS
 .B luai
-.BR \-a " " \fIentry.lua\fR
+.BR a " " \fIentry.lua\fR
 .RI [ options ]
 .br
 .B luai
-.BR \-t " " \fIentry.lua\fR
+.BR t " " \fIentry.lua\fR
 .RI [ options ]
 .br
 .B luai
-.BR \-c " " \fIentry.lua\fR
+.BR b " " \fIentry.lua\fR
 .RI [ options ]
 .br
 .B luai
@@ -40,13 +40,15 @@ Install via LuaRocks:
 .nf
 luarocks install luainstaller
 .fi
-This installs the \fBluai\fR CLI and the Lua module.
+This installs the \fBluai\fR and \fBluainstaller\fR CLI commands, the Lua module,
+and \fBluai(1)\fR / \fBluainstaller(1)\fR man pages.
 .PP
 Install from a source checkout when LuaRocks is unavailable:
 .nf
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 luai --help
+luainstaller -v
 .fi
 The source installer only requires a \fBlua\fR command. Building \fB--onedir\fR or \fB--onefile\fR bundles
 still requires the local C toolchain and Lua development metadata. Linux uses \fBcc\fR,
@@ -56,30 +58,34 @@ build host plus a Windows Lua prefix that provides Lua headers and \fBlua54.dll\
 
 .SH COMMANDS
 .TP
-.B \-a
+.B a
 Analyze Lua and native module dependencies.
 .TP
-.B \-t
+.B t
 Print trace records for dependency resolution decisions and compatibility diagnostics.
 .TP
-.B \-c
+.B b
 Build an onedir bundle or self-extracting onefile bundle.
+.PP
+Compatibility aliases are kept for existing scripts: \fB-a\fR/\fBanalyze\fR,
+\fB-t\fR/\fBtrace\fR, and \fB-c\fR/\fBbuild\fR.
 
 .SH CLI USAGE
-The CLI tool name is \fBluai\fR.
+The CLI tool names are \fBluai\fR and \fBluainstaller\fR.
 
 .SS Help
 .nf
 luai --help
+luainstaller -v
 .fi
 Typical output:
 .nf
-luai - Package Lua projects into same-environment executables
+luai / luainstaller - Package Lua projects into same-environment executables
 
 Usage:
-  luai -a <entry.lua> [options]
-  luai -t <entry.lua> [options]
-  luai -c <entry.lua> [options]
+  luai a <entry.lua> [options]
+  luai t <entry.lua> [options]
+  luai b <entry.lua> [options]
 
 Options:
   ...
@@ -89,7 +95,7 @@ Options:
 
 Onedir mode:
 .nf
-luai -c --onedir \fIentry.lua\fR -o \fIoutput_dir\fR
+luai b --dir \fIentry.lua\fR -o \fIoutput_dir\fR
 .fi
 Typical output:
 .nf
@@ -103,7 +109,7 @@ Lua C modules into \fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
 
 Single-file mode:
 .nf
-luai -c --onefile \fIentry.lua\fR -o \fIoutput_executable\fR
+luai b --file \fIentry.lua\fR -o \fIoutput_executable\fR
 .fi
 The generated executable extracts an inner onedir layout to a content-addressed
 cache directory, then starts the inner launcher.
@@ -111,7 +117,7 @@ cache directory, then starts the inner launcher.
 .SS analyze
 Analyze dependencies only:
 .nf
-luai -a \fIentry.lua\fR
+luai a \fIentry.lua\fR
 .fi
 Typical output:
 .nf
@@ -123,29 +129,29 @@ N script(s), M library(ies)
 .SS trace
 Trace dependency resolution and compatibility boundaries:
 .nf
-luai -t \fIentry.lua\fR
+luai t \fIentry.lua\fR
 .fi
 Typical output includes analyzer records followed by a \fBcompatibility\fR section
 that states the same OS, same architecture, same ABI, and same Lua ABI promise.
 
 .SH OPTIONS
-The following options apply to \fB-a\fR, \fB-t\fR, and/or \fB-c\fR as described.
+The following options apply to \fBa\fR, \fBt\fR, and/or \fBb\fR as described.
 
 .TP
 .BI \-o ", " \-\-out " " path
 Output path.
-For \fB-c --onedir\fR: a directory path.
+For \fBb --dir\fR: a directory path.
 Examples:
 .nf
-luai -c main.lua --out ../dist/app
+luai b main.lua --out ../dist/app
 .fi
 
 .TP
-.B \-\-onedir
+.B \-\-dir ", " \-\-onedir
 Generate a Linux, macOS, or Windows directory bundle. This is the default bundle mode.
 
 .TP
-.B \-\-onefile
+.B \-\-file ", " \-\-onefile
 Generate a self-extracting single-file executable.
 
 .TP
@@ -163,15 +169,15 @@ expects \fBinclude/lua.h\fR and \fBlib/liblua.a\fR. Windows expects
 .BI \-v ", " \-\-verbose
 Enable verbose analysis and bundling logs.
 .nf
-luai -c main.lua --verbose
+luai b main.lua --verbose
 .fi
 
 .TP
 .BI \-\-max\-deps " " n
 Maximum number of dependencies allowed (default: 36).
 .nf
-luai -c main.lua --max-deps 100
-luai -a main.lua --max-deps 50
+luai b main.lua --max-deps 100
+luai a main.lua --max-deps 50
 .fi
 
 .TP
@@ -179,7 +185,7 @@ luai -a main.lua --max-deps 50
 Manually include additional dependencies. May be specified multiple times.
 Use this for dynamic \fBrequire\fR patterns that static analysis cannot detect.
 .nf
-luai -c main.lua --include ./require.lua --include ./plugin.lua
+luai b main.lua --include ./require.lua --include ./plugin.lua
 .fi
 
 .TP
@@ -188,7 +194,7 @@ Manually exclude dependencies. May be specified multiple times.
 Use this to remove false positives (for example, \fBpcall(require, ...)\fR patterns); takes priority
 over \fB--include\fR.
 .nf
-luai -c main.lua --exclude ./test_utils.lua
+luai b main.lua --exclude ./test_utils.lua
 .fi
 
 .TP
@@ -197,18 +203,18 @@ Disable dependency scanning. This is a compatibility alias for
 \fB--require-engine manual\fR, where you must specify all
 dependencies via \fB--include\fR.
 .nf
-luai -c main.lua --no-depscan --include ./a.lua --include ./b.lua
+luai b main.lua --no-depscan --include ./a.lua --include ./b.lua
 .fi
 
 .TP
-.BI \-\-require\-engine " " engine
+.BI \-r ", " \-\-require\-engine " " engine
 Select dependency discovery. Supported values are \fBstatic\fR, \fBmanual\fR, and
 \fBruntime\fR. \fBstatic\fR is the default analyzer. \fBmanual\fR uses only explicit
 \fB--include\fR inputs. \fBruntime\fR runs the entry script once while tracing
 actual \fBrequire\fR calls; arguments after \fB--\fR are passed to that build-time
 run.
 .nf
-luai -c --onefile main.lua --require-engine runtime -- seed --verbose
+luai b --file main.lua -r runtime -- seed --verbose
 .fi
 
 .SH LUA API

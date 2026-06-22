@@ -56,14 +56,19 @@ lua_version=$("$lua_path" -e 'local v = _VERSION:match("(%d+%.%d+)"); assert(v);
 lua_share="$prefix/share/lua/$lua_version"
 module_dir="$lua_share/luainstaller"
 bin_dir="$prefix/bin"
+man_dir="$prefix/share/man/man1"
 
-mkdir -p "$module_dir" "$bin_dir"
+mkdir -p "$module_dir" "$bin_dir" "$man_dir"
 cp "$project_root/src/init.lua" "$lua_share/luainstaller.lua"
 for module in analyzer bundler cgen cli compat launcher logger manifest onefile platform require_engine runtime; do
     cp "$project_root/src/$module.lua" "$module_dir/$module.lua"
 done
+cp "$project_root/luainstaller.1" "$man_dir/luai.1"
+cp "$project_root/luainstaller.1" "$man_dir/luainstaller.1"
 
-cat > "$bin_dir/luai" <<SH
+write_wrapper() {
+    name=$1
+    cat > "$bin_dir/$name" <<SH
 #!/bin/sh
 set -eu
 
@@ -73,6 +78,11 @@ lua_share="\$prefix_root/share/lua/$lua_version"
 export LUA_PATH="\$lua_share/?.lua;\$lua_share/?/init.lua;\${LUA_PATH:-;;}"
 exec "\$lua_bin" "\$lua_share/luainstaller/cli.lua" "\$@"
 SH
-chmod +x "$bin_dir/luai"
+    chmod +x "$bin_dir/$name"
+}
 
-printf 'installed luai to %s\n' "$bin_dir/luai"
+write_wrapper luai
+write_wrapper luainstaller
+
+printf 'installed luai and luainstaller to %s\n' "$bin_dir"
+printf 'installed man pages to %s\n' "$man_dir"

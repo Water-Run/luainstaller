@@ -86,6 +86,14 @@ local function read_file(path)
     return content
 end
 
+local function assert_file_exists(path)
+    local handle = io.open(path, "rb")
+    if not handle then
+        error("expected file to exist: " .. path, 2)
+    end
+    handle:close()
+end
+
 local function remove_tree(path)
     if path and path ~= "" and path:match("^/tmp/luainstaller%-") then
         run("rm -rf " .. shell_quote(path))
@@ -107,6 +115,12 @@ end
 local function assert_contains(text, pattern)
     if not tostring(text):find(pattern, 1, true) then
         error("expected output to contain " .. pattern .. "\nactual:\n" .. tostring(text), 2)
+    end
+end
+
+local function assert_equals(actual, expected)
+    if actual ~= expected then
+        error("expected:\n" .. tostring(expected) .. "\nactual:\n" .. tostring(actual), 2)
     end
 end
 
@@ -502,13 +516,13 @@ end
 local function check_remote_onefile_script_coverage()
     local macos = read_file("tools/remote-test-macos.sh")
     assert_contains(macos, "bundle_onefile()")
-    assert_contains(macos, "--onefile")
+    assert_contains(macos, "--file")
     assert_contains(macos, "mac-onefile-runtime")
     assert_contains(macos, "mac-onefile-student")
 
     local windows = read_file("tools/remote-test-windows.sh")
     assert_contains(windows, "bundle_demo_onefile()")
-    assert_contains(windows, "--onefile")
+    assert_contains(windows, "--file")
     assert_contains(windows, "runtime-onefile.exe")
     assert_contains(windows, "student-onefile.exe")
     print("remote onefile script coverage ok")
@@ -635,15 +649,20 @@ end
 
 local function check_cli_contract()
     local direct_help = run("lua src/cli.lua --help")
-    assert_contains(direct_help, "luai -a <entry.lua>")
+    assert_contains(direct_help, "luai a <entry.lua>")
 
     local help = run(cli_command({ "--help" }))
-    assert_contains(help, "luai -a <entry.lua>")
-    assert_contains(help, "luai -t <entry.lua>")
-    assert_contains(help, "luai -c <entry.lua>")
+    assert_contains(help, "luai a <entry.lua>")
+    assert_contains(help, "luai t <entry.lua>")
+    assert_contains(help, "luai b <entry.lua>")
+
+    assert_equals(
+        run(cli_command({ "--version" })),
+        "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
+    )
 
     local analyzed = run(cli_command({
-        "-a",
+        "a",
         "test/student_management_system/main.lua",
         "--max-deps",
         "250",
@@ -653,7 +672,7 @@ local function check_cli_contract()
     assert_contains(analyzed, "library(ies)")
 
     local traced = run(cli_command({
-        "-t",
+        "t",
         "test/student_management_system/main.lua",
         "--max-deps",
         "250",
@@ -665,7 +684,7 @@ local function check_cli_contract()
     assert_contains(traced, "does not claim universal cross-platform output")
 
     local verbose_analyzed = run(cli_command({
-        "-a",
+        "a",
         "test/student_management_system/main.lua",
         "--max-deps",
         "250",
@@ -680,8 +699,8 @@ local function check_cli_contract()
 
     local cli_out = make_temp_dir("cli-onedir")
     local bundled = run(cli_command({
-        "-c",
-        "--onedir",
+        "b",
+        "--dir",
         "test/student_management_system/main.lua",
         "-o",
         cli_out,
@@ -1003,9 +1022,9 @@ return { message = function() return "cli runtime dynamic module" end }
 ]])
 
     local traced = run(cli_command({
-        "-a",
+        "a",
         root .. "/main.lua",
-        "--require-engine",
+        "-r",
         "runtime",
         "--",
         "dynamic",
@@ -1026,7 +1045,11 @@ local function check_installed_cli_bundle()
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
     run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.0.0-1.rockspec")
-    run("cd /tmp && " .. shell_quote(tree .. "/bin/luai") .. " -c --onedir "
+    assert_equals(
+        run(shell_quote(tree .. "/bin/luainstaller") .. " --version"),
+        "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
+    )
+    run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " b --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
         .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
     assert_contains(run(shell_quote(out_dir .. "/runtime") .. " installed"), "hello installed")
@@ -1039,8 +1062,17 @@ local function check_source_install_bundle()
     local prefix = root .. "/prefix"
     local out_dir = root .. "/runtime"
     run("sh tools/install-source.sh --prefix " .. shell_quote(prefix))
-    assert_contains(run(shell_quote(prefix .. "/bin/luai") .. " --version"), "Version 1.0.0")
-    run("cd /tmp && " .. shell_quote(prefix .. "/bin/luai") .. " -c --onedir "
+    assert_equals(
+        run(shell_quote(prefix .. "/bin/luai") .. " --version"),
+        "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
+    )
+    assert_equals(
+        run(shell_quote(prefix .. "/bin/luainstaller") .. " --version"),
+        "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
+    )
+    assert_file_exists(prefix .. "/share/man/man1/luai.1")
+    assert_file_exists(prefix .. "/share/man/man1/luainstaller.1")
+    run("cd /tmp && " .. shell_quote(prefix .. "/bin/luainstaller") .. " b --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
         .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
     assert_contains(run(shell_quote(out_dir .. "/runtime") .. " source-install"), "hello source-install")

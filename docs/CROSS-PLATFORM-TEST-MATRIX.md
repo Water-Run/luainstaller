@@ -24,7 +24,7 @@ external dependency closure remain outside this stage.
 | --- | --- | --- | --- |
 | local workstation | Linux x86_64 | available | Full smoke, LuaRocks install, source install, and no-system-`lua` container bundle runtime passed. |
 | `192.168.10.40` | Linux x86_64 | available | Full smoke passed after installing sample native modules. Source-installed `luai` built and ran a pure Lua bundle. |
-| `192.168.5.19` | Linux aarch64 | unavailable | Source install and `luai -a` passed. `luai -c --onedir` cleanly failed with `ToolchainError` because Lua headers / Lua `pkg-config` metadata are not installed. |
+| `192.168.5.19` | Linux aarch64 | unavailable | Source install and `luai a` passed. `luainstaller b --dir` cleanly failed with `ToolchainError` because Lua headers / Lua `pkg-config` metadata are not installed. |
 | `yymac06` | macOS arm64 | temporary `/tmp` LuaRocks plus local SQLite source cache | Temporary user-local Lua 5.4.8 and LuaRocks were built. Pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles build and run from clean `env -i` runtimes. Pure Lua and `student_management_system` `--onefile` bundles also build and run from clean runtimes. |
 | `192.168.69.130` | Windows 10 x64 | unavailable on target | Linux-built Windows Lua 5.4.8, MinGW-built native DLLs, and bundled pure Lua dependencies were used to build pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles plus pure Lua and `student_management_system` `--onefile` bundles. The bundles run on the Windows host from a cleaned PowerShell environment without installed Lua or LuaRocks. |
 
@@ -58,7 +58,8 @@ Linux without LuaRocks:
 ```sh
 sh tools/install-source.sh --prefix /tmp/luainstaller-source-prefix
 /tmp/luainstaller-source-prefix/bin/luai --version
-/tmp/luainstaller-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
+/tmp/luainstaller-source-prefix/bin/luainstaller --version
+/tmp/luainstaller-source-prefix/bin/luai a test/runtime_bundle/main.lua --max-deps 120
 ```
 
 Remote Linux hosts:

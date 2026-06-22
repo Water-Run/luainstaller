@@ -148,8 +148,8 @@ find test/firebird_web_sql -maxdepth 1 -name '*.lua' -print0 | xargs -0 -n1 luac
 Future packaging targets:
 
 ```sh
-luai -t test/firebird_web_sql/server.lua
-luai -c test/firebird_web_sql/server.lua -o build/firebird-web-sql
+luai t test/firebird_web_sql/server.lua
+luai b test/firebird_web_sql/server.lua -o build/firebird-web-sql
 ```
 
 Expected dependency behavior:

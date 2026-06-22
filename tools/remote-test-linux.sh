@@ -32,7 +32,7 @@ lua test/smoke_all.lua
 rm -rf /tmp/luainstaller-linux-source-prefix /tmp/luainstaller-linux-runtime
 sh tools/install-source.sh --prefix /tmp/luainstaller-linux-source-prefix
 /tmp/luainstaller-linux-source-prefix/bin/luai --version
-/tmp/luainstaller-linux-source-prefix/bin/luai -c --onedir test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-runtime --max-deps 120
+/tmp/luainstaller-linux-source-prefix/bin/luainstaller b --dir test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-runtime --max-deps 120
 env -i PATH=/usr/bin:/bin /tmp/luainstaller-linux-runtime/luainstaller-linux-runtime linux-clean | grep "hello linux-clean"
 echo "linux x64 remote ok"
 EOF
@@ -45,8 +45,8 @@ cd "$REMOTE_ROOT"
 rm -rf /tmp/luainstaller-linux-arm64-source-prefix /tmp/luainstaller-linux-arm64-runtime
 sh tools/install-source.sh --prefix /tmp/luainstaller-linux-arm64-source-prefix
 /tmp/luainstaller-linux-arm64-source-prefix/bin/luai --version
-/tmp/luainstaller-linux-arm64-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
-if /tmp/luainstaller-linux-arm64-source-prefix/bin/luai -c --onedir test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-arm64-runtime --max-deps 120 >/tmp/luainstaller-linux-arm64-bundle.out 2>&1; then
+/tmp/luainstaller-linux-arm64-source-prefix/bin/luai a test/runtime_bundle/main.lua --max-deps 120
+if /tmp/luainstaller-linux-arm64-source-prefix/bin/luainstaller b --dir test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-arm64-runtime --max-deps 120 >/tmp/luainstaller-linux-arm64-bundle.out 2>&1; then
     env -i PATH=/usr/bin:/bin /tmp/luainstaller-linux-arm64-runtime/luainstaller-linux-arm64-runtime arm64-clean | grep "hello arm64-clean"
 else
     grep "ToolchainError" /tmp/luainstaller-linux-arm64-bundle.out
