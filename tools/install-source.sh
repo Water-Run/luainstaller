@@ -59,7 +59,7 @@ bin_dir="$prefix/bin"
 
 mkdir -p "$module_dir" "$bin_dir"
 cp "$project_root/src/init.lua" "$lua_share/luainstaller.lua"
-for module in analyzer bundler cgen cli launcher logger manifest platform runtime; do
+for module in analyzer bundler cgen cli launcher logger manifest onefile platform require_engine runtime; do
     cp "$project_root/src/$module.lua" "$module_dir/$module.lua"
 done
 

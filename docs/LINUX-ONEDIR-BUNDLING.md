@@ -22,11 +22,12 @@ The generated bundle does not require a separate `lua` command on the target
 environment. The linked Lua shared runtime is copied into the bundle and found
 through the launcher's `$ORIGIN/.luai/native` runtime search path.
 
-`--onefile`, general cross-building, and automatic external shared-library
+`--onefile` is implemented as a self-extracting wrapper around the same onedir
+runtime contract. General cross-building and automatic external shared-library
 closure are not implemented in this stage. macOS has a separate same-platform
 `--onedir` path that links against a static Lua prefix. Windows has a separate
 MinGW profile that emits `.exe` launchers and bundles `lua54.dll`. This document
-focuses on the Linux shared-Lua implementation.
+focuses on the Linux shared-Lua onedir implementation.
 
 ## Output Layout
 
@@ -239,14 +240,18 @@ Current limitations are explicit:
 
 - This document covers Linux only. macOS `--onedir` has a separate static-Lua
   profile, and Windows `--onedir` has a separate MinGW/Lua-DLL profile.
-- `--onefile` is not implemented.
+- `--onefile` is implemented by extracting an inner onedir layout to a
+  content-addressed cache directory before running it; it is not a no-extract
+  in-memory native module loader.
 - Native module external dependencies are not closed automatically. For example,
   an `.so` may still depend on system `libsqlite3.so.0`, `libssl.so.3`, or other
   libraries.
 - Bundles are not cross-distribution artifacts. The tested promise is same OS,
   architecture, ABI, Lua ABI, and compatible system libraries.
-- Dynamic `require(variable)` is rejected by the analyzer. Use `--include` for
-  dependencies static analysis cannot see.
+- Dynamic `require(variable)` is rejected by the static analyzer. Use
+  `--require-engine runtime` for path-sensitive build-time tracing, or
+  `--include` / `--require-engine manual` for dependencies that need explicit
+  control.
 - Optional probes through `pcall(require, "...")` are traced as optional missing
   modules when unresolved.
 - The Linux generated launcher uses a shared Lua profile. Static Lua linking is
@@ -255,19 +260,19 @@ Current limitations are explicit:
   without Lua headers or Lua `pkg-config` metadata can run analysis but cannot
   compile the C launcher.
 
-## Onefile Direction
+## Onefile Runtime
 
-The future `--onefile` path should reuse the same manifest and runtime contract:
+The `--onefile` path reuses the same manifest and runtime contract:
 
-1. Store the manifest, Lua payload, native Lua C modules, and Lua shared runtime
-   in an embedded archive or appended payload.
-2. At startup, validate the payload and extract native components to a temporary
-   or content-addressed cache directory.
-3. Set `package.cpath` to that extraction directory.
-4. Run the same bootstrap searcher for embedded Lua modules.
-5. Preserve the user program's exit status and report cleanup failures without
+1. Stage the normal onedir bundle.
+2. Store the manifest, Lua payload, native Lua C modules, and Lua shared runtime
+   in an embedded extractor payload.
+3. At startup, extract components to a content-addressed cache directory.
+4. Run the inner launcher from the extracted directory, preserving its
+   `.luai/native` search paths.
+5. Preserve the user program's exit status and report extraction failures without
    hiding the original program result.
 
-For Windows bundles that need `lua55.dll`, the safer design is a two-stage
-launcher: an outer extractor with no Lua DLL dependency writes an inner onedir
-layout, then starts the real launcher from that directory.
+For Windows bundles that need `lua54.dll`, this two-stage design is required:
+the outer extractor has no Lua DLL dependency, writes the inner onedir layout,
+then starts the real launcher from that directory.

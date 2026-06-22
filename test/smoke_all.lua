@@ -25,6 +25,8 @@ package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
 package.preload["luainstaller.launcher"] = function() return dofile("src/launcher.lua") end
 package.preload["luainstaller.bundler"] = function() return dofile("src/bundler.lua") end
+package.preload["luainstaller.require_engine"] = function() return dofile("src/require_engine.lua") end
+package.preload["luainstaller.onefile"] = function() return dofile("src/onefile.lua") end
 package.preload["luainstaller"] = function() return dofile("src/init.lua") end
 package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
 ]]
@@ -63,6 +65,12 @@ end
 
 local function remove_file(path)
     os.remove(path)
+end
+
+local function write_file(path, content)
+    local handle = assert(io.open(path, "wb"))
+    handle:write(content or "")
+    handle:close()
 end
 
 local function remove_tree(path)
@@ -241,13 +249,14 @@ assert(type(optional_firebird.candidates) == "table")
 local bundled = luainstaller.bundle({
     entry = "test/student_management_system/main.lua",
     mode = "onefile",
-    out = "build/student-manager",
+    out = os.getenv("LUAI_API_ONEFILE_OUT"),
     max_deps = 250,
 })
-assert(bundled.ok == false)
-assert(bundled.error.type == "NotImplementedError")
-assert(type(bundled.error.manifest) == "table")
-local manifest = bundled.error.manifest
+assert(bundled.ok == true, bundled.error and bundled.error.message)
+assert(bundled.action == "bundle")
+assert(bundled.mode == "onefile")
+assert(type(bundled.executable) == "string")
+local manifest = bundled.manifest
 assert(manifest.version == 1)
 assert(manifest.output.mode == "onefile")
 assert(manifest.entry.source_path:match("student_management_system/main%.lua$"))
@@ -278,7 +287,52 @@ assert(unsafe.error.type == "InvalidOutputError")
 
 print("api contract ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "api contract ok")
+    local root = make_temp_dir("api-onefile")
+    local onefile_out = root .. "/student-onefile"
+    assert_contains(run("LUAI_API_ONEFILE_OUT=" .. shell_quote(onefile_out)
+        .. " lua -e " .. shell_quote(script)), "api contract ok")
+    remove_tree(root)
+end
+
+local function check_require_engines()
+    local root = make_temp_dir("require-engine")
+    write_file(root .. "/main.lua", [[
+local name = arg[1] or "dynamic"
+local mod = require(name)
+print(mod.message())
+]])
+    write_file(root .. "/dynamic.lua", [[
+return { message = function() return "runtime dynamic module" end }
+]])
+
+    local script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+
+local manual = luainstaller.analyze({
+    entry = "test/runtime_bundle/main.lua",
+    require_engine = "manual",
+    include = { "test/runtime_bundle/greeter.lua" },
+})
+assert(manual.ok == true, manual.error and manual.error.message)
+assert(#manual.dependencies.scripts == 1)
+assert(manual.dependencies.scripts[1]:match("runtime_bundle/greeter%%.lua$"))
+
+local runtime = luainstaller.analyze({
+    entry = %q,
+    require_engine = "runtime",
+    run_args = { "dynamic" },
+})
+assert(runtime.ok == true, runtime.error and runtime.error.message)
+assert(#runtime.dependencies.scripts == 1)
+assert(runtime.dependencies.scripts[1]:match("dynamic%%.lua$"))
+assert(#runtime.trace >= 1)
+assert(runtime.trace[1].requested == "dynamic")
+
+print("require engines ok")
+]], root .. "/main.lua")
+
+    assert_contains(run("lua -e " .. shell_quote(script)), "require engines ok")
+    remove_tree(root)
 end
 
 local function check_manifest_without_popen()
@@ -687,6 +741,74 @@ assert_bundle({
     print("onedir bundles ok")
 end
 
+local function check_onefile_bundles()
+    local script = SOURCE_LOADER .. [[
+local luainstaller = require("luainstaller")
+
+local function assert_bundle(opts)
+    local result = luainstaller.bundle(opts)
+    assert(result.ok == true, result.error and result.error.message)
+    assert(result.action == "bundle")
+    assert(result.mode == "onefile")
+    assert(type(result.executable) == "string")
+    print(result.executable)
+end
+
+assert_bundle({
+    entry = "test/runtime_bundle/main.lua",
+    mode = "onefile",
+    out = os.getenv("LUAI_RUNTIME_ONEFILE_OUT"),
+    max_deps = 250,
+})
+assert_bundle({
+    entry = "test/student_management_system/main.lua",
+    mode = "onefile",
+    out = os.getenv("LUAI_STUDENT_ONEFILE_OUT"),
+    max_deps = 250,
+})
+]]
+
+    local root = make_temp_dir("onefile")
+    local runtime_out = root .. "/runtime-onefile"
+    local student_out = root .. "/student-onefile"
+    local built = run("LUAI_RUNTIME_ONEFILE_OUT=" .. shell_quote(runtime_out)
+        .. " LUAI_STUDENT_ONEFILE_OUT=" .. shell_quote(student_out)
+        .. " lua -e " .. shell_quote(script))
+    assert_contains(built, runtime_out)
+    assert_contains(built, student_out)
+    assert_contains(run(shell_quote(runtime_out) .. " onefile"), "hello onefile")
+    local student_data = root .. "/students-onefile.json"
+    assert_contains(run(shell_quote(student_out) .. " --data " .. shell_quote(student_data) .. " seed"), "Seeded 8 students")
+    assert_contains(run(shell_quote(student_out) .. " --data " .. shell_quote(student_data) .. " list --sort average"), "Ada Lovelace")
+    remove_tree(root)
+    print("onefile bundles ok")
+end
+
+local function check_cli_require_engine_runtime()
+    local root = make_temp_dir("cli-require-engine")
+    write_file(root .. "/main.lua", [[
+local name = arg[1] or "dynamic"
+local mod = require(name)
+print(mod.message())
+]])
+    write_file(root .. "/dynamic.lua", [[
+return { message = function() return "cli runtime dynamic module" end }
+]])
+
+    local traced = run(cli_command({
+        "-a",
+        root .. "/main.lua",
+        "--require-engine",
+        "runtime",
+        "--",
+        "dynamic",
+    }))
+    assert_contains(traced, "success.")
+    assert_contains(traced, "dynamic.lua")
+    remove_tree(root)
+    print("cli require engine ok")
+end
+
 local function check_installed_cli_bundle()
     if not command_ok("luarocks --version") then
         print("installed cli bundle skipped: luarocks unavailable")
@@ -728,6 +850,7 @@ check_syntax()
 check_samples()
 check_analyzer_visibility()
 check_api_contract()
+check_require_engines()
 check_manifest_without_popen()
 check_bundler_without_popen()
 check_platform_profiles()
@@ -737,6 +860,8 @@ check_cli_contract()
 check_runtime_cgen()
 check_c_launcher()
 check_onedir_bundles()
+check_onefile_bundles()
+check_cli_require_engine_runtime()
 check_installed_cli_bundle()
 check_source_install_bundle()
 

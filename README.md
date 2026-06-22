@@ -2,7 +2,7 @@
 
 *[中文](README-zh.md)*
 
-`luainstaller` is a tool that packages Lua projects into **distributable executables**. Linux, macOS, and Windows `--onedir` output are implemented for same-platform or profiled builds. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.
+`luainstaller` is a tool that packages Lua projects into **distributable executables**. Linux, macOS, and Windows `--onedir` output are implemented for same-platform or profiled builds, and `--onefile` builds are implemented as self-extracting wrappers around the same runtime contract. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.
 
 `luainstaller` provides dependency analysis and same-platform directory bundling
 capabilities, and can package non-pure-Lua content inside the wrapper program.
@@ -31,7 +31,7 @@ export PATH="$HOME/.local/bin:$PATH"
 luai --help
 ```
 
-This source installer only needs a `lua` command. Building `--onedir` bundles
+This source installer only needs a `lua` command. Building `--onedir` or `--onefile` bundles
 still requires the local C toolchain and Lua development metadata. Linux uses
 `cc`, Lua headers, and `pkg-config` data for Lua. macOS uses `cc` plus a
 matching Lua prefix that provides Lua headers and `liblua.a`. Windows bundles
@@ -55,6 +55,7 @@ luai --help
 luai -a test/student_management_system/main.lua
 luai -t test/student_management_system/main.lua
 luai -c --onedir test/student_management_system/main.lua -o build/student-manager
+luai -c --onefile test/runtime_bundle/main.lua -o build/runtime-onefile
 ```
 
 Current command status:
@@ -63,19 +64,20 @@ Current command status:
 |---------|--------|-------------|
 | `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
 | `luai -t <entry.lua>` | implemented | Print analyzer trace records with classifications and reasons. |
-| `luai -c <entry.lua>` | implemented on Linux, macOS, and Windows for `--onedir` | Build a directory bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
+| `luai -c <entry.lua>` | implemented on Linux, macOS, and Windows for `--onedir` and `--onefile` | Build a directory bundle or self-extracting onefile bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
 
 Common options:
 
 | Option | Description |
 |--------|-------------|
 | `--onedir` | Directory bundle mode. This is the default output mode. |
-| `--onefile` | Single-file bundle mode, planned after onedir. |
+| `--onefile` | Self-extracting single-file bundle mode. |
 | `-o, --out <path>` | Output path for bundle actions. |
 | `--include <path>` | Manually include a dependency; repeatable. |
 | `--exclude <path>` | Exclude a dependency by path or basename; repeatable. |
 | `--target-os <os>` | Select a target profile: `linux`, `macos`, or `windows`. |
 | `--lua-prefix <path>` | Lua prefix used by targets that need explicit headers/runtime files. |
+| `--require-engine <engine>` | Dependency discovery engine: `static`, `manual`, or `runtime`. |
 | `--no-depscan` | Disable automatic dependency scanning. |
 | `--max-deps <n>` | Maximum dependency count, default `36`. |
 | `--verbose` | Request more detailed output where available. |
@@ -115,7 +117,7 @@ Available functions:
 |----------|--------|--------------|
 | `luainstaller.analyze(opts)` | implemented | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
 | `luainstaller.trace(opts)` | implemented | Real analyzer trace records with requiring file, source line, candidates, classification, and reason. |
-| `luainstaller.bundle(opts)` | implemented on Linux, macOS, and Windows for `mode = "onedir"` | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`; `onefile` still returns `NotImplementedError`. |
+| `luainstaller.bundle(opts)` | implemented on Linux, macOS, and Windows for `mode = "onedir"` and `mode = "onefile"` | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`. |
 
 Common `opts` fields:
 
@@ -123,11 +125,13 @@ Common `opts` fields:
 |-------|------|---------|-------------|
 | `entry` | string | required | Entry script path. |
 | `mode` | string | `"onedir"` | `onedir` or `onefile`. |
-| `out` | string | nil | Output directory path for `onedir`. |
+| `out` | string | nil | Output directory path for `onedir`; output executable path for `onefile`. |
 | `max_deps` | number | `36` | Maximum dependency count. |
 | `include` | string[] | `{}` | Extra files to include. |
 | `exclude` | string[] | `{}` | Paths or basenames to exclude. |
 | `depscan` | boolean | `true` | Set `false` for manual-only dependencies. |
+| `require_engine` | string | `"static"` | Dependency engine: `static`, `manual`, or `runtime`; `depscan = false` aliases `manual`. |
+| `run_args` | string[] | `{}` | Arguments passed to the entry script during `require_engine = "runtime"` discovery. |
 | `target_os` | string | host OS | Target profile: `linux`, `macos`, or `windows`. |
 | `lua_prefix` | string | `LUAI_LUA_PREFIX` | Lua headers/runtime prefix for macOS and Windows profiles. |
 
@@ -136,7 +140,7 @@ Common `opts` fields:
 ## How It Works
 
 The current workflow is: **analyze entry script → collect dependencies → trace
-resolution decisions → build a same-platform onedir bundle**.
+resolution decisions → build a same-platform onedir or onefile bundle**.
 
 Linux, macOS, and Windows `--onedir` output are implemented. The bundler generates a C
 launcher, writes `.luai/manifest.lua`, embeds Lua payloads in the launcher, and
@@ -147,8 +151,17 @@ launcher against a static `liblua.a` from the selected Lua prefix. Windows uses
 launcher and into `.luai/native/`. The compatibility boundary is same OS, same
 architecture, same ABI, and same Lua ABI.
 
-`--onefile` payloads, general cross-building, and automatic external
+`--onefile` first stages the same onedir layout, embeds those files in a native
+extractor, and writes them to a content-addressed cache directory at runtime
+before launching the inner executable. This preserves native Lua C module and
+Lua runtime behavior because `.so`, `.dylib`, and `.dll` files exist on disk
+before user code runs. General cross-building and automatic external
 shared-library dependency closure are still roadmap work.
+
+Dependency discovery is selectable. `static` uses the analyzer, `manual` uses
+only explicit includes, and `runtime` runs the entry script once while tracing
+actual `require` calls. Runtime discovery only covers code paths executed during
+that build-time run.
 
 For detailed implementation notes, non-pure-Lua behavior, verification commands,
 and current limitations, see
@@ -172,7 +185,7 @@ The overall process can be summarized as:
 [entry.lua]
      |
      v
-[Static Dependency Analysis]
+[Dependency Analysis: static / manual / runtime]
      |
      v
 [Collect Lua files / manual --include / --exclude]
@@ -181,5 +194,5 @@ The overall process can be summarized as:
 [Generate C launcher / copy native modules / write manifest]
      |
      v
-[Linux, macOS, or Windows onedir bundle]
+[Linux, macOS, or Windows onedir or onefile bundle]
 ```

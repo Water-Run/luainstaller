@@ -21,7 +21,7 @@ luai \- analyze and package Lua projects into same-environment executables
 .SH DESCRIPTION
 \fBluainstaller\fR is a tool that analyzes Lua dependencies and packages Lua projects into
 \fBsame-environment executables\fR. The current implemented bundle targets are Linux,
-macOS, and Windows \fB--onedir\fR output. It is open-sourced on GitHub and licensed under the
+macOS, and Windows \fB--onedir\fR and \fB--onefile\fR output. It is open-sourced on GitHub and licensed under the
 \fBLGPL\fR. See the repository for source code, releases, and documentation:
 https://github.com/Water-Run/luainstaller
 
@@ -47,7 +47,7 @@ sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
 luai --help
 .fi
-The source installer only requires a \fBlua\fR command. Building \fB--onedir\fR bundles
+The source installer only requires a \fBlua\fR command. Building \fB--onedir\fR or \fB--onefile\fR bundles
 still requires the local C toolchain and Lua development metadata. Linux uses \fBcc\fR,
 Lua headers, and Lua \fBpkg-config\fR data. macOS uses \fBcc\fR plus a matching Lua
 prefix that provides Lua headers and \fBliblua.a\fR. Windows uses MinGW on a Linux
@@ -62,8 +62,7 @@ Analyze Lua and native module dependencies.
 Print trace records for dependency resolution decisions.
 .TP
 .B \-c
-Build a Linux, macOS, or Windows onedir bundle. The \fB--onefile\fR mode is accepted as a planned mode but is not
-implemented yet.
+Build a Linux, macOS, or Windows onedir bundle or self-extracting onefile bundle.
 
 .SH CLI USAGE
 The CLI tool name is \fBluai\fR.
@@ -101,11 +100,12 @@ success.
 Lua sources in a generated launcher, copies the linked Lua shared runtime and detected native
 Lua C modules into \fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
 
-Single-file mode is planned:
+Single-file mode:
 .nf
-luai -c --onefile \fIentry.lua\fR
+luai -c --onefile \fIentry.lua\fR -o \fIoutput_executable\fR
 .fi
-It currently returns \fBNotImplementedError\fR.
+The generated executable extracts an inner onedir layout to a content-addressed
+cache directory, then starts the inner launcher.
 
 .SS analyze
 Analyze dependencies only:
@@ -137,7 +137,7 @@ Generate a Linux, macOS, or Windows directory bundle. This is the default bundle
 
 .TP
 .B \-\-onefile
-Planned single-file executable mode. Not implemented yet.
+Generate a self-extracting single-file executable.
 
 .TP
 .BI \-\-target\-os " " os
@@ -184,10 +184,22 @@ luai -c main.lua --exclude ./test_utils.lua
 
 .TP
 .B \-\-no\-depscan
-Disable dependency scanning. This switches to a fully manual mode where you must specify all
+Disable dependency scanning. This is a compatibility alias for
+\fB--require-engine manual\fR, where you must specify all
 dependencies via \fB--include\fR.
 .nf
 luai -c main.lua --no-depscan --include ./a.lua --include ./b.lua
+.fi
+
+.TP
+.BI \-\-require\-engine " " engine
+Select dependency discovery. Supported values are \fBstatic\fR, \fBmanual\fR, and
+\fBruntime\fR. \fBstatic\fR is the default analyzer. \fBmanual\fR uses only explicit
+\fB--include\fR inputs. \fBruntime\fR runs the entry script once while tracing
+actual \fBrequire\fR calls; arguments after \fB--\fR are passed to that build-time
+run.
+.nf
+luai -c --onefile main.lua --require-engine runtime -- seed --verbose
 .fi
 
 .SH LUA API
@@ -220,8 +232,8 @@ l l l l.
 Parameter	Type	Default	Description
 _
 \fBentry\fR	string	required	Entry script path
-\fBmode\fR	string	\fBonedir\fR	Bundle mode; \fBonefile\fR is planned
-\fBout\fR	string	\-	Output directory for \fBonedir\fR
+\fBmode\fR	string	\fBonedir\fR	Bundle mode: \fBonedir\fR or \fBonefile\fR
+\fBout\fR	string	\-	Output directory for \fBonedir\fR; executable path for \fBonefile\fR
 \fBtarget_os\fR	string	host OS	Target profile: \fBlinux\fR, \fBmacos\fR, or \fBwindows\fR
 \fBlua_prefix\fR	string	\fBLUAI_LUA_PREFIX\fR	Lua headers/runtime prefix for macOS and Windows
 \fBverbose\fR	boolean	\fBfalse\fR	Whether to output detailed logs
@@ -229,6 +241,8 @@ _
 \fBinclude\fR	string[]	\fB{}\fR	Manually include dependencies
 \fBexclude\fR	string[]	\fB{}\fR	Manually exclude dependencies (priority over \fBinclude\fR)
 \fBdepscan\fR	boolean	\fBtrue\fR	Enable automatic dependency analysis
+\fBrequire_engine\fR	string	\fBstatic\fR	Dependency engine: \fBstatic\fR, \fBmanual\fR, or \fBruntime\fR
+\fBrun_args\fR	string[]	\fB{}\fR	Arguments for \fBruntime\fR require discovery
 .TE
 
 Example:
@@ -274,7 +288,7 @@ end
 .SH HOW IT WORKS
 The workflow of \fBluainstaller\fR can be summarized as: \fBanalyze entry script\fR \->
 \fBcollect dependencies\fR \-> \fBtrace resolution decisions\fR \-> \fBbuild a same-platform onedir
-bundle\fR.
+or onefile bundle\fR.
 
 When \fBbundle\fR is executed, \fBluainstaller\fR first performs \fBstatic dependency analysis\fR
 starting from the entry \fB.lua\fR file. It scans the source code for common reference patterns
@@ -291,9 +305,14 @@ shared runtime; macOS links against a static \fBliblua.a\fR from the selected Lu
 Windows uses \fBx86_64-w64-mingw32-gcc\fR, emits a \fB.exe\fR, and copies
 \fBlua54.dll\fR beside the launcher and into \fB.luai/native/\fR.
 
+For \fB--onefile\fR, \fBluainstaller\fR first stages that same onedir layout, embeds
+the staged files in a native extractor, and writes them to a content-addressed
+cache directory at runtime before launching the inner executable.
+
 The first-stage compatibility promise is same OS, same architecture, same ABI, and same Lua
 ABI. The current implementation does not claim cross-platform output, automatic external
-shared-library closure, or \fB--onefile\fR packaging.
+shared-library closure, or complete dynamic-require proof. Runtime require discovery only
+covers code paths that execute during the build-time trace run.
 
 .SH SEE ALSO
 GitHub repository: https://github.com/Water-Run/luainstaller

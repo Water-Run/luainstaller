@@ -56,6 +56,12 @@ local function installSourcePreloads()
     package.preload["luainstaller.bundler"] = package.preload["luainstaller.bundler"] or function()
         return dofile(sourcePath("bundler.lua"))
     end
+    package.preload["luainstaller.require_engine"] = package.preload["luainstaller.require_engine"] or function()
+        return dofile(sourcePath("require_engine.lua"))
+    end
+    package.preload["luainstaller.onefile"] = package.preload["luainstaller.onefile"] or function()
+        return dofile(sourcePath("onefile.lua"))
+    end
     package.preload["luainstaller"] = function()
         return dofile(sourcePath("init.lua"))
     end
@@ -102,17 +108,18 @@ Actions:
       Trace dependency resolution decisions.
 
   -c <entry.lua>
-      Build a bundle. --onedir is the default Linux output mode; --onefile is
-      planned.
+      Build a bundle. --onedir is the default output mode; --onefile builds a
+      self-extracting executable.
 
 Options:
   --onedir              Select directory bundle mode (default)
-  --onefile             Select single-file bundle mode (planned)
+  --onefile             Select self-extracting single-file bundle mode
   -o, --out <path>      Output path for bundle actions
   --include <path>      Include an extra Lua file; repeatable
   --exclude <path>      Exclude a dependency by path or basename; repeatable
   --target-os <os>      Target profile: linux, macos, or windows
   --lua-prefix <path>   Lua prefix for targets that require one
+  --require-engine <e>  Dependency engine: static, manual, or runtime
   --no-depscan          Disable automatic dependency scanning
   --max-deps <n>        Maximum dependency count (default: 36)
   --verbose             Print more detail
@@ -295,6 +302,7 @@ local function newOptions()
     return {
         include = {},
         exclude = {},
+        run_args = {},
         depscan = true,
         mode    = "onedir",
         max_deps = DEFAULT_MAX_DEPS,
@@ -331,8 +339,11 @@ local function parseActionOptions(parser, action, first_entry)
             opts.target_os = parser:consumeValue(arg)
         elseif arg == "--lua-prefix" then
             opts.lua_prefix = parser:consumeValue(arg)
+        elseif arg == "--require-engine" then
+            opts.require_engine = parser:consumeValue(arg)
         elseif arg == "--no-depscan" or arg == "--manual" then
             opts.depscan = false
+            opts.require_engine = "manual"
         elseif arg == "--max-deps" or arg == "-max" then
             local number, err = parsePositiveInteger(parser:consumeValue(arg), arg)
             if not number then
@@ -341,6 +352,11 @@ local function parseActionOptions(parser, action, first_entry)
             opts.max_deps = number
         elseif arg == "--verbose" or arg == "--detail" then
             opts.verbose = true
+        elseif arg == "--" then
+            while parser:hasNext() do
+                opts.run_args[#opts.run_args + 1] = parser:consume()
+            end
+            break
         elseif arg == "-require" then
             local val = parser:consumeValue(arg)
             for req in val:gmatch("[^,]+") do

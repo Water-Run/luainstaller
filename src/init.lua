@@ -19,6 +19,8 @@ local analyzer = require("luainstaller.analyzer")
 local bundler  = require("luainstaller.bundler")
 local logger   = require("luainstaller.logger")
 local manifest = require("luainstaller.manifest")
+local onefile  = require("luainstaller.onefile")
+local require_engine = require("luainstaller.require_engine")
 
 
 --[[
@@ -136,80 +138,8 @@ local function normalizeOptions(opts)
     return opts
 end
 
-local function listContains(list, value)
-    for i = 1, #list do
-        if list[i] == value then
-            return true
-        end
-    end
-    return false
-end
-
-local function isExcluded(path, excludes)
-    local name = basename(path)
-    for i = 1, #excludes do
-        local exclude = tostring(excludes[i])
-        if path == exclude or name == exclude or path:sub(-#exclude) == exclude then
-            return true
-        end
-    end
-    return false
-end
-
-local function applyManualInputs(result, opts)
-    local scripts = {}
-    local libraries = {}
-    local excludes = opts.exclude or {}
-
-    for _, path in ipairs(result.scripts or {}) do
-        if not isExcluded(path, excludes) and not listContains(scripts, path) then
-            scripts[#scripts + 1] = path
-        end
-    end
-
-    for _, path in ipairs(result.libraries or {}) do
-        if not isExcluded(path, excludes) and not listContains(libraries, path) then
-            libraries[#libraries + 1] = path
-        end
-    end
-
-    for _, path in ipairs(opts.include or {}) do
-        if not fileExists(path) then
-            return nil, makeError("ScriptNotFoundError", string.format("Included path not found: %s", path), {
-                script_path = path,
-            })
-        end
-        if not isExcluded(path, excludes) and not listContains(scripts, path) then
-            scripts[#scripts + 1] = path
-        end
-    end
-
-    return {
-        scripts   = scripts,
-        libraries = libraries,
-        trace     = result.trace or {},
-    }
-end
-
 local function dependencyPlan(opts)
-    local raw
-    if opts.depscan == false then
-        raw = { scripts = {}, libraries = {} }
-    else
-        local ok, result = pcall(analyzer.traceDependencies, opts.entry, {
-            max_dependencies = opts.max_deps or opts.max_dependencies or DEFAULT_MAX_DEPS,
-        })
-        if not ok then
-            return nil, fromThrownError(result)
-        end
-        raw = result
-    end
-
-    local merged, err = applyManualInputs(raw, opts)
-    if not merged then
-        return nil, err
-    end
-    return merged
+    return require_engine.plan(opts)
 end
 
 --@description: Perform dependency analysis on a Lua entry script
@@ -323,18 +253,7 @@ function M.bundle(opts)
         return built_manifest
     end
 
-    if normalized.mode == "onefile" then
-        return makeError("NotImplementedError", "onefile bundling is planned but not yet implemented", {
-            action       = "bundle",
-            entry        = normalized.entry,
-            mode         = normalized.mode,
-            out          = normalized.out,
-            dependencies = analyzed.dependencies,
-            manifest     = built_manifest.manifest,
-        })
-    end
-
-    return bundler.bundleOnedir({
+    local bundle_opts = {
         entry = normalized.entry,
         out = normalized.out,
         target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
@@ -342,7 +261,13 @@ function M.bundle(opts)
         dependencies = analyzed.dependencies,
         trace = analyzed.trace,
         manifest = built_manifest.manifest,
-    })
+    }
+
+    if normalized.mode == "onefile" then
+        return onefile.bundleOnefile(bundle_opts)
+    end
+
+    return bundler.bundleOnedir(bundle_opts)
 end
 
 M.bundleToSinglefile = M.bundle
