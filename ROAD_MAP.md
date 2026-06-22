@@ -8,9 +8,10 @@ state control, native module loading, and self-extraction.
 
 ## Goal
 
-Build `luainstaller` into a Lua 5.5.0-based packaging tool that can produce
-same-environment, out-of-the-box executables for pure Lua and non-pure-Lua
-projects.
+Build `luainstaller` into a packaging tool that can produce same-environment,
+out-of-the-box executables for pure Lua and non-pure-Lua projects. The current
+release remains Lua 5.4-compatible; Lua 5.5.0 is the forward-looking language
+baseline for later release work.
 
 The useful compatibility promise is:
 
@@ -25,8 +26,8 @@ module compatibility must still be treated as a real ABI boundary.
 
 ## Baseline Decisions
 
-- Lua 5.5.0 is the development baseline.
-- Project code may use Lua 5.5 syntax and standard-library features.
+- Current project code and the rockspec stay compatible with Lua 5.4 or newer.
+- Lua 5.5.0 is a roadmap target, not a requirement for the current release.
 - The CLI command should be `luai`.
 - The library import should remain `require("luainstaller")`.
 - `--onedir` should be implemented before `--onefile`.
@@ -247,9 +248,10 @@ Rules:
 
 ### Phase 1: Baseline And Policy
 
-- [ ] Set Lua 5.5.0 as the development baseline in `README.md`,
-      `README-zh.md`, `CODING-STYLE.txt`, and the rockspec.
-- [ ] Replace the current Lua 5.4-first style note with Lua 5.5.0-first policy.
+- [ ] Keep current release docs explicit about Lua 5.4+ compatibility while
+      tracking Lua 5.5.0 as a roadmap target.
+- [ ] Revisit the Lua baseline once the toolchain and dependency ecosystem make
+      Lua 5.5.0 a practical release requirement.
 - [ ] Document old-system support as a build profile.
 - [ ] Define Linux host, current Windows host, and Windows XP-compatible MinGW
       profiles.
@@ -408,7 +410,8 @@ The first useful milestone is complete when:
   produces a directory bundle.
 - The directory bundle runs without a separate Lua installation on the same
   build environment.
-- Docs state the Lua 5.5.0 baseline and same OS, architecture, ABI boundary.
+- Docs state the current Lua compatibility and same OS, architecture, ABI
+  boundary.
 - The rockspec installs `luai` and does not reference missing modules.
 
 ## Non-Goals For The First Milestone

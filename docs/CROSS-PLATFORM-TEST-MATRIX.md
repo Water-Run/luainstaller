@@ -1,18 +1,18 @@
 # Cross-Platform Test Matrix
 
-Date: 2026-06-21
+Date: 2026-06-22
 
 This document records the current Linux, macOS, and Windows verification loop
-for branch `codex/linux-onedir-demo-validation`.
+for the `main` branch.
 
 ## Current Support Boundary
 
 `luainstaller` currently implements dependency analysis on any host with a
-compatible Lua runtime, Linux `--onedir` bundle output on Linux hosts with a
-working local C/Lua toolchain, and macOS `--onedir` bundle output on macOS hosts
-when a matching static Lua prefix is supplied. Windows `--onedir` bundle output
-is implemented as a profiled build from Linux using MinGW and a Windows Lua
-prefix.
+compatible Lua runtime, Linux `--onedir` and `--onefile` bundle output on Linux
+hosts with a working local C/Lua toolchain, and macOS `--onedir` and `--onefile`
+bundle output on macOS hosts when a matching static Lua prefix is supplied.
+Windows `--onedir` and `--onefile` bundle output is implemented as a profiled
+build from Linux using MinGW and a Windows Lua prefix.
 
 The tested runtime promise is still same OS family, same architecture, same Lua
 ABI, and compatible native module DLLs. General cross-building and automatic
@@ -25,8 +25,8 @@ external dependency closure remain outside this stage.
 | local workstation | Linux x86_64 | available | Full smoke, LuaRocks install, source install, and no-system-`lua` container bundle runtime passed. |
 | `192.168.10.40` | Linux x86_64 | available | Full smoke passed after installing sample native modules. Source-installed `luai` built and ran a pure Lua bundle. |
 | `192.168.5.19` | Linux aarch64 | unavailable | Source install and `luai -a` passed. `luai -c --onedir` cleanly failed with `ToolchainError` because Lua headers / Lua `pkg-config` metadata are not installed. |
-| `yymac06` | macOS arm64 | temporary `/tmp` LuaRocks plus local SQLite source cache | Temporary user-local Lua 5.4.8 and LuaRocks were built. Pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles build and run from clean `env -i` runtimes. |
-| `192.168.69.130` | Windows 10 x64 | unavailable on target | Linux-built Windows Lua 5.4.8, MinGW-built native DLLs, and bundled pure Lua dependencies were used to build pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles. The bundles run on the Windows host from a cleaned PowerShell environment without installed Lua or LuaRocks. |
+| `yymac06` | macOS arm64 | temporary `/tmp` LuaRocks plus local SQLite source cache | Temporary user-local Lua 5.4.8 and LuaRocks were built. Pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles build and run from clean `env -i` runtimes. Pure Lua and `student_management_system` `--onefile` bundles also build and run from clean runtimes. |
+| `192.168.69.130` | Windows 10 x64 | unavailable on target | Linux-built Windows Lua 5.4.8, MinGW-built native DLLs, and bundled pure Lua dependencies were used to build pure Lua, `student_management_system`, `savinglua`, `ltokei`, and `firebird_web_sql` `--onedir` bundles plus pure Lua and `student_management_system` `--onefile` bundles. The bundles run on the Windows host from a cleaned PowerShell environment without installed Lua or LuaRocks. |
 
 ## Fixes From This Loop
 
@@ -81,8 +81,9 @@ sh tools/remote-test-macos.sh
 
 The script builds or reuses temporary user-local Lua and LuaRocks under `/tmp`,
 source-installs `luai`, builds the pure Lua, `student_management_system`,
-`savinglua`, `ltokei`, and `firebird_web_sql` demos, and runs the resulting
-executables under `env -i PATH=/usr/bin:/bin`.
+`savinglua`, `ltokei`, and `firebird_web_sql` demos as `--onedir` bundles,
+builds pure Lua and `student_management_system` as `--onefile` bundles, and runs
+the resulting executables under `env -i PATH=/usr/bin:/bin`.
 
 For `savinglua`, the script does not rely on the host `/usr/lib/libsqlite3.dylib`
 or on LuaRocks being able to build a working `lsqlite3` module. It downloads
@@ -101,7 +102,8 @@ sh tools/remote-test-windows.sh
 The script builds Lua 5.4.8 for Windows with MinGW, cross-compiles `cjson`,
 `lfs`, `lsqlite3`, `socket.core`, and `mime.core` DLLs, copies Pegasus,
 LuaSocket Lua modules, and `mimetypes`, then builds and verifies all selected
-Windows bundles under Wine and on `192.168.69.130`.
+Windows `--onedir` bundles plus pure Lua and `student_management_system`
+`--onefile` bundles under Wine and on `192.168.69.130`.
 
 ## Remaining Work
 

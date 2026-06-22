@@ -12,8 +12,9 @@ description = {
     detailed = [[
         luainstaller provides tools for analyzing and packaging Lua projects
         into same-environment executables. The current Lua implementation owns
-        dependency analysis, trace-oriented diagnostics, and bundle planning;
-        runtime launcher generation is developed in later milestones.
+        dependency analysis, trace-oriented diagnostics, manifest generation,
+        C launcher generation, onedir bundling, and self-extracting onefile
+        bundling for the verified target profiles.
     ]],
     homepage = "https://github.com/Water-Run/luainstaller",
     license = "LGPL-3.0-or-later",

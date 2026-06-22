@@ -159,11 +159,23 @@ bundle_demo() {
         -o "$out" --target-os windows --lua-prefix "$WIN_PREFIX" --max-deps 300
 }
 
+bundle_demo_onefile() {
+    entry=$1
+    out=$2
+    lua_path="$PROJECT_ROOT/src/?.lua;$PROJECT_ROOT/src/?/init.lua;$WIN_TREE/share/lua/5.4/?.lua;$WIN_TREE/share/lua/5.4/?/init.lua;;"
+    lua_cpath="$WIN_TREE/lib/lua/5.4/?.dll;$WIN_TREE/lib/lua/5.4/?/core.dll;$WIN_TREE/lib/lua/5.4/?/init.dll;;"
+    LUA_PATH="$lua_path" LUA_CPATH="$lua_cpath" \
+        lua "$PROJECT_ROOT/src/cli.lua" -c --onefile "$PROJECT_ROOT/$entry" \
+        -o "$out" --target-os windows --lua-prefix "$WIN_PREFIX" --max-deps 300
+}
+
 build_bundles() {
     rm -rf "$WIN_OUT"
     mkdir -p "$WIN_OUT"
     bundle_demo test/runtime_bundle/main.lua "$WIN_OUT/runtime"
     bundle_demo test/student_management_system/main.lua "$WIN_OUT/student"
+    bundle_demo_onefile test/runtime_bundle/main.lua "$WIN_OUT/runtime-onefile"
+    bundle_demo_onefile test/student_management_system/main.lua "$WIN_OUT/student-onefile"
     bundle_demo test/savinglua/main.lua "$WIN_OUT/savinglua"
     bundle_demo test/ltokei/main.lua "$WIN_OUT/ltokei"
     bundle_demo test/firebird_web_sql/server.lua "$WIN_OUT/firebird"
@@ -174,6 +186,9 @@ verify_with_wine() {
     wine "$WIN_OUT/runtime/runtime.exe" wine-clean | grep "hello wine-clean"
     wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json seed | grep "Seeded 8 students"
     wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json list --sort average | grep "Ada Lovelace"
+    wine "$WIN_OUT/runtime-onefile.exe" wine-onefile-clean | grep "hello wine-onefile-clean"
+    wine "$WIN_OUT/student-onefile.exe" --data Z:/tmp/luainstaller-win-students-onefile.json seed | grep "Seeded 8 students"
+    wine "$WIN_OUT/student-onefile.exe" --data Z:/tmp/luainstaller-win-students-onefile.json list --sort average | grep "Ada Lovelace"
     wine "$WIN_OUT/savinglua/savinglua.exe" --db Z:/tmp/luainstaller-win-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}' | grep "stored users:ada"
     wine "$WIN_OUT/savinglua/savinglua.exe" --db Z:/tmp/luainstaller-win-savinglua.sqlite3 get users:ada | grep "Ada Lovelace"
     wine "$WIN_OUT/ltokei/ltokei.exe" Z:"$WIN_OUT/ltokei/.luai" | grep "Total"
@@ -219,12 +234,23 @@ function Require-Match($Text, $Pattern, $Name) {
 $runtime = & (Join-Path $root 'runtime\runtime.exe') 'windows-clean' | Out-String
 Require-Match $runtime 'hello windows-clean' 'runtime'
 
+$runtimeOnefile = & (Join-Path $root 'runtime-onefile.exe') 'windows-onefile-clean' | Out-String
+Require-Match $runtimeOnefile 'hello windows-onefile-clean' 'runtime onefile'
+
 $students = Join-Path $env:TEMP 'luainstaller-win-students.json'
 if (Test-Path $students) { Remove-Item -Force $students }
 $studentSeed = & (Join-Path $root 'student\student.exe') --data $students seed | Out-String
 Require-Match $studentSeed 'Seeded 8 students' 'student seed'
 $studentList = & (Join-Path $root 'student\student.exe') --data $students list --sort average | Out-String
 Require-Match $studentList 'Ada Lovelace' 'student list'
+
+$studentsOnefile = Join-Path $env:TEMP 'luainstaller-win-students-onefile.json'
+if (Test-Path $studentsOnefile) { Remove-Item -Force $studentsOnefile }
+$studentOnefile = Join-Path $root 'student-onefile.exe'
+$studentOnefileSeed = & $studentOnefile --data $studentsOnefile seed | Out-String
+Require-Match $studentOnefileSeed 'Seeded 8 students' 'student onefile seed'
+$studentOnefileList = & $studentOnefile --data $studentsOnefile list --sort average | Out-String
+Require-Match $studentOnefileList 'Ada Lovelace' 'student onefile list'
 
 $db = Join-Path $env:TEMP 'luainstaller-win-savinglua.sqlite3'
 if (Test-Path $db) { Remove-Item -Force $db }

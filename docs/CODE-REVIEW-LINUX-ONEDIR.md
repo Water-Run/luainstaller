@@ -2,10 +2,14 @@
 
 Date: 2026-06-21
 
+This is a historical review of the Linux `--onedir` milestone. Later work added
+the onefile wrapper and macOS/Windows onedir profiles; current status lives in
+`README.md` and `docs/CROSS-PLATFORM-TEST-MATRIX.md`.
+
 ## Scope
 
-This review covers the Linux `--onedir` implementation and related documentation
-on branch `codex/linux-onedir-demo-validation`.
+This review covered the Linux `--onedir` implementation and related
+documentation at that milestone.
 
 Reviewed areas:
 
@@ -97,12 +101,12 @@ Code and documentation were checked for:
 
 ## Known Remaining Limitations
 
-- `--onefile` is still not implemented.
+- At the time of this review, onefile support had not landed yet.
 - This Linux-focused review did not cover macOS output. macOS `--onedir` was
   implemented and verified later in `docs/CROSS-PLATFORM-TEST-MATRIX.md`.
 - This Linux-focused review did not cover Windows output. Windows `--onedir`
   was implemented and verified later in `docs/CROSS-PLATFORM-TEST-MATRIX.md`.
 - External shared library closure is not automatic.
-- Legacy compatibility helpers still exist in the CLI implementation.
+- Legacy compatibility commands still exist in the CLI interface.
 - Older superpowers plan/spec files are historical records and may describe
   earlier milestone expectations rather than current behavior.

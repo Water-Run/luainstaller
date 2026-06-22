@@ -2,14 +2,14 @@
 
 *[中文](README-zh.md)*
 
-`luainstaller` is a tool that packages Lua projects into **distributable executables**. Linux, macOS, and Windows `--onedir` output are implemented for same-platform or profiled builds, and `--onefile` builds are implemented as self-extracting wrappers around the same runtime contract. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.
+`luainstaller` is a tool that packages Lua projects into **distributable executables**. Linux, macOS, and Windows `--onedir` output are implemented for same-platform or profiled builds, and `--onefile` builds are implemented as self-extracting wrappers around the same runtime contract. The current local and lab scripts verify Linux, macOS, and Windows `--onedir` and `--onefile` bundles for the selected sample matrix. It is open-sourced on [GitHub](https://github.com/Water-Run/luainstaller) and licensed under **LGPL**.
 
 `luainstaller` provides dependency analysis and same-platform directory bundling
 capabilities, and can package non-pure-Lua content inside the wrapper program.
 It is important to note that `luainstaller` guarantees that the packaged binary
 will run on the same **system environment** as yours. A separate `lua` command
-is not required for Linux, macOS, or Windows onedir bundles, but system ABI and
-native library compatibility still matter.
+is not required for the verified Linux, macOS, or Windows bundles, but system
+ABI and native library compatibility still matter.
 
 > `luainstaller` was previously provided as a Python library. Older versions were out-of-the-box and cross-platform, but could only bundle pure Lua scripts. (See the `deprecated-python-lib` branch)
 
@@ -64,7 +64,7 @@ Current command status:
 |---------|--------|-------------|
 | `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
 | `luai -t <entry.lua>` | implemented | Print analyzer trace records with classifications and reasons. |
-| `luai -c <entry.lua>` | implemented on Linux, macOS, and Windows for `--onedir` and `--onefile` | Build a directory bundle or self-extracting onefile bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
+| `luai -c <entry.lua>` | implemented for Linux, macOS, and Windows `--onedir` and `--onefile` in the verified sample matrix | Build a directory bundle or self-extracting onefile bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
 
 Common options:
 
@@ -117,7 +117,7 @@ Available functions:
 |----------|--------|--------------|
 | `luainstaller.analyze(opts)` | implemented | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
 | `luainstaller.trace(opts)` | implemented | Real analyzer trace records with requiring file, source line, candidates, classification, and reason. |
-| `luainstaller.bundle(opts)` | implemented on Linux, macOS, and Windows for `mode = "onedir"` and `mode = "onefile"` | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`. |
+| `luainstaller.bundle(opts)` | implemented for Linux, macOS, and Windows `mode = "onedir"` and `mode = "onefile"` in the verified sample matrix | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`. |
 
 Common `opts` fields:
 
@@ -142,11 +142,12 @@ Common `opts` fields:
 The current workflow is: **analyze entry script → collect dependencies → trace
 resolution decisions → build a same-platform onedir or onefile bundle**.
 
-Linux, macOS, and Windows `--onedir` output are implemented. The bundler generates a C
-launcher, writes `.luai/manifest.lua`, embeds Lua payloads in the launcher, and
-copies detected native Lua C modules into `.luai/native/`. Linux uses a
-shared-Lua launcher and copies the linked Lua shared runtime. macOS links the
-launcher against a static `liblua.a` from the selected Lua prefix. Windows uses
+Linux, macOS, and Windows `--onedir` and `--onefile` output are implemented for
+the verified sample matrix. The bundler generates a C launcher, writes
+`.luai/manifest.lua`, embeds Lua payloads in the launcher, and copies detected
+native Lua C modules into `.luai/native/`. Linux uses a shared-Lua launcher and
+copies the linked Lua shared runtime. macOS links the launcher against a static
+`liblua.a` from the selected Lua prefix. Windows uses
 `x86_64-w64-mingw32-gcc`, emits a `.exe`, and copies `lua54.dll` beside the
 launcher and into `.luai/native/`. The compatibility boundary is same OS, same
 architecture, same ABI, and same Lua ABI.
@@ -155,8 +156,9 @@ architecture, same ABI, and same Lua ABI.
 extractor, and writes them to a content-addressed cache directory at runtime
 before launching the inner executable. This preserves native Lua C module and
 Lua runtime behavior because `.so`, `.dylib`, and `.dll` files exist on disk
-before user code runs. General cross-building and automatic external
-shared-library dependency closure are still roadmap work.
+before user code runs. Existing extracted files are reused when their size and
+content hash match the embedded payload. General cross-building and automatic
+external shared-library dependency closure are still roadmap work.
 
 Dependency discovery is selectable. `static` uses the analyzer, `manual` uses
 only explicit includes, and `runtime` runs the entry script once while tracing
@@ -171,13 +173,13 @@ For lab results across Linux, macOS, and Windows hosts, see
 
 The pure Lua runtime milestone is implemented: `luainstaller.runtime` can install
 a bundled module searcher, and `luainstaller.cgen` can generate a Lua bootstrap
-chunk for pure Lua payloads. This bootstrap is the Lua side that future C
-launcher work will embed.
+chunk for pure Lua payloads. This bootstrap is embedded by the generated C
+launcher.
 
 The C launcher template milestone is implemented: `luainstaller.launcher` can
 generate shared-Lua C source that embeds the Lua bootstrap and executes it
-through the Lua C API. The Linux onedir bundler uses this generator to produce
-the executable in the output directory.
+through the Lua C API. The bundler uses this generator to produce the executable
+in the output directory.
 
 The overall process can be summarized as:
 

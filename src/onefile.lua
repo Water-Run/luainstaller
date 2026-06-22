@@ -341,14 +341,37 @@ static int luai_parent_dir(char *out, size_t out_size, const char *path) {
     return 0;
 }
 
+static int luai_file_matches_hash(const char *path, size_t expected_size, const char *expected_hash) {
+    FILE *file = fopen(path, "rb");
+    unsigned int hash = 2166136261u;
+    size_t total = 0;
+    int ch;
+    char actual[9];
+    if (!file) return 0;
+    while ((ch = fgetc(file)) != EOF) {
+        hash ^= (unsigned char)ch;
+        hash *= 16777619u;
+        total++;
+    }
+    if (ferror(file)) {
+        fclose(file);
+        return 0;
+    }
+    fclose(file);
+    if (total != expected_size) return 0;
+    snprintf(actual, sizeof(actual), "%08x", hash);
+    return strcmp(actual, expected_hash) == 0;
+}
+
 static int luai_join(char *out, size_t out_size, const char *left, const char *right) {
     int n = snprintf(out, out_size, "%s%s%s", left, L_SEP, right);
     return n >= 0 && (size_t)n < out_size ? 0 : -1;
 }
 
-static int luai_write_file(const char *path, const unsigned char *data, size_t size, int executable) {
+static int luai_write_file(const char *path, const unsigned char *data, size_t size, int executable, const char *hash) {
     char parent[4096];
     FILE *file;
+    if (luai_file_matches_hash(path, size, hash)) return 0;
     if (luai_parent_dir(parent, sizeof(parent), path) != 0) return -1;
     if (luai_mkdir_p(parent) != 0) return -1;
     file = fopen(path, "wb");
@@ -387,7 +410,7 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size) {
     for (i = 0; i < LUAI_FILE_COUNT; ++i) {
         char target[4096];
         if (luai_join(target, sizeof(target), bundle_dir, luai_files[i].path) != 0) return -1;
-        if (luai_write_file(target, luai_files[i].data, luai_files[i].size, luai_files[i].executable) != 0) {
+        if (luai_write_file(target, luai_files[i].data, luai_files[i].size, luai_files[i].executable, luai_files[i].hash) != 0) {
             fprintf(stderr, "luainstaller-onefile: cannot extract %s\n", luai_files[i].path);
             return -1;
         }
@@ -481,6 +504,7 @@ local function generateExtractor(files, payload_id, inner_exe)
     lines[#lines + 1] = "    const char *path;"
     lines[#lines + 1] = "    const unsigned char *data;"
     lines[#lines + 1] = "    size_t size;"
+    lines[#lines + 1] = "    const char *hash;"
     lines[#lines + 1] = "    int executable;"
     lines[#lines + 1] = "};"
     lines[#lines + 1] = emitFileArrays(files)
@@ -490,10 +514,11 @@ local function generateExtractor(files, payload_id, inner_exe)
     lines[#lines + 1] = "static const struct luai_embedded_file luai_files[] = {"
     for i, file in ipairs(files) do
         lines[#lines + 1] = string.format(
-            "    { %s, luai_file_%d, %d, %d },",
+            "    { %s, luai_file_%d, %d, %s, %d },",
             cString(file.path),
             i,
             file.size,
+            cString(file.hash),
             file.executable and 1 or 0
         )
     end

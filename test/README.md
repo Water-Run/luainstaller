@@ -5,7 +5,7 @@ packaging behavior. These applications are packaging targets for binary tools,
 similar to PyInstaller-built applications. They are intentionally
 application-like rather than unit-test-only fixtures: they should help verify
 dependency analysis, LuaRocks module discovery, native module handling, data
-files, embedded Web UI, and future onefile runtime extraction.
+files, embedded Web UI, and onefile runtime extraction.
 
 The test programs are grouped by packaging difficulty.
 
@@ -52,11 +52,11 @@ export PATH="$HOME/.local/bin:$PATH"
 luai -a test/single_file/01_hello_luainstaller.lua
 ```
 
-Linux, macOS, and Windows `--onedir` packaging are implemented for the selected
-sample matrix. The smoke suite packages and runs selected Linux examples,
-including native Lua C module targets, and verifies that the generated bundles
-can run without a separate `lua` command in a same-ABI environment. Remote
-scripts extend the same coverage to macOS and Windows:
+Linux, macOS, and Windows `--onedir` and `--onefile` packaging are implemented
+for the selected sample matrix. The smoke suite packages and runs selected
+Linux examples, including native Lua C module targets, and verifies that the
+generated bundles can run without a separate `lua` command in a same-ABI
+environment. Remote scripts extend the same coverage to macOS and Windows:
 
 ```sh
 sh tools/remote-test-linux.sh

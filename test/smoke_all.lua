@@ -63,6 +63,11 @@ local function command_output(command)
     return out
 end
 
+local function command_output_trimmed(command)
+    local output = command_output(command)
+    return (output:gsub("%s+$", ""))
+end
+
 local function remove_file(path)
     os.remove(path)
 end
@@ -71,6 +76,13 @@ local function write_file(path, content)
     local handle = assert(io.open(path, "wb"))
     handle:write(content or "")
     handle:close()
+end
+
+local function read_file(path)
+    local handle = assert(io.open(path, "rb"))
+    local content = handle:read("*a") or ""
+    handle:close()
+    return content
 end
 
 local function remove_tree(path)
@@ -458,6 +470,21 @@ print("windows profile toolchain ok")
     assert_contains(run("lua -e " .. shell_quote(script)), "windows profile toolchain ok")
 end
 
+local function check_remote_onefile_script_coverage()
+    local macos = read_file("tools/remote-test-macos.sh")
+    assert_contains(macos, "bundle_onefile()")
+    assert_contains(macos, "--onefile")
+    assert_contains(macos, "mac-onefile-runtime")
+    assert_contains(macos, "mac-onefile-student")
+
+    local windows = read_file("tools/remote-test-windows.sh")
+    assert_contains(windows, "bundle_demo_onefile()")
+    assert_contains(windows, "--onefile")
+    assert_contains(windows, "runtime-onefile.exe")
+    assert_contains(windows, "student-onefile.exe")
+    print("remote onefile script coverage ok")
+end
+
 local function cli_command(args)
     local quoted = {}
     for i = 1, #args do
@@ -776,7 +803,19 @@ assert_bundle({
         .. " lua -e " .. shell_quote(script))
     assert_contains(built, runtime_out)
     assert_contains(built, student_out)
-    assert_contains(run(shell_quote(runtime_out) .. " onefile"), "hello onefile")
+    local cache_root = root .. "/onefile-cache"
+    assert_contains(run("TMPDIR=" .. shell_quote(cache_root) .. " " .. shell_quote(runtime_out) .. " onefile"), "hello onefile")
+    local manifest_path = command_output_trimmed("find " .. shell_quote(cache_root) .. " -path '*/.luai/manifest.lua' | sort | head -n 1")
+    if manifest_path == "" then
+        error("onefile cache manifest was not extracted", 2)
+    end
+    local first_mtime = command_output_trimmed("stat -c %Y " .. shell_quote(manifest_path))
+    run("sleep 1")
+    assert_contains(run("TMPDIR=" .. shell_quote(cache_root) .. " " .. shell_quote(runtime_out) .. " onefile-again"), "hello onefile-again")
+    local second_mtime = command_output_trimmed("stat -c %Y " .. shell_quote(manifest_path))
+    if first_mtime ~= second_mtime then
+        error("onefile cache rewrote matching extracted file", 2)
+    end
     local student_data = root .. "/students-onefile.json"
     assert_contains(run(shell_quote(student_out) .. " --data " .. shell_quote(student_data) .. " seed"), "Seeded 8 students")
     assert_contains(run(shell_quote(student_out) .. " --data " .. shell_quote(student_data) .. " list --sort average"), "Ada Lovelace")
@@ -856,6 +895,7 @@ check_bundler_without_popen()
 check_platform_profiles()
 check_macos_profile_reaches_toolchain()
 check_windows_profile_reaches_toolchain()
+check_remote_onefile_script_coverage()
 check_cli_contract()
 check_runtime_cgen()
 check_c_launcher()

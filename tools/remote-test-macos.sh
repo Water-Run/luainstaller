@@ -114,6 +114,12 @@ bundle() {
     LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" LUAI_LUA_PREFIX="\$LUA_PREFIX" "\$PREFIX/bin/luai" -c --onedir "\$entry" -o "\$out" --max-deps 250
 }
 
+bundle_onefile() {
+    entry=\$1
+    out=\$2
+    LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" LUAI_LUA_PREFIX="\$LUA_PREFIX" "\$PREFIX/bin/luai" -c --onefile "\$entry" -o "\$out" --max-deps 250
+}
+
 exe_path() {
     out=\$1
     printf '%s/%s' "\$out" "\$(basename "\$out")"
@@ -130,6 +136,15 @@ rm -rf /tmp/luainstaller-mac-student /tmp/macos-students.json
 bundle test/student_management_system/main.lua /tmp/luainstaller-mac-student
 env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json seed | grep "Seeded 8 students"
 env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json list --sort average | grep "Ada Lovelace"
+
+rm -rf /tmp/luainstaller-mac-onefile-runtime
+bundle_onefile test/runtime_bundle/main.lua /tmp/luainstaller-mac-onefile-runtime
+env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-runtime mac-onefile-runtime | grep "hello mac-onefile-runtime"
+
+rm -rf /tmp/luainstaller-mac-onefile-student /tmp/macos-onefile-students.json
+bundle_onefile test/student_management_system/main.lua /tmp/luainstaller-mac-onefile-student
+env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json seed | grep "Seeded 8 students"
+env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json list --sort average | grep "Ada Lovelace"
 
 rm -rf /tmp/luainstaller-mac-savinglua /tmp/macos-savinglua.sqlite3
 bundle test/savinglua/main.lua /tmp/luainstaller-mac-savinglua

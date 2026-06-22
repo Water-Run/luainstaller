@@ -20,16 +20,17 @@ luai \- analyze and package Lua projects into same-environment executables
 
 .SH DESCRIPTION
 \fBluainstaller\fR is a tool that analyzes Lua dependencies and packages Lua projects into
-\fBsame-environment executables\fR. The current implemented bundle targets are Linux,
-macOS, and Windows \fB--onedir\fR and \fB--onefile\fR output. It is open-sourced on GitHub and licensed under the
+\fBsame-environment executables\fR. The current verified sample matrix covers Linux,
+macOS, and Windows \fB--onedir\fR and \fB--onefile\fR output through local and lab
+scripts. It is open-sourced on GitHub and licensed under the
 \fBLGPL\fR. See the repository for source code, releases, and documentation:
 https://github.com/Water-Run/luainstaller
 
 \fBluainstaller\fR provides dependency analysis and same-platform directory bundling capabilities, and can
 package non-pure-Lua content inside the wrapper program. It is important to note that
 \fBluainstaller\fR guarantees that the packaged binary will run on the same \fBsystem environment\fR
-as yours. Linux, macOS, and Windows onedir bundles do not require a separate \fBlua\fR
-command, but system ABI and native library compatibility still matter.
+as yours. The verified Linux, macOS, and Windows bundles do not require a separate
+\fBlua\fR command, but system ABI and native library compatibility still matter.
 
 \fBluainstaller\fR can be used as a CLI tool and (when installed via LuaRocks) as a Lua module via
 \fBrequire("luainstaller")\fR.
@@ -62,7 +63,7 @@ Analyze Lua and native module dependencies.
 Print trace records for dependency resolution decisions.
 .TP
 .B \-c
-Build a Linux, macOS, or Windows onedir bundle or self-extracting onefile bundle.
+Build an onedir bundle or self-extracting onefile bundle.
 
 .SH CLI USAGE
 The CLI tool name is \fBluai\fR.
@@ -307,7 +308,8 @@ Windows uses \fBx86_64-w64-mingw32-gcc\fR, emits a \fB.exe\fR, and copies
 
 For \fB--onefile\fR, \fBluainstaller\fR first stages that same onedir layout, embeds
 the staged files in a native extractor, and writes them to a content-addressed
-cache directory at runtime before launching the inner executable.
+cache directory at runtime before launching the inner executable. Matching
+previously extracted files are reused when their size and content hash match.
 
 The first-stage compatibility promise is same OS, same architecture, same ABI, and same Lua
 ABI. The current implementation does not claim cross-platform output, automatic external

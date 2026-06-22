@@ -2,11 +2,11 @@
 
 *[English](README.md)*
 
-`luainstaller` 是一个将 Lua 项目打包为**可分发可执行程序**的工具。当前已实现 Linux、macOS 与 Windows `--onedir` 输出，用于同平台或显式 profile 构建；`--onefile` 已实现为基于同一运行时契约的自解压单文件包装器。项目开源于 [GitHub](https://github.com/Water-Run/luainstaller)，遵循 **LGPL** 协议。
+`luainstaller` 是一个将 Lua 项目打包为**可分发可执行程序**的工具。当前已实现 Linux、macOS 与 Windows `--onedir` 输出，用于同平台或显式 profile 构建；`--onefile` 已实现为基于同一运行时契约的自解压单文件包装器。当前本地与实验脚本已验证所选样例矩阵中的 Linux、macOS 和 Windows `--onedir` 与 `--onefile` 包。项目开源于 [GitHub](https://github.com/Water-Run/luainstaller)，遵循 **LGPL** 协议。
 
 `luainstaller` 具备依赖分析与同平台目录打包能力，可在封装程序中包含非纯
 Lua 的内容。需要特别说明的是，`luainstaller` 保障的是打包后的二进制文件能
-在与当前**相同的系统环境**下正常运行。Linux、macOS 和 Windows onedir 目录包
+在与当前**相同的系统环境**下正常运行。已验证的 Linux、macOS 和 Windows 包
 不需要目标环境额外提供 `lua` 命令，但仍要求系统 ABI 和 native library 兼容。
 
 > `luainstaller` 曾以 Python 库形式提供。旧版本开箱即用且跨平台，但仅支持打包纯 Lua 脚本。（见 `deprecated-python-lib` 分支）
@@ -61,7 +61,7 @@ luai -c --onefile test/runtime_bundle/main.lua -o build/runtime-onefile
 |------|------|------|
 | `luai -a <entry.lua>` | 已实现 | 分析 Lua 与 native 模块依赖。 |
 | `luai -t <entry.lua>` | 已实现 | 输出粗粒度的解析诊断信息。 |
-| `luai -c <entry.lua>` | Linux、macOS 和 Windows `--onedir` 与 `--onefile` 已实现 | 构建目录包或自解压单文件包，包含 launcher、manifest、嵌入的 Lua payload 和复制的 native Lua C 模块。 |
+| `luai -c <entry.lua>` | 已在所选样例矩阵中实现并验证 Linux、macOS 和 Windows `--onedir` 与 `--onefile` | 构建目录包或自解压单文件包，包含 launcher、manifest、嵌入的 Lua payload 和复制的 native Lua C 模块。 |
 
 常用选项：
 
@@ -114,7 +114,7 @@ end
 |------|------|----------|
 | `luainstaller.analyze(opts)` | 已实现 | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
 | `luainstaller.trace(opts)` | 已实现 | analyzer 真实 trace 记录，包含引用文件、源码行、候选项、分类和原因。 |
-| `luainstaller.bundle(opts)` | Linux、macOS 和 Windows `mode = "onedir"` 与 `mode = "onefile"` 已实现 | 返回 `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`。 |
+| `luainstaller.bundle(opts)` | 已在所选样例矩阵中实现并验证 Linux、macOS 和 Windows `mode = "onedir"` 与 `mode = "onefile"` | 返回 `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`。 |
 
 常用 `opts` 字段：
 
@@ -139,19 +139,20 @@ end
 当前工作流程是：**分析入口脚本 → 收集依赖 → 输出解析诊断 → 构建同平台
 onedir 目录包或 onefile 单文件包**。
 
-Linux、macOS 和 Windows `--onedir` 输出已经实现。它会生成 C launcher，写入
-`.luai/manifest.lua`，将 Lua payload 嵌入 launcher，并把检测到的 native Lua
-C 模块复制到 `.luai/native/`。Linux 使用 shared-Lua launcher 并复制链接到的
-Lua shared runtime；macOS 使用所选 Lua prefix 中的静态 `liblua.a` 链接
-launcher；Windows 使用 `x86_64-w64-mingw32-gcc` 生成 `.exe`，并把 `lua54.dll`
-复制到 launcher 同级目录和 `.luai/native/`。兼容性边界是相同 OS、相同架构、
-相同 ABI 和相同 Lua ABI。
+Linux、macOS 和 Windows `--onedir` 与 `--onefile` 输出已经在所选样例矩阵中实现
+并验证。它会生成 C launcher，写入 `.luai/manifest.lua`，将 Lua payload 嵌入
+launcher，并把检测到的 native Lua C 模块复制到 `.luai/native/`。Linux 使用
+shared-Lua launcher 并复制链接到的 Lua shared runtime；macOS 使用所选 Lua
+prefix 中的静态 `liblua.a` 链接 launcher；Windows 使用
+`x86_64-w64-mingw32-gcc` 生成 `.exe`，并把 `lua54.dll` 复制到 launcher 同级
+目录和 `.luai/native/`。兼容性边界是相同 OS、相同架构、相同 ABI 和相同 Lua ABI。
 
 `--onefile` 会先复用同一 onedir 布局完成 staging，再把这些文件嵌入一个 native
 extractor。运行时 extractor 将文件写入按内容 hash 区分的缓存目录，然后启动内层
 可执行程序。这样 `.so`、`.dylib`、`.dll` 等 native Lua C 模块和 Lua runtime
-都会在用户代码运行前真实存在于文件系统中。通用跨平台交叉构建和自动外部
-shared library 依赖闭包仍是路线图中的后续工作。
+都会在用户代码运行前真实存在于文件系统中。已存在的提取文件在大小和内容 hash
+匹配时会复用。通用跨平台交叉构建和自动外部 shared library 依赖闭包仍是路线图中
+的后续工作。
 
 依赖发现引擎可选：`static` 使用静态 analyzer，`manual` 只使用显式 include，
 `runtime` 会在构建期运行入口程序一次并记录实际发生的 `require` 调用。runtime
@@ -164,11 +165,11 @@ Linux、macOS 和 Windows 测试环境结果见
 
 纯 Lua runtime 里程碑已实现：`luainstaller.runtime` 可以安装 bundled module
 searcher，`luainstaller.cgen` 可以为纯 Lua payload 生成 Lua bootstrap chunk。
-这段 bootstrap 是后续 C launcher 将要嵌入的 Lua 侧启动逻辑。
+这段 bootstrap 已由生成的 C launcher 嵌入执行。
 
 C launcher template 里程碑已实现：`luainstaller.launcher` 可以生成
-shared-Lua C 源码，将 Lua bootstrap 嵌入并通过 Lua C API 执行。这是后续
-Linux onedir bundler 用来生成输出目录可执行程序的构建基础。
+shared-Lua C 源码，将 Lua bootstrap 嵌入并通过 Lua C API 执行。bundler 使用它
+生成输出目录中的可执行程序。
 
 可以将其工作过程概括为：
 
