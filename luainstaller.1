@@ -60,7 +60,7 @@ build host plus a Windows Lua prefix that provides Lua headers and \fBlua54.dll\
 Analyze Lua and native module dependencies.
 .TP
 .B \-t
-Print trace records for dependency resolution decisions.
+Print trace records for dependency resolution decisions and compatibility diagnostics.
 .TP
 .B \-c
 Build an onedir bundle or self-extracting onefile bundle.
@@ -119,6 +119,14 @@ success.
 \fIentry.lua\fR
 N script(s), M library(ies)
 .fi
+
+.SS trace
+Trace dependency resolution and compatibility boundaries:
+.nf
+luai -t \fIentry.lua\fR
+.fi
+Typical output includes analyzer records followed by a \fBcompatibility\fR section
+that states the same OS, same architecture, same ABI, and same Lua ABI promise.
 
 .SH OPTIONS
 The following options apply to \fB-a\fR, \fB-t\fR, and/or \fB-c\fR as described.

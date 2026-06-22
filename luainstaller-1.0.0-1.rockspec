@@ -40,6 +40,7 @@ build = {
         ["luainstaller"]          = "src/init.lua",
         ["luainstaller.logger"]   = "src/logger.lua",
         ["luainstaller.analyzer"] = "src/analyzer.lua",
+        ["luainstaller.compat"]   = "src/compat.lua",
         ["luainstaller.manifest"] = "src/manifest.lua",
         ["luainstaller.platform"] = "src/platform.lua",
         ["luainstaller.runtime"]  = "src/runtime.lua",

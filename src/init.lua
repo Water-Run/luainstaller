@@ -17,6 +17,7 @@ Updated:
 
 local analyzer = require("luainstaller.analyzer")
 local bundler  = require("luainstaller.bundler")
+local compat   = require("luainstaller.compat")
 local logger   = require("luainstaller.logger")
 local manifest = require("luainstaller.manifest")
 local onefile  = require("luainstaller.onefile")
@@ -205,17 +206,56 @@ end
 --@param opts: table|string - Options table with entry, or legacy entry string
 --@return: table - Structured trace result
 function M.trace(opts)
-    local analyzed = M.analyze(opts)
+    local normalized, err = normalizeOptions(opts)
+    if not normalized then
+        return err
+    end
+
+    local analyzed = M.analyze(normalized)
     if not analyzed.ok then
         return analyzed
     end
 
     return {
-        ok           = true,
-        action       = "trace",
-        entry        = analyzed.entry,
-        dependencies = analyzed.dependencies,
-        trace        = analyzed.trace or {},
+        ok            = true,
+        action        = "trace",
+        entry         = analyzed.entry,
+        dependencies  = analyzed.dependencies,
+        trace         = analyzed.trace or {},
+        compatibility = compat.diagnose({
+            entry = analyzed.entry,
+            mode = normalized.mode or "onedir",
+            target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
+            lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
+            launcher_profile = normalized.launcher_profile,
+            dependencies = analyzed.dependencies,
+            trace = analyzed.trace,
+        }),
+    }
+end
+
+function M.compatibility(opts)
+    local normalized, err = normalizeOptions(opts)
+    if not normalized then
+        return err
+    end
+    local analyzed = M.analyze(normalized)
+    if not analyzed.ok then
+        return analyzed
+    end
+    return {
+        ok = true,
+        action = "compatibility",
+        entry = analyzed.entry,
+        compatibility = compat.diagnose({
+            entry = analyzed.entry,
+            mode = normalized.mode or "onedir",
+            target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
+            lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
+            launcher_profile = normalized.launcher_profile,
+            dependencies = analyzed.dependencies,
+            trace = analyzed.trace,
+        }),
     }
 end
 

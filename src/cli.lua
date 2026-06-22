@@ -44,6 +44,9 @@ local function installSourcePreloads()
     package.preload["luainstaller.manifest"] = package.preload["luainstaller.manifest"] or function()
         return dofile(sourcePath("manifest.lua"))
     end
+    package.preload["luainstaller.compat"] = package.preload["luainstaller.compat"] or function()
+        return dofile(sourcePath("compat.lua"))
+    end
     package.preload["luainstaller.platform"] = package.preload["luainstaller.platform"] or function()
         return dofile(sourcePath("platform.lua"))
     end
@@ -405,6 +408,16 @@ local function renderTrace(result)
             item.selected_path and " -> " or "",
             item.selected_path or ""
         ))
+    end
+    if result.compatibility then
+        io.write("compatibility.\n")
+        io.write(string.format("  %s\n", result.compatibility.summary or "unknown"))
+        for _, note in ipairs(result.compatibility.notes or {}) do
+            io.write(string.format("  note: %s\n", note))
+        end
+        for _, warning in ipairs(result.compatibility.warnings or {}) do
+            io.write(string.format("  warning: %s\n", warning))
+        end
     end
 end
 

@@ -20,6 +20,7 @@ local SOURCE_LOADER = [[
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
 package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
+package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
 package.preload["luainstaller.platform"] = function() return dofile("src/platform.lua") end
 package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
@@ -347,6 +348,34 @@ print("require engines ok")
     remove_tree(root)
 end
 
+local function check_compatibility_diagnostics()
+    local script = SOURCE_LOADER .. [[
+local luainstaller = require("luainstaller")
+
+local traced = luainstaller.trace({
+    entry = "test/runtime_bundle/main.lua",
+    max_deps = 120,
+})
+assert(traced.ok == true, traced.error and traced.error.message)
+assert(type(traced.compatibility) == "table")
+assert(traced.compatibility.summary:match("same OS"))
+assert(traced.compatibility.summary:match("same architecture"))
+assert(traced.compatibility.summary:match("same ABI"))
+assert(traced.compatibility.summary:match("same Lua ABI"))
+assert(#traced.compatibility.notes >= 1)
+assert(traced.compatibility.notes[1]:match("does not claim universal cross%-platform output"))
+local diagnosed = luainstaller.compatibility({
+    entry = "test/runtime_bundle/main.lua",
+    max_deps = 120,
+})
+assert(diagnosed.ok == true, diagnosed.error and diagnosed.error.message)
+assert(diagnosed.action == "compatibility")
+assert(diagnosed.compatibility.summary == traced.compatibility.summary)
+print("compat api ok")
+]]
+    assert_contains(run("lua -e " .. shell_quote(script)), "compat api ok")
+end
+
 local function check_manifest_without_popen()
     local script = SOURCE_LOADER .. [[
 local manifest = require("luainstaller.manifest")
@@ -523,6 +552,9 @@ local function check_cli_contract()
     }))
     assert_contains(traced, "trace.")
     assert_contains(traced, "resolved")
+    assert_contains(traced, "compatibility.")
+    assert_contains(traced, "same OS, same architecture, same ABI, same Lua ABI")
+    assert_contains(traced, "does not claim universal cross-platform output")
 
     local cli_out = make_temp_dir("cli-onedir")
     local bundled = run(cli_command({
@@ -890,6 +922,7 @@ check_samples()
 check_analyzer_visibility()
 check_api_contract()
 check_require_engines()
+check_compatibility_diagnostics()
 check_manifest_without_popen()
 check_bundler_without_popen()
 check_platform_profiles()

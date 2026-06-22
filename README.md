@@ -63,7 +63,7 @@ Current command status:
 | Command | Status | Description |
 |---------|--------|-------------|
 | `luai -a <entry.lua>` | implemented | Analyze Lua and native module dependencies. |
-| `luai -t <entry.lua>` | implemented | Print analyzer trace records with classifications and reasons. |
+| `luai -t <entry.lua>` | implemented | Print analyzer trace records plus compatibility diagnostics for the same OS, architecture, ABI, and Lua ABI boundary. |
 | `luai -c <entry.lua>` | implemented for Linux, macOS, and Windows `--onedir` and `--onefile` in the verified sample matrix | Build a directory bundle or self-extracting onefile bundle with a launcher, manifest, embedded Lua payload, and copied native Lua C modules. |
 
 Common options:
@@ -116,7 +116,8 @@ Available functions:
 | Function | Status | Return shape |
 |----------|--------|--------------|
 | `luainstaller.analyze(opts)` | implemented | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
-| `luainstaller.trace(opts)` | implemented | Real analyzer trace records with requiring file, source line, candidates, classification, and reason. |
+| `luainstaller.trace(opts)` | implemented | Real analyzer trace records with requiring file, source line, candidates, classification, reason, and a `compatibility` summary. |
+| `luainstaller.compatibility(opts)` | implemented | Compatibility diagnostics for target profile, Lua ABI, launcher profile, and known native-library risks. |
 | `luainstaller.bundle(opts)` | implemented for Linux, macOS, and Windows `mode = "onedir"` and `mode = "onefile"` in the verified sample matrix | Returns `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`. |
 
 Common `opts` fields:

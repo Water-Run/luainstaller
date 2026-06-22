@@ -60,7 +60,7 @@ luai -c --onefile test/runtime_bundle/main.lua -o build/runtime-onefile
 | 命令 | 状态 | 说明 |
 |------|------|------|
 | `luai -a <entry.lua>` | 已实现 | 分析 Lua 与 native 模块依赖。 |
-| `luai -t <entry.lua>` | 已实现 | 输出粗粒度的解析诊断信息。 |
+| `luai -t <entry.lua>` | 已实现 | 输出 analyzer trace 记录，以及相同 OS、架构、ABI 和 Lua ABI 边界的兼容性诊断。 |
 | `luai -c <entry.lua>` | 已在所选样例矩阵中实现并验证 Linux、macOS 和 Windows `--onedir` 与 `--onefile` | 构建目录包或自解压单文件包，包含 launcher、manifest、嵌入的 Lua payload 和复制的 native Lua C 模块。 |
 
 常用选项：
@@ -113,7 +113,8 @@ end
 | 函数 | 状态 | 返回形态 |
 |------|------|----------|
 | `luainstaller.analyze(opts)` | 已实现 | `{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }` |
-| `luainstaller.trace(opts)` | 已实现 | analyzer 真实 trace 记录，包含引用文件、源码行、候选项、分类和原因。 |
+| `luainstaller.trace(opts)` | 已实现 | analyzer 真实 trace 记录，包含引用文件、源码行、候选项、分类、原因和 `compatibility` 摘要。 |
+| `luainstaller.compatibility(opts)` | 已实现 | 输出目标 profile、Lua ABI、launcher profile 和已知 native library 风险的兼容性诊断。 |
 | `luainstaller.bundle(opts)` | 已在所选样例矩阵中实现并验证 Linux、macOS 和 Windows `mode = "onedir"` 与 `mode = "onefile"` | 返回 `{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`。 |
 
 常用 `opts` 字段：
