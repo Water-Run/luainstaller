@@ -1,0 +1,344 @@
+= luainstaller
+
+link:README-zh.adoc[中文]
+
+`luainstaller` is a tool that packages Lua projects into *distributable
+executables*. Linux, macOS, and Windows `--onedir` output are
+implemented for same-platform or profiled builds, and `--onefile` builds
+are implemented as self-extracting wrappers around the same runtime
+contract. The current local and lab scripts verify Linux, macOS, and
+Windows `--onedir` and `--onefile` bundles for the selected sample
+matrix. It is open-sourced on
+https://github.com/Water-Run/luainstaller[GitHub] and licensed under
+*LGPL*.
+
+`luainstaller` provides dependency analysis and same-platform directory
+bundling capabilities, and can package non-pure-Lua content inside the
+wrapper program. It is important to note that `luainstaller` guarantees
+that the packaged binary will run on the same *system environment* as
+yours. A separate `lua` command is not required for the verified Linux,
+macOS, or Windows bundles, but system ABI and native library
+compatibility still matter.
+
+____
+`luainstaller` was previously provided as a Python library. Older
+versions were out-of-the-box and cross-platform, but could only bundle
+pure Lua scripts. (See the `deprecated-python-lib` branch)
+____
+
+'''''
+
+=== Documentation
+
+* link:docs/LINUX-ONEDIR-BUNDLING.adoc[Linux onedir bundling] explains the
+  generated layout, launcher/runtime flow, native Lua C module handling, and
+  verification commands.
+* link:docs/CROSS-PLATFORM-TEST-MATRIX.adoc[Cross-platform test matrix] records
+  the current Linux, macOS, and Windows verification loop.
+* link:test/README.adoc[Test programs] describes the sample applications used
+  to exercise pure Lua, native module, and onefile packaging behavior.
+* `luai(1)` and `luainstaller(1)` are installed by the source installer. The
+  manual page source is kept in `luainstaller.1`.
+
+GitHub renders `README.adoc` and linked `.adoc` files directly.
+
+'''''
+
+=== Installation
+
+Install via `luarocks`:
+
+[source,bash]
+----
+luarocks install luainstaller
+----
+
+Install from a source checkout when LuaRocks is unavailable:
+
+[source,bash]
+----
+sh tools/install-source.sh --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+luai --help
+luainstaller -v
+----
+
+This source installer only needs a `lua` command and installs both CLI
+names plus `luai(1)` and `luainstaller(1)` man pages. Building
+`--onedir` or `--onefile` bundles still requires the local C toolchain
+and Lua development metadata. Linux uses `cc`, Lua headers, and
+`pkg-config` data for Lua. macOS uses `cc` plus a matching Lua prefix
+that provides Lua headers and `liblua.a`. Windows bundles are built from
+a Linux host with MinGW and a Windows Lua prefix containing Lua headers
+plus `lua54.dll`.
+
+'''''
+
+=== Build Requirements
+
+Dependency analysis works with Lua 5.4 or newer and does not require a C
+compiler. Building bundles does.
+
+[cols=",",options="header",]
+|===
+|Target |Requirements
+|Linux `--dir` / `--file` |Lua headers, Lua `pkg-config` metadata, `cc`, and
+the native Lua modules required by the entry program.
+
+|macOS `--dir` / `--file` |`cc` plus `--lua-prefix` or `LUAI_LUA_PREFIX`
+pointing at a matching Lua prefix that provides headers and `liblua.a`.
+
+|Windows `--dir` / `--file` from Linux |MinGW, a Windows Lua prefix containing
+headers and `lua54.dll`, and Windows builds of any native Lua C modules used by
+the package.
+|===
+
+Bundles are intended for environments with the same OS family, architecture,
+ABI, Lua ABI, and compatible native library set as the build profile.
+
+'''''
+
+=== Usage
+
+`luainstaller` can be used as a CLI tool or invoked directly from Lua
+scripts.
+
+'''''
+
+==== Command-Line Tool (CLI)
+
+CLI command names: `luai` and `luainstaller`.
+
+[source,bash]
+----
+luai --help
+luai a test/student_management_system/main.lua
+luai t test/student_management_system/main.lua
+luai b --dir test/student_management_system/main.lua -o build/student-manager
+luai b --file test/runtime_bundle/main.lua -o build/runtime-onefile
+luainstaller -v
+----
+
+Current command status:
+
+[cols=",,",options="header",]
+|===
+|Command |Status |Description
+|`luai a <entry.lua>` |implemented |Analyze Lua and native
+module dependencies.
+
+|`luai t <entry.lua>` |implemented |Print analyzer trace records
+plus compatibility diagnostics for the same OS, architecture, ABI, and
+Lua ABI boundary.
+
+|`luai b <entry.lua>` |implemented for Linux, macOS, and Windows
+`--dir` and `--file` in the verified sample matrix |Build a directory
+bundle or self-extracting onefile bundle with a launcher, manifest,
+embedded Lua payload, and copied native Lua C modules.
+|===
+
+Compatibility aliases are kept for existing scripts: `-a`/`analyze`,
+`-t`/`trace`, and `-c`/`build`.
+
+Common options:
+
+[cols=",",options="header",]
+|===
+|Option |Description
+|`--dir, --onedir` |Directory bundle mode. This is the default output
+mode.
+
+|`--file, --onefile` |Self-extracting single-file bundle mode.
+
+|`-o, --out <path>` |Output path for bundle actions.
+
+|`--include <path>` |Manually include a dependency; repeatable.
+
+|`--exclude <path>` |Exclude a dependency by path or basename;
+repeatable.
+
+|`--target-os <os>` |Select a target profile: `linux`, `macos`,
+or `windows`.
+
+|`--lua-prefix <path>` |Lua prefix used by targets that need
+explicit headers/runtime files.
+
+|`-r, --require-engine <engine>` |Dependency discovery engine:
+`static`, `manual`, or `runtime`.
+
+|`--no-depscan` |Disable automatic dependency scanning.
+
+|`--max-deps <n>` |Maximum dependency count, default `36`.
+
+|`--verbose` |Request more detailed output where available.
+|===
+
+'''''
+
+==== Lua API
+
+The Lua API uses the same parameter semantics as the CLI. Dependency
+scanning is enabled by default; set `depscan = false` to disable it.
+
+[source,lua]
+----
+local luainstaller = require("luainstaller")
+----
+
+'''''
+
+===== Structured Results
+
+The public API returns result tables instead of throwing for normal user
+errors.
+
+[source,lua]
+----
+local analyzed = luainstaller.analyze({
+  entry = "test/student_management_system/main.lua",
+  max_deps = 250,
+})
+
+if analyzed.ok then
+  print(#analyzed.dependencies.scripts)
+else
+  io.stderr:write(analyzed.error.type .. ": " .. analyzed.error.message .. "\n")
+end
+----
+
+Available functions:
+
+[cols=",,",options="header",]
+|===
+|Function |Status |Return shape
+|`luainstaller.analyze(opts)` |implemented
+|pass:[`{ ok = true, action = "analyze", dependencies = { scripts = {}, libraries = {} } }`]
+
+|`luainstaller.trace(opts)` |implemented |Real analyzer trace records
+with requiring file, source line, candidates, classification, reason,
+and a `compatibility` summary.
+
+|`luainstaller.compatibility(opts)` |implemented |Compatibility
+diagnostics for target profile, Lua ABI, launcher profile, and known
+native-library risks.
+
+|`luainstaller.bundle(opts)` |implemented for Linux, macOS, and Windows
+`mode = "onedir"` and `mode = "onefile"` in the verified sample matrix
+|Returns
+pass:[`{ ok = true, action = "bundle", executable = "...", manifest = { ... } }`].
+|===
+
+Common `opts` fields:
+
+[cols=",,,",options="header",]
+|===
+|Field |Type |Default |Description
+|`entry` |string |required |Entry script path.
+
+|`mode` |string |`"onedir"` |`onedir` or `onefile`.
+
+|`out` |string |nil |Output directory path for `onedir`; output
+executable path for `onefile`.
+
+|`max_deps` |number |`36` |Maximum dependency count.
+
+|`include` |string[] |pass:[`{}`] |Extra files to include.
+
+|`exclude` |string[] |pass:[`{}`] |Paths or basenames to exclude.
+
+|`depscan` |boolean |`true` |Set `false` for manual-only dependencies.
+
+|`require_engine` |string |`"static"` |Dependency engine: `static`,
+`manual`, or `runtime`; `depscan = false` aliases `manual`.
+
+|`run_args` |string[] |pass:[`{}`] |Arguments passed to the entry
+script during `require_engine = "runtime"` discovery.
+
+|`target_os` |string |host OS |Target profile: `linux`, `macos`, or
+`windows`.
+
+|`lua_prefix` |string |`LUAI_LUA_PREFIX` |Lua
+headers/runtime prefix for macOS and Windows profiles.
+|===
+
+'''''
+
+=== How It Works
+
+The current workflow is: *analyze entry script → collect dependencies →
+trace resolution decisions → build a same-platform onedir or onefile
+bundle*.
+
+Linux, macOS, and Windows `--onedir` and `--onefile` output are
+implemented for the verified sample matrix. The bundler generates a C
+launcher, writes `.luai/manifest.lua`, embeds Lua payloads in the
+launcher, and copies detected native Lua C modules into `.luai/native/`.
+Linux uses a shared-Lua launcher and copies the linked Lua shared
+runtime. macOS links the launcher against a static `liblua.a` from the
+selected Lua prefix. Windows uses `x86_64-w64-mingw32-gcc`, emits a
+`.exe`, and copies `lua54.dll` beside the launcher and into
+`.luai/native/`. The compatibility boundary is same OS, same
+architecture, same ABI, and same Lua ABI.
+
+`--onefile` first stages the same onedir layout, embeds those files in a
+native extractor, and writes them to a content-addressed cache directory
+at runtime before launching the inner executable. This preserves native
+Lua C module and Lua runtime behavior because `.so`, `.dylib`, and
+`.dll` files exist on disk before user code runs. Existing extracted
+files are reused when their size and content hash match the embedded
+payload. General cross-building and automatic external shared-library
+dependency closure are outside the current support boundary.
+
+Dependency discovery is selectable. `static` uses the analyzer, `manual`
+uses only explicit includes, and `runtime` runs the entry script once
+while tracing actual `require` calls. Runtime discovery only covers code
+paths executed during that build-time run.
+
+For detailed implementation notes, non-pure-Lua behavior, verification
+commands, and current limitations, see
+link:docs/LINUX-ONEDIR-BUNDLING.adoc[docs/LINUX-ONEDIR-BUNDLING.adoc]. For
+lab results across Linux, macOS, and Windows hosts, see
+link:docs/CROSS-PLATFORM-TEST-MATRIX.adoc[docs/CROSS-PLATFORM-TEST-MATRIX.adoc].
+
+The pure Lua runtime milestone is implemented: `luainstaller.runtime`
+can install a bundled module searcher, and `luainstaller.cgen` can
+generate a Lua bootstrap chunk for pure Lua payloads. This bootstrap is
+embedded by the generated C launcher.
+
+The C launcher template milestone is implemented:
+`luainstaller.launcher` can generate shared-Lua C source that embeds the
+Lua bootstrap and executes it through the Lua C API. The bundler uses
+this generator to produce the executable in the output directory.
+
+The overall process can be summarized as:
+
+[source,plaintext]
+----
+[entry.lua]
+     |
+     v
+[Dependency Analysis: static / manual / runtime]
+     |
+     v
+[Collect Lua files / manual --include / --exclude]
+     |
+     v
+[Generate C launcher / copy native modules / write manifest]
+     |
+     v
+[Linux, macOS, or Windows onedir or onefile bundle]
+----
+
+'''''
+
+=== Troubleshooting
+
+Use `luai t <entry.lua>` before bundling when dependency discovery is unclear.
+The trace output reports the requiring file, source line, candidates, selected
+path, classification, and compatibility summary.
+
+If a build fails with `ToolchainError`, check that the selected target has the
+required compiler, Lua headers, Lua runtime metadata, and target-native Lua C
+modules. If a generated bundle starts but a native module fails to load, inspect
+`.luai/manifest.lua`, the copied files under `.luai/native/`, and the platform
+dynamic loader output (`ldd`, `otool -L`, or the Windows DLL search path).

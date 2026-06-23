@@ -624,11 +624,11 @@ print(result.executable)
     assert_contains(windows_script, "sshpass -e scp $SSH_OPTS")
     assert_contains(windows_script, "sshpass -e ssh $SSH_OPTS")
 
-    local test_readme = read_file("test/README.md")
+    local test_readme = read_file("test/README.adoc")
     assert_contains(test_readme, "WINDOWS_PASSWORD=...")
     assert_contains(test_readme, "tools/remote-test-windows.sh")
 
-    local test_matrix = read_file("docs/CROSS-PLATFORM-TEST-MATRIX.md")
+    local test_matrix = read_file("docs/CROSS-PLATFORM-TEST-MATRIX.adoc")
     assert_contains(test_matrix, "WINDOWS_PASSWORD=...")
     assert_contains(test_matrix, "tools/remote-test-windows.sh")
 

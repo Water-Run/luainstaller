@@ -1,0 +1,177 @@
+= firebird_web_sql
+
+This sample is a complete Web SQL Shell target for `luainstaller`. It is
+meant to be packaged as a ready-to-run binary tool, similar to how a
+PyInstaller app ships a local web UI and backend together.
+
+The app includes an embedded single-page Web interface, JSON APIs, a
+mock SQL driver for smoke tests, and an optional Firebird adapter
+through LuaSQL.
+
+=== Packaging Purpose
+
+This is not only a demo server. It is a packaging target that exercises:
+
+* embedded Web UI delivery from Lua source
+* Pegasus web server discovery
+* `cjson` native module discovery
+* optional Firebird database driver handling
+* optional OpenSSL-backed security capability detection
+* larger multi-file application tracing
+* HTTP API plus browser UI workflows
+
+=== Features
+
+* single-page WebSQLShell interface
+* access password field in the page, stored locally by the browser
+* optional public/private key passwordless-auth configuration surface
+* optional encrypted API mode when server crypto is available
+* schema browser
+* SQL editor
+* result table
+* query history
+* favorite SQL snippets
+* CSV export
+* mock driver with `EMPLOYEE` and `DEPARTMENT` tables
+* real Firebird adapter path through `luasql.firebird`
+
+=== Files
+
+* `server.lua` - Pegasus server and JSON API routes
+* `config.lua` - environment-driven configuration
+* `db.lua` - mock and Firebird database adapter
+* `history.lua` - in-memory SQL history
+* `security.lua` - security capability detection and guidance
+* `web.lua` - embedded HTML/CSS/JavaScript page
+* `smoke_test.lua` - non-interactive check that does not need
+Firebird
+
+=== Dependencies
+
+Install the basic Web shell dependencies:
+
+[source,sh]
+----
+luarocks install pegasus
+luarocks install lua-cjson
+----
+
+Install Firebird support when connecting to a real database:
+
+[source,sh]
+----
+luarocks install luasql-firebird
+----
+
+Install OpenSSL-backed server crypto when experimenting with encrypted
+payloads or key-based authentication:
+
+[source,sh]
+----
+luarocks install luaossl
+----
+
+The page uses browser WebCrypto for client-side cryptographic operations
+where available. `plc` is a possible pure Lua research fallback for
+NaCl-style primitives, but `luaossl` is the preferred server-side option
+for this sample.
+
+=== Security Model
+
+The page lets the user set the access password, which is sent as
+`X-Auth-Token`. This is convenient for a packaged local tool.
+
+The UI also includes public/private key fields for passwordless
+workflows and an encrypted API toggle. These are intentionally
+capability-gated:
+
+* WebCrypto is expected on the browser side.
+* `luaossl` is expected on the Lua server side.
+* HTTP application-layer encryption can reduce passive credential
+exposure, but it does not replace HTTPS against active man-in-the-middle
+attacks because an attacker could tamper with the page JavaScript before
+it runs.
+
+Use HTTPS or a trusted local loopback deployment for sensitive
+databases.
+
+=== Run
+
+Start in mock mode:
+
+[source,sh]
+----
+cd test/firebird_web_sql
+lua server.lua
+----
+
+Open:
+
+[source,text]
+----
+http://127.0.0.1:9090/
+----
+
+The default access password is `changeme_PLEASE`. Override it for
+real use:
+
+[source,sh]
+----
+FIREBIRD_WEB_SQL_TOKEN='change_this' lua test/firebird_web_sql/server.lua
+----
+
+Connect to a real Firebird database:
+
+[source,sh]
+----
+FIREBIRD_WEB_SQL_DRIVER='luasql-firebird' \
+FIREBIRD_HOST='127.0.0.1' \
+FIREBIRD_DATABASE='/path/to/database.fdb' \
+FIREBIRD_USER='SYSDBA' \
+FIREBIRD_PASSWORD='masterkey' \
+lua test/firebird_web_sql/server.lua
+----
+
+=== API
+
+* `GET /` - embedded Web page
+* `GET /api/status` - server, connection, and security status
+* `POST /api/connect` - switch driver or connection settings
+* `POST /api/query` - run SQL
+* `POST /api/execute` - alias for SQL execution
+* `GET /api/tables` - list tables
+* `GET /api/table/<name>` - table metadata and sample rows
+* `GET /api/history` - query history
+* `POST /api/history/clear` - clear query history
+* `POST /api/export/csv` - run query and return CSV
+
+=== Verification
+
+Run the smoke test without a real Firebird server:
+
+[source,sh]
+----
+lua test/firebird_web_sql/smoke_test.lua
+----
+
+Run syntax checks:
+
+[source,sh]
+----
+find test/firebird_web_sql -maxdepth 1 -name '*.lua' -print0 | xargs -0 -n1 luac -p
+----
+
+Future packaging targets:
+
+[source,sh]
+----
+luai t test/firebird_web_sql/server.lua
+luai b test/firebird_web_sql/server.lua -o build/firebird-web-sql
+----
+
+Expected dependency behavior:
+
+* Lua modules: `config`, `db`, `history`, `security`, `web`
+* LuaRocks/native modules: `pegasus`, `cjson`
+* Optional real database module: `luasql.firebird`
+* Optional crypto module: `luaossl`
