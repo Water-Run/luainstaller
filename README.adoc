@@ -1,7 +1,5 @@
 = luainstaller
 
-link:README-zh.adoc[中文]
-
 `luainstaller` is a tool that packages Lua projects into *distributable
 executables*. Linux, macOS, and Windows `--onedir` output are
 implemented for same-platform or profiled builds, and `--onefile` builds
@@ -30,9 +28,19 @@ ____
 
 === Documentation
 
-* link:docs/LINUX-ONEDIR-BUNDLING.adoc[Linux onedir bundling] explains the
-  generated layout, launcher/runtime flow, native Lua C module handling, and
-  verification commands.
+* link:docs/README.adoc[Documentation index] gives the recommended reading
+  path.
+* link:docs/USER-GUIDE.adoc[User guide] covers installation, first bundles,
+  dependency discovery, native modules, platform profiles, and verification.
+* link:docs/OPERATING-MODE.adoc[Operating mode] explains analysis, manifest
+  generation, launcher generation, onedir assembly, and onefile extraction.
+* link:docs/CLI.adoc[CLI reference] documents the split `luai` and
+  `luainstaller` command personalities, output contracts, options, and
+  migration notes.
+* link:docs/TROUBLESHOOTING.adoc[Troubleshooting] maps common analysis,
+  toolchain, output safety, and runtime failures to diagnosis steps.
+* link:docs/LINUX-ONEDIR-BUNDLING.adoc[Linux onedir bundling] gives
+  Linux-specific generated layout and native-module details.
 * link:docs/CROSS-PLATFORM-TEST-MATRIX.adoc[Cross-platform test matrix] records
   the current Linux, macOS, and Windows verification loop.
 * link:test/README.adoc[Test programs] describes the sample applications used
@@ -59,8 +67,8 @@ Install from a source checkout when LuaRocks is unavailable:
 ----
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
-luai --help
-luainstaller -v
+luai -h
+luainstaller version
 ----
 
 This source installer only needs a `lua` command and installs both CLI
@@ -107,71 +115,27 @@ scripts.
 
 ==== Command-Line Tool (CLI)
 
-CLI command names: `luai` and `luainstaller`.
+CLI command names: `luai` and `luainstaller`. They are intentionally different
+interfaces over the same Lua API: `luai` is compact and script-oriented;
+`luainstaller` is full-word and human-oriented. The full command contract,
+output policy, migration table, and terminal behavior are documented in
+link:docs/CLI.adoc[docs/CLI.adoc].
 
 [source,bash]
 ----
-luai --help
-luai a test/student_management_system/main.lua
-luai t test/student_management_system/main.lua
-luai b --dir test/student_management_system/main.lua -o build/student-manager
-luai b --file test/runtime_bundle/main.lua -o build/runtime-onefile
-luainstaller -v
+luai -h
+luai -a test/student_management_system/main.lua
+luai -t test/student_management_system/main.lua
+luai -b --dir test/student_management_system/main.lua -o build/student-manager
+luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile
+luainstaller help
+luainstaller version
+luainstaller analyze test/student_management_system/main.lua
+luainstaller build --dir test/student_management_system/main.lua -o build/student-manager
 ----
 
-Current command status:
-
-[cols=",,",options="header",]
-|===
-|Command |Status |Description
-|`luai a <entry.lua>` |implemented |Analyze Lua and native
-module dependencies.
-
-|`luai t <entry.lua>` |implemented |Print analyzer trace records
-plus compatibility diagnostics for the same OS, architecture, ABI, and
-Lua ABI boundary.
-
-|`luai b <entry.lua>` |implemented for Linux, macOS, and Windows
-`--dir` and `--file` in the verified sample matrix |Build a directory
-bundle or self-extracting onefile bundle with a launcher, manifest,
-embedded Lua payload, and copied native Lua C modules.
-|===
-
-Compatibility aliases are kept for existing scripts: `-a`/`analyze`,
-`-t`/`trace`, and `-c`/`build`.
-
-Common options:
-
-[cols=",",options="header",]
-|===
-|Option |Description
-|`--dir, --onedir` |Directory bundle mode. This is the default output
-mode.
-
-|`--file, --onefile` |Self-extracting single-file bundle mode.
-
-|`-o, --out <path>` |Output path for bundle actions.
-
-|`--include <path>` |Manually include a dependency; repeatable.
-
-|`--exclude <path>` |Exclude a dependency by path or basename;
-repeatable.
-
-|`--target-os <os>` |Select a target profile: `linux`, `macos`,
-or `windows`.
-
-|`--lua-prefix <path>` |Lua prefix used by targets that need
-explicit headers/runtime files.
-
-|`-r, --require-engine <engine>` |Dependency discovery engine:
-`static`, `manual`, or `runtime`.
-
-|`--no-depscan` |Disable automatic dependency scanning.
-
-|`--max-deps <n>` |Maximum dependency count, default `36`.
-
-|`--verbose` |Request more detailed output where available.
-|===
+For scripting, prefer `luai`. For interactive terminal use, prefer
+`luainstaller`.
 
 '''''
 
@@ -333,7 +297,8 @@ The overall process can be summarized as:
 
 === Troubleshooting
 
-Use `luai t <entry.lua>` before bundling when dependency discovery is unclear.
+Use `luai -t <entry.lua>` or `luainstaller trace <entry.lua>` before bundling
+when dependency discovery is unclear.
 The trace output reports the requiring file, source line, candidates, selected
 path, classification, and compatibility summary.
 

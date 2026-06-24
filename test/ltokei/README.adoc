@@ -69,8 +69,8 @@ Future packaging targets:
 
 [source,sh]
 ----
-luai t test/ltokei/main.lua
-luai b test/ltokei/main.lua -o build/ltokei
+luai -t test/ltokei/main.lua
+luai -b test/ltokei/main.lua -o build/ltokei
 ----
 
 Expected dependency behavior:

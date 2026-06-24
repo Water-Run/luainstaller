@@ -109,9 +109,9 @@ Future packaging targets:
 
 [source,sh]
 ----
-luai a test/student_management_system/main.lua
-luai t test/student_management_system/main.lua
-luai b test/student_management_system/main.lua -o build/student-manager
+luai -a test/student_management_system/main.lua
+luai -t test/student_management_system/main.lua
+luai -b test/student_management_system/main.lua -o build/student-manager
 ----
 
 Expected dependency behavior:

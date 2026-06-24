@@ -9,7 +9,7 @@ Start here:
 [source,sh]
 ----
 lua test/single_file/01_hello_luainstaller.lua
-luai b test/single_file/01_hello_luainstaller.lua
+luai -b test/single_file/01_hello_luainstaller.lua
 ----
 
 === Coverage

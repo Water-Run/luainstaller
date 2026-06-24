@@ -19,6 +19,12 @@ dist/
 out/
 target/
 
+# Agent planning artifacts
+doc/superpower/
+doc/superpowers/
+docs/superpower/
+docs/superpowers/
+
 # If you ship prebuilt binaries selectively, keep them explicit
 # e.g. do NOT ignore /bin globally unless you are sure
 # bin/

@@ -118,6 +118,12 @@ local function assert_contains(text, pattern)
     end
 end
 
+local function assert_not_contains(text, pattern)
+    if tostring(text):find(pattern, 1, true) then
+        error("expected output not to contain " .. pattern .. "\nactual:\n" .. tostring(text), 2)
+    end
+end
+
 local function assert_equals(actual, expected)
     if actual ~= expected then
         error("expected:\n" .. tostring(expected) .. "\nactual:\n" .. tostring(actual), 2)
@@ -636,70 +642,91 @@ print(result.executable)
     print("release safety contract ok")
 end
 
-local function cli_command(args)
+local function cli_command(program_name, args)
     local quoted = {}
     for i = 1, #args do
         quoted[#quoted + 1] = string.format("%q", args[i])
     end
     return "lua -e " .. shell_quote(SOURCE_LOADER .. string.format([[
 local cli = require("luainstaller.cli")
-os.exit(cli.main({ %s }))
-]], table.concat(quoted, ", ")))
+os.exit(cli.main({ %s }, { program_name = %q, color = false, animations = false }))
+]], table.concat(quoted, ", "), program_name))
 end
 
 local function check_cli_contract()
-    local direct_help = run("lua src/cli.lua --help")
-    assert_contains(direct_help, "luai a <entry.lua>")
+    local direct_help = run("lua src/cli.lua -h")
+    assert_contains(direct_help, "luai -a <entry.lua>")
 
-    local help = run(cli_command({ "--help" }))
-    assert_contains(help, "luai a <entry.lua>")
-    assert_contains(help, "luai t <entry.lua>")
-    assert_contains(help, "luai b <entry.lua>")
+    local luai_help = run(cli_command("luai", { "-h" }))
+    assert_contains(luai_help, "luai -a <entry.lua>")
+    assert_contains(luai_help, "luai -t <entry.lua>")
+    assert_contains(luai_help, "luai -b <entry.lua>")
+    assert_not_contains(luai_help, "luainstaller analyze")
 
     assert_equals(
-        run(cli_command({ "--version" })),
+        run(cli_command("luai", { "-v" })),
+        "luai 1.0.0\n"
+    )
+
+    local full_help = run(cli_command("luainstaller", { "help" }))
+    assert_contains(full_help, "luainstaller analyze <entry.lua>")
+    assert_contains(full_help, "luainstaller trace <entry.lua>")
+    assert_contains(full_help, "luainstaller build <entry.lua>")
+
+    assert_equals(
+        run(cli_command("luainstaller", { "version" })),
         "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
     )
 
-    local analyzed = run(cli_command({
-        "a",
-        "test/student_management_system/main.lua",
-        "--max-deps",
-        "250",
-    }))
-    assert_contains(analyzed, "success.")
-    assert_contains(analyzed, "script(s)")
-    assert_contains(analyzed, "library(ies)")
+    local bad_luai = run(cli_command("luai", { "build", "test/single_file/01_hello_luainstaller.lua" }), {
+        expect_failure = true,
+    })
+    assert_contains(bad_luai, "error: unknown luai command: build")
 
-    local traced = run(cli_command({
-        "t",
+    local bad_full = run(cli_command("luainstaller", { "-b", "test/single_file/01_hello_luainstaller.lua" }), {
+        expect_failure = true,
+    })
+    assert_contains(bad_full, "error: unknown luainstaller command: -b")
+
+    local analyzed = run(cli_command("luai", {
+        "-a",
         "test/student_management_system/main.lua",
         "--max-deps",
         "250",
     }))
-    assert_contains(traced, "trace.")
+    assert_contains(analyzed, "ok")
+    assert_contains(analyzed, "scripts:")
+    assert_contains(analyzed, "libraries:")
+
+    local traced = run(cli_command("luai", {
+        "-t",
+        "test/student_management_system/main.lua",
+        "--max-deps",
+        "250",
+    }))
+    assert_contains(traced, "trace")
     assert_contains(traced, "resolved")
-    assert_contains(traced, "compatibility.")
+    assert_contains(traced, "compatibility:")
     assert_contains(traced, "same OS, same architecture, same ABI, same Lua ABI")
     assert_contains(traced, "does not claim universal cross-platform output")
 
-    local verbose_analyzed = run(cli_command({
-        "a",
+    local verbose_analyzed = run(cli_command("luai", {
+        "-a",
         "test/student_management_system/main.lua",
         "--max-deps",
         "250",
         "--verbose",
     }))
-    assert_contains(verbose_analyzed, "trace records:")
+    assert_contains(verbose_analyzed, "trace-records:")
     assert_contains(verbose_analyzed, "model")
 
-    local engines = run(cli_command({ "engines" }))
-    assert_contains(engines, "Legacy engine names")
-    assert_contains(engines, "current bundler ignores -engine")
+    local engines = run(cli_command("luainstaller", { "engines" }))
+    assert_contains(engines, "Legacy engines")
+    assert_contains(engines, "retained for inspection")
 
     local cli_out = make_temp_dir("cli-onedir")
-    local bundled = run(cli_command({
-        "b",
+    local bundled = run(cli_command("luai", {
+        "-b",
         "--dir",
         "test/student_management_system/main.lua",
         "-o",
@@ -707,7 +734,7 @@ local function check_cli_contract()
         "--max-deps",
         "250",
     }))
-    assert_contains(bundled, "success.")
+    assert_contains(bundled, "ok")
     assert_contains(bundled, cli_out .. "/")
     remove_tree(cli_out)
 
@@ -1021,15 +1048,15 @@ print(mod.message())
 return { message = function() return "cli runtime dynamic module" end }
 ]])
 
-    local traced = run(cli_command({
-        "a",
+    local traced = run(cli_command("luai", {
+        "-a",
         root .. "/main.lua",
         "-r",
         "runtime",
         "--",
         "dynamic",
     }))
-    assert_contains(traced, "success.")
+    assert_contains(traced, "ok")
     assert_contains(traced, "dynamic.lua")
     remove_tree(root)
     print("cli require engine ok")
@@ -1046,10 +1073,10 @@ local function check_installed_cli_bundle()
     local out_dir = root .. "/runtime"
     run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.0.0-1.rockspec")
     assert_equals(
-        run(shell_quote(tree .. "/bin/luainstaller") .. " --version"),
+        run(shell_quote(tree .. "/bin/luainstaller") .. " version"),
         "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
     )
-    run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " b --dir "
+    run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
         .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
     assert_contains(run(shell_quote(out_dir .. "/runtime") .. " installed"), "hello installed")
@@ -1063,16 +1090,16 @@ local function check_source_install_bundle()
     local out_dir = root .. "/runtime"
     run("sh tools/install-source.sh --prefix " .. shell_quote(prefix))
     assert_equals(
-        run(shell_quote(prefix .. "/bin/luai") .. " --version"),
-        "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
+        run(shell_quote(prefix .. "/bin/luai") .. " -v"),
+        "luai 1.0.0\n"
     )
     assert_equals(
-        run(shell_quote(prefix .. "/bin/luainstaller") .. " --version"),
+        run(shell_quote(prefix .. "/bin/luainstaller") .. " version"),
         "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
     )
     assert_file_exists(prefix .. "/share/man/man1/luai.1")
     assert_file_exists(prefix .. "/share/man/man1/luainstaller.1")
-    run("cd /tmp && " .. shell_quote(prefix .. "/bin/luainstaller") .. " b --dir "
+    run("cd /tmp && " .. shell_quote(prefix .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
         .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
     assert_contains(run(shell_quote(out_dir .. "/runtime") .. " source-install"), "hello source-install")

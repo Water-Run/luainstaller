@@ -164,7 +164,7 @@ bundle_demo() {
     lua_path="$PROJECT_ROOT/src/?.lua;$PROJECT_ROOT/src/?/init.lua;$WIN_TREE/share/lua/5.4/?.lua;$WIN_TREE/share/lua/5.4/?/init.lua;;"
     lua_cpath="$WIN_TREE/lib/lua/5.4/?.dll;$WIN_TREE/lib/lua/5.4/?/core.dll;$WIN_TREE/lib/lua/5.4/?/init.dll;;"
     LUA_PATH="$lua_path" LUA_CPATH="$lua_cpath" \
-        lua "$PROJECT_ROOT/src/cli.lua" b --dir "$PROJECT_ROOT/$entry" \
+        lua "$PROJECT_ROOT/src/cli.lua" -b --dir "$PROJECT_ROOT/$entry" \
         -o "$out" --target-os windows --lua-prefix "$WIN_PREFIX" --max-deps 300
 }
 
@@ -174,7 +174,7 @@ bundle_demo_onefile() {
     lua_path="$PROJECT_ROOT/src/?.lua;$PROJECT_ROOT/src/?/init.lua;$WIN_TREE/share/lua/5.4/?.lua;$WIN_TREE/share/lua/5.4/?/init.lua;;"
     lua_cpath="$WIN_TREE/lib/lua/5.4/?.dll;$WIN_TREE/lib/lua/5.4/?/core.dll;$WIN_TREE/lib/lua/5.4/?/init.dll;;"
     LUA_PATH="$lua_path" LUA_CPATH="$lua_cpath" \
-        lua "$PROJECT_ROOT/src/cli.lua" b --file "$PROJECT_ROOT/$entry" \
+        lua "$PROJECT_ROOT/src/cli.lua" -b --file "$PROJECT_ROOT/$entry" \
         -o "$out" --target-os windows --lua-prefix "$WIN_PREFIX" --max-deps 300
 }
 

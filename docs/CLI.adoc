@@ -1,0 +1,495 @@
+= luainstaller CLI Reference
+:author: WaterRun
+:revdate: 2026-06-24
+:toc: left
+:toclevels: 4
+:sectanchors:
+:sectlinks:
+:icons: font
+:source-highlighter: rouge
+:experimental:
+:table-caption: Table
+:xrefstyle: short
+:command-luai: luai
+:command-full: luainstaller
+
+[[abstract]]
+[abstract]
+--
+`luainstaller` ships two command-line interfaces over the same packaging API.
+`{command-luai}` is compact, plain, and script-oriented. `{command-full}` is
+full-word, sectioned, and terminal-oriented.
+--
+
+[[identity]]
+== Command Identity
+
+The two executable names are not aliases in user experience. They share the
+same Lua library and packaging backend, but they intentionally expose different
+syntax and output contracts.
+
+`{command-luai}`::
+  Compact interface modeled after traditional Lua and Unix C tools.
+  It accepts short commands and emits stable plain text.
+
+`{command-full}`::
+  Modern interface modeled after full-word application CLIs.
+  It accepts subcommands and emits richer human-readable output.
+
+[IMPORTANT]
+====
+Command forms do not cross over.
+
+* `luai -b app.lua` is valid.
+* `luainstaller build app.lua` is valid.
+* `luai build app.lua` is invalid.
+* `luainstaller -b app.lua` is invalid.
+====
+
+See xref:command-matrix[] for the complete command mapping.
+For an end-to-end packaging workflow, read xref:USER-GUIDE.adoc[] first. For
+the implementation model behind these commands, read xref:OPERATING-MODE.adoc[].
+
+[[command-matrix]]
+== Command Matrix
+
+[cols="1,2,2,3",options="header"]
+|===
+|Action |`luai` |`luainstaller` |Notes
+
+|Help
+|`luai -h`
+|`luainstaller help`
+|Both commands describe only their own accepted syntax.
+
+|Version
+|`luai -v`
+|`luainstaller version`
+|`luai` prints a compact banner; `luainstaller` prints license context.
+
+|Analyze
+|`luai -a <entry.lua>`
+|`luainstaller analyze <entry.lua>`
+|Find Lua sources and native Lua modules.
+
+|Trace
+|`luai -t <entry.lua>`
+|`luainstaller trace <entry.lua>`
+|Show require-resolution decisions and compatibility notes.
+
+|Build
+|`luai -b <entry.lua>`
+|`luainstaller build <entry.lua>`
+|Build `--dir` or `--file` bundles.
+
+|Logs
+|Not exposed
+|`luainstaller logs`
+|Operational log review is a modern CLI concern.
+
+|Legacy engines
+|Not exposed
+|`luainstaller engines`
+|Retained for auditing older workflow names.
+|===
+
+[[choosing]]
+== Choosing A Command
+
+[qanda]
+Should a script call `luai` or `luainstaller`?::
+  Use `luai`. Its output is short, plain, and free of terminal presentation.
+
+Should a human use `luai` or `luainstaller`?::
+  Use `luainstaller` unless you prefer terse shell output.
+
+Can both commands build the same bundle?::
+  Yes. They dispatch to the same `luainstaller.bundle()` API after parsing
+  their distinct command syntax.
+
+Can I parse `luainstaller` output?::
+  Avoid doing so. Use the Lua API for structured integration, or use `luai`
+  for line-oriented shell checks.
+
+[[luai]]
+== `luai`
+
+`luai` is deliberately small. It does not attempt to be friendly by accepting
+nearby long-form commands; unknown forms fail early.
+
+[[luai-synopsis]]
+=== Synopsis
+
+[source,sh]
+----
+luai -h
+luai -v
+luai -a <entry.lua> [action-options]
+luai -t <entry.lua> [action-options]
+luai -b <entry.lua> [build-options]
+----
+
+[[luai-output-contract]]
+=== Output Contract
+
+[horizontal]
+Color:: Never emitted.
+Animation:: Never emitted.
+Progress frames:: Never emitted.
+Error prefix:: `error:`
+Hint prefix:: `try:`
+Default success token:: `ok`
+
+.Compact analysis output
+[source,text]
+----
+ok
+entry: test/runtime_bundle/main.lua
+scripts: 1
+libraries: 0
+script[1]: /work/test/runtime_bundle/greeter.lua
+----
+
+[TIP]
+====
+The compact output is intentionally readable by `grep`, `awk`, shell
+conditionals, and CI logs. It is still not a stable machine data format; use
+the Lua API when consumers need structured records.
+====
+
+[[luainstaller]]
+== `luainstaller`
+
+`luainstaller` favors explicit full words and readable terminal output.
+It may use ANSI color and progress animation when the terminal context allows
+presentation.
+
+[[luainstaller-synopsis]]
+=== Synopsis
+
+[source,sh]
+----
+luainstaller help
+luainstaller version
+luainstaller analyze <entry.lua> [action-options]
+luainstaller trace <entry.lua> [action-options]
+luainstaller build <entry.lua> [build-options]
+luainstaller logs [log-options]
+luainstaller engines
+----
+
+[[modern-output-contract]]
+=== Output Contract
+
+[cols="1,3",options="header"]
+|===
+|Condition |Behavior
+
+|Interactive terminal
+|Color and progress animation may be used.
+
+|`NO_COLOR` is set
+|Color is disabled.
+
+|CI-style or redirected output
+|Presentation downgrades to plain, stable text.
+
+|Explicit test context disables color
+|No ANSI escape sequences are emitted.
+
+|Explicit test context enables color
+|ANSI escape sequences are emitted for modern renderer coverage.
+|===
+
+[sidebar]
+.Presentation Is Not Data
+--
+Color and animation never carry information required to understand success,
+failure, output paths, compatibility notes, or error messages. When
+presentation is unavailable, the same semantic content is printed as text.
+--
+
+.Modern analysis output
+[source,text]
+----
+Analysis complete
+  Entry: test/runtime_bundle/main.lua
+  Lua scripts: 1
+  Native libraries: 0
+----
+
+[[shared-options]]
+== Action And Build Options
+
+The same option parser is shared after each CLI has accepted its own command
+form.
+
+[cols="1,1,3",options="header"]
+|===
+|Option |Actions |Meaning
+
+|`--dir`, `--onedir`
+|Build
+|Create a directory bundle. This is the default build mode.
+
+|`--file`, `--onefile`
+|Build
+|Create a self-extracting onefile wrapper around the same onedir runtime
+contract.
+
+|`-o <path>`, `--out <path>`
+|Build
+|Select the output directory for `--dir` or output executable for `--file`.
+
+|`--include <path>`
+|Analyze, trace, build
+|Manually include an extra dependency. Repeatable.
+
+|`--exclude <path>`
+|Analyze, trace, build
+|Exclude a dependency by path or basename. Repeatable.
+
+|`--target-os <os>`
+|Trace, build
+|Select `linux`, `macos`, or `windows` profile.
+
+|`--lua-prefix <path>`
+|Trace, build
+|Select a Lua prefix that provides headers and runtime files for profiled
+targets.
+
+|`-r <engine>`, `--require-engine <engine>`
+|Analyze, trace, build
+|Select `static`, `manual`, or `runtime` dependency discovery.
+
+|`--no-depscan`
+|Analyze, trace, build
+|Alias for manual dependency mode.
+
+|`--max-deps <n>`
+|Analyze, trace, build
+|Set the dependency count limit.
+
+|`--verbose`
+|Analyze, build
+|Emit additional trace or manifest counts.
+|===
+
+[[dependency-engines]]
+== Dependency Discovery Engines
+
+[horizontal]
+`static`:: Parse literal `require(...)` calls without running the program.
+`manual`:: Use explicit `--include` inputs only.
+`runtime`:: Run the entry script once and trace the `require` calls that
+actually execute.
+
+[CAUTION]
+====
+`runtime` discovery is path-sensitive. A module that is required only under a
+different user option, platform branch, or data condition will not be observed.
+Use `--include` for dependencies that must be present even when the build-time
+run does not load them.
+====
+
+.Runtime discovery with callouts
+[source,sh]
+----
+luai -a app/main.lua -r runtime -- dynamic-module-name # <1> <2>
+----
+<1> Select runtime require tracing.
+<2> Pass `dynamic-module-name` to the build-time run after `--`.
+
+[[examples]]
+== Worked Examples
+
+[[example-compact-dir]]
+=== Compact Directory Bundle
+
+[source,sh]
+----
+luai -b --dir test/runtime_bundle/main.lua -o build/runtime
+build/runtime/runtime sample
+----
+
+Expected program output:
+
+[source,text]
+----
+hello sample
+entry=test/runtime_bundle/main.lua
+----
+
+[[example-modern-onefile]]
+=== Modern Onefile Bundle
+
+[source,sh]
+----
+luainstaller build --file test/runtime_bundle/main.lua -o build/runtime-onefile
+build/runtime-onefile sample
+----
+
+Expected CLI and program output:
+
+[source,text]
+----
+Build complete
+  Executable: build/runtime-onefile
+hello sample
+entry=test/runtime_bundle/main.lua
+----
+
+[[example-trace-first]]
+=== Trace Before Build
+
+[source,sh]
+----
+luainstaller trace test/student_management_system/main.lua --max-deps 250
+----
+
+Use this when a build fails because a dependency cannot be located. Trace
+records show the requiring file, requested module name, candidate paths,
+selection reason, and compatibility summary.
+
+[[errors]]
+== Error Model
+
+Errors keep the same underlying structured API result but use command-specific
+presentation.
+
+[cols="1,2,2",options="header"]
+|===
+|Case |`luai` |`luainstaller`
+
+|Unknown command
+|`error: unknown luai command: build`
+|`error: unknown luainstaller command: -b`
+
+|Missing entry
+|`error: analyze requires an entry script`
+|`error: analyze requires an entry script`
+
+|Backend error
+|`error: ToolchainError: ...`
+|`error: ToolchainError: ...`
+
+|Hint
+|`try: luai -h`
+|`hint: run luainstaller help`
+|===
+
+[[migration]]
+== Migration From The Unified CLI
+
+[%collapsible]
+.Old forms and replacements
+====
+[cols="1,1,1",options="header"]
+|===
+|Old form |New compact form |New modern form
+
+|`luai a app.lua`
+|`luai -a app.lua`
+|`luainstaller analyze app.lua`
+
+|`luai t app.lua`
+|`luai -t app.lua`
+|`luainstaller trace app.lua`
+
+|`luai b app.lua -o dist/app`
+|`luai -b app.lua -o dist/app`
+|`luainstaller build app.lua -o dist/app`
+
+|`luainstaller --version`
+|`luai -v`
+|`luainstaller version`
+|===
+====
+
+[NOTE]
+====
+The old forms are shown only as migration references. They are not accepted by
+the split CLI contract.
+====
+
+[[backend-boundary]]
+== Backend Boundary
+
+The CLI split is presentation and argument handling. The public Lua API remains
+the stable integration point:
+
+[source,lua]
+----
+local luainstaller = require("luainstaller")
+
+local result = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    mode = "onedir",
+    out = "build/runtime",
+})
+
+if not result.ok then
+    io.stderr:write(result.error.type .. ": " .. result.error.message .. "\n")
+end
+----
+
+[[platform-notes]]
+== Platform Notes
+
+[cols="1,3",options="header"]
+|===
+|Target |Current packaging boundary
+
+|Linux
+|Builds on Linux with `cc`, Lua headers, and Lua `pkg-config` metadata.
+
+|macOS
+|Builds with `cc` and a Lua prefix that provides headers and `liblua.a`.
+
+|Windows
+|Built from a Linux host with MinGW and a Windows Lua prefix that provides
+headers and `lua54.dll`.
+|===
+
+[IMPORTANT]
+====
+Bundles target the same OS family, architecture, ABI, Lua ABI, and compatible
+native library set as the selected build profile. They are not universal
+cross-platform artifacts.
+====
+
+[[glossary]]
+[glossary]
+== Glossary
+
+CLI personality::
+  The visible command syntax and output behavior attached to one executable
+  name.
+
+Onedir::
+  A directory bundle containing the launcher, `.luai/manifest.lua`, embedded
+  Lua payload, copied native modules, and copied Lua runtime when needed.
+
+Onefile::
+  A self-extracting executable that stages an onedir layout into a
+  content-addressed cache before running the inner launcher.
+
+Profile::
+  The selected target OS family and Lua runtime assumptions used during
+  compatibility checks and build planning.
+
+[[appendix-rendering]]
+[appendix]
+== AsciiDoc Rendering Notes
+
+This file intentionally uses AsciiDoc structures that are not native Markdown:
+
+* document attributes such as `:toc:`, `:sectanchors:`, and `:experimental:`;
+* cross references such as `xref:command-matrix[]`;
+* admonition blocks including `[IMPORTANT]`, `[TIP]`, `[CAUTION]`, and `[NOTE]`;
+* description lists and horizontal description lists;
+* `[qanda]` sections;
+* sidebars;
+* collapsible blocks;
+* glossary and appendix sections;
+* source callouts.

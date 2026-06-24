@@ -5,7 +5,7 @@ Date: 2026-06-22
 This document records the current Linux, macOS, and Windows verification
 loop for the `main` branch.
 
-=== Current Support Boundary
+== Current Support Boundary
 
 `luainstaller` currently implements dependency analysis on any host with
 a compatible Lua runtime, Linux `--onedir` and `--onefile` bundle output
@@ -19,7 +19,7 @@ The tested runtime promise is still same OS family, same architecture,
 same Lua ABI, and compatible native module DLLs. General cross-building
 and automatic external dependency closure remain outside this stage.
 
-=== Environment Results
+== Environment Results
 
 [cols=",,,",options="header",]
 |===
@@ -32,8 +32,8 @@ passed.
 installing sample native modules. Source-installed `luai` built and ran
 a pure Lua bundle.
 
-|`192.168.5.19` |Linux aarch64 |unavailable |Source install and `luai a`
-passed. `luainstaller b --dir` cleanly failed with `ToolchainError`
+|`192.168.5.19` |Linux aarch64 |unavailable |Source install and `luai -a`
+passed. `luainstaller build --dir` cleanly failed with `ToolchainError`
 because Lua headers / Lua `pkg-config` metadata are not installed.
 
 |`yymac06` |macOS arm64 |temporary `/tmp` LuaRocks plus local SQLite
@@ -54,7 +54,7 @@ on the Windows host from a cleaned PowerShell environment without
 installed Lua or LuaRocks.
 |===
 
-=== Fixes From This Loop
+== Fixes From This Loop
 
 * `luainstaller.manifest` no longer crashes when `io.popen` is
 unavailable. Platform fields degrade to strings such as `unknown`.
@@ -70,7 +70,7 @@ with MinGW, copies `lua54.dll` beside the launcher and into
 * `test/smoke_all.lua` covers the no-`io.popen` manifest and bundler
 contracts.
 
-=== Reproduction Commands
+== Reproduction Commands
 
 Local Linux:
 
@@ -87,9 +87,9 @@ Linux without LuaRocks:
 [source,sh]
 ----
 sh tools/install-source.sh --prefix /tmp/luainstaller-source-prefix
-/tmp/luainstaller-source-prefix/bin/luai --version
-/tmp/luainstaller-source-prefix/bin/luainstaller --version
-/tmp/luainstaller-source-prefix/bin/luai a test/runtime_bundle/main.lua --max-deps 120
+/tmp/luainstaller-source-prefix/bin/luai -v
+/tmp/luainstaller-source-prefix/bin/luainstaller version
+/tmp/luainstaller-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
 ----
 
 Remote Linux hosts:
@@ -144,7 +144,7 @@ verifies all selected Windows `--onedir` bundles plus pure Lua and
 on `192.168.69.130`. Set `SSH_OPTS` to override the default lab
 automation SSH options.
 
-=== Remaining Work
+== Remaining Work
 
 * Add a native Windows source installer or package installer for users
 who want to run the CLI directly on Windows instead of cross-building

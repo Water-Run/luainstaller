@@ -16,7 +16,8 @@ General Rules
   possible.
 - Keep generated files out of the repository unless they are stable fixtures.
 - Code and documentation should match the LuaRocks installation path.
-  The library is `luainstaller`; the command-line tool is `luai`.
+  The library is `luainstaller`; the command-line tools are `luai` and
+  `luainstaller`.
 
 
 Lua Style
@@ -124,6 +125,6 @@ Documentation Style
   platform combinations.
 - Say "same OS, same architecture, same ABI" when describing the first-stage
   compatibility boundary.
-- Mention `luai` for CLI examples and `require("luainstaller")` for library
-  examples.
+- Mention `luai` for compact CLI examples, `luainstaller` for full-word CLI
+  examples, and `require("luainstaller")` for library examples.
 - If behavior is planned but not implemented, label it as a plan.

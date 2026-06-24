@@ -72,8 +72,8 @@ Future packaging targets:
 
 [source,sh]
 ----
-luai t test/savinglua/main.lua
-luai b test/savinglua/main.lua -o build/savinglua
+luai -t test/savinglua/main.lua
+luai -b test/savinglua/main.lua -o build/savinglua
 ----
 
 Expected dependency behavior:

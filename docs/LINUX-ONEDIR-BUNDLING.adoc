@@ -7,7 +7,7 @@ bundles, and what remains outside the current support boundary.
 For lab results across Linux, macOS, and Windows hosts, see
 link:CROSS-PLATFORM-TEST-MATRIX.adoc[docs/CROSS-PLATFORM-TEST-MATRIX.adoc].
 
-=== Status
+== Status
 
 Linux `--onedir` is the first implemented bundle target. It is designed
 for the same host family that produced the bundle:
@@ -31,13 +31,13 @@ prefix. Windows has a separate MinGW profile that emits `.exe` launchers
 and bundles `lua54.dll`. This document focuses on the Linux shared-Lua
 onedir implementation.
 
-=== Output Layout
+== Output Layout
 
 For:
 
 [source,sh]
 ----
-luai b --dir test/savinglua/main.lua -o dist/savinglua
+luai -b --dir test/savinglua/main.lua -o dist/savinglua
 ----
 
 the output layout is:
@@ -61,7 +61,7 @@ The executable name is derived from the output directory basename. The
 `.luai/build/launcher.c` file is retained for inspection and
 troubleshooting.
 
-=== Build Pipeline
+== Build Pipeline
 
 The implementation is intentionally layered:
 
@@ -82,7 +82,7 @@ byte array and runs it through the Lua C API.
 launcher, copies the linked Lua shared runtime, copies native Lua C
 modules, and writes `.luai/manifest.lua`.
 
-=== Runtime Flow
+== Runtime Flow
 
 At process startup:
 
@@ -106,7 +106,7 @@ normal filesystem searchers.
 Pure Lua modules are loaded from the embedded payload. Native Lua C
 modules are loaded from `.luai/native/` as real files.
 
-=== Non-Pure-Lua Packaging
+== Non-Pure-Lua Packaging
 
 Native Lua C modules cannot be loaded from ordinary Lua strings. They
 must be present as filesystem files because Lua's native loader uses the
@@ -147,7 +147,7 @@ The flat copy is useful for diagnostics and simple module names. The
 nested copy matches Lua's `?` replacement behavior for names containing
 dots.
 
-=== Lua Shared Runtime
+== Lua Shared Runtime
 
 The launcher is a shared-Lua executable in this stage. After
 compilation, `bundler` runs `ldd` on the executable, finds the linked
@@ -168,7 +168,7 @@ launcher = {
 This is what allows bundles to run in a same-ABI environment that has no
 `lua` command installed.
 
-=== Manifest
+== Manifest
 
 `.luai/manifest.lua` is a Lua table. It records:
 
@@ -187,7 +187,7 @@ This is what allows bundles to run in a same-ABI environment that has no
 The manifest is the contract later `--onefile`, diagnostics,
 compatibility checks, and native dependency features should reuse.
 
-=== Verified Examples
+== Verified Examples
 
 The smoke suite packages and runs:
 
@@ -202,7 +202,7 @@ Additional clean-environment verification was run in a container without
 a `lua` command. `ldd` showed the launcher loading `liblua-5.4.so` from
 `.luai/native/`, and the packaged examples ran there.
 
-=== Commands
+== Commands
 
 Install with LuaRocks:
 
@@ -217,8 +217,8 @@ Install from source when LuaRocks is unavailable:
 ----
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
-luai --help
-luainstaller -v
+luai -h
+luainstaller version
 ----
 
 The source installer copies the Lua modules into the selected prefix,
@@ -230,7 +230,7 @@ Build a bundle:
 
 [source,sh]
 ----
-luai b --dir test/savinglua/main.lua -o /tmp/savinglua-bundle --max-deps 250
+luai -b --dir test/savinglua/main.lua -o /tmp/savinglua-bundle --max-deps 250
 ----
 
 Run it:
@@ -257,7 +257,7 @@ Inspect the manifest:
 lua -e 'local m = dofile("/tmp/savinglua-bundle/.luai/manifest.lua"); print(m.launcher.lua_runtime.destination_path)'
 ----
 
-=== Limitations
+== Limitations
 
 Current limitations are explicit:
 
@@ -284,7 +284,7 @@ document.
 Hosts without Lua headers or Lua `pkg-config` metadata can run analysis
 but cannot compile the C launcher.
 
-=== Onefile Runtime
+== Onefile Runtime
 
 The `--onefile` path reuses the same manifest and runtime contract:
 

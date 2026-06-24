@@ -1,0 +1,322 @@
+= luainstaller User Guide
+:toc: left
+:toclevels: 4
+:sectanchors:
+:sectlinks:
+:icons: font
+:source-highlighter: rouge
+:experimental:
+
+[[overview]]
+== Overview
+
+`luainstaller` analyzes a Lua entry script, discovers Lua and native Lua module
+dependencies, writes a manifest, generates a native launcher, and produces a
+same-environment `onedir` or `onefile` bundle.
+
+The short version:
+
+[source,sh]
+----
+luai -b --dir test/runtime_bundle/main.lua -o build/runtime
+build/runtime/runtime demo
+----
+
+Expected result:
+
+[source,text]
+----
+hello demo
+entry=test/runtime_bundle/main.lua
+----
+
+[[installation]]
+== Installation
+
+[[install-luarocks]]
+=== LuaRocks
+
+[source,sh]
+----
+luarocks install luainstaller
+----
+
+This installs:
+
+* the `luainstaller` Lua module;
+* the `luai` compact CLI;
+* the `luainstaller` modern CLI;
+* `luai(1)` and `luainstaller(1)` man pages where supported.
+
+[[install-source]]
+=== Source Checkout
+
+[source,sh]
+----
+sh tools/install-source.sh --prefix "$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+luai -h
+luainstaller version
+----
+
+[NOTE]
+====
+The source installer only needs a `lua` command. Building bundles still needs
+the target profile's compiler, Lua headers, Lua runtime metadata, and native
+Lua modules.
+====
+
+[[first-bundle]]
+== Building A First Bundle
+
+Use a pure Lua program first. It avoids native module setup while validating the
+launcher and runtime contract.
+
+[source,sh]
+----
+luai -b --dir test/runtime_bundle/main.lua -o build/runtime-demo --max-deps 120
+build/runtime-demo/runtime-demo first-run
+----
+
+The generated layout is:
+
+[source,text]
+----
+build/runtime-demo/
+    runtime-demo
+    .luai/
+        manifest.lua
+        native/
+            liblua5.4.so.0
+        build/
+            launcher.c
+----
+
+The exact Lua runtime filename depends on the platform and build profile.
+
+[[onefile]]
+== Building A Onefile Bundle
+
+[source,sh]
+----
+luai -b --file test/runtime_bundle/main.lua -o build/runtime-demo-onefile
+build/runtime-demo-onefile onefile-run
+----
+
+`--file` first stages an onedir bundle, embeds the staged files into an
+extractor, then extracts them to a content-addressed cache at runtime.
+
+[CAUTION]
+====
+Onefile is not an in-memory native module loader. Native Lua modules and Lua
+runtime libraries still need to exist as real files before the user program can
+load them. The extractor creates that filesystem layout before launching the
+inner executable.
+====
+
+[[choosing-cli]]
+== Choosing `luai` Or `luainstaller`
+
+[cols="1,2,2",options="header"]
+|===
+|Task |Recommended command |Reason
+
+|Shell script or CI
+|`luai`
+|Compact, plain, line-oriented output.
+
+|Interactive terminal session
+|`luainstaller`
+|Full commands, sectioned output, optional color and progress.
+
+|Machine integration
+|Lua API
+|Structured result tables are more stable than CLI text.
+|===
+
+See xref:CLI.adoc[CLI Reference] for the complete split command contract.
+
+[[dependency-discovery]]
+== Dependency Discovery
+
+`luainstaller` has three dependency discovery modes.
+
+[horizontal]
+`static`:: Default. Parse literal `require(...)` calls.
+`manual`:: Use only explicit `--include` dependencies.
+`runtime`:: Run the entry once and record executed `require` calls.
+
+[[static-discovery]]
+=== Static Discovery
+
+[source,sh]
+----
+luai -a test/runtime_bundle/main.lua
+----
+
+Static discovery is deterministic and does not run the program. It is best for
+normal Lua modules with literal `require("name")` calls.
+
+[[manual-discovery]]
+=== Manual Discovery
+
+[source,sh]
+----
+luai -b app/main.lua --no-depscan \
+  --include app/config.lua \
+  --include app/plugins/default.lua
+----
+
+Use manual mode when the dependency set is known and should not be inferred.
+
+[[runtime-discovery]]
+=== Runtime Discovery
+
+[source,sh]
+----
+luai -a app/main.lua -r runtime -- demo-profile
+----
+
+Arguments after `--` are passed to the build-time execution of the entry
+script.
+
+[WARNING]
+====
+Runtime discovery covers only the code paths that execute during that run.
+If a dependency is loaded only for another user action, another platform, or
+another configuration file, include it manually.
+====
+
+[[native-modules]]
+== Native Lua Modules
+
+Native Lua modules are `.so`, `.dylib`, or `.dll` files loaded through Lua's C
+module loader. They cannot be embedded as plain Lua strings.
+
+Examples:
+
+[source,lua]
+----
+require("cjson")
+require("lfs")
+require("socket.core")
+require("lsqlite3")
+----
+
+When a native module is discovered, the onedir bundler copies it into
+`.luai/native/`. For dotted module names such as `socket.core`, the bundler
+preserves a nested destination so Lua's normal `package.cpath` semantics still
+work.
+
+[IMPORTANT]
+====
+`luainstaller` copies detected native Lua C modules. It does not currently
+close every external shared-library dependency of those modules. For example,
+an SQLite Lua module may still depend on a compatible system `libsqlite3`.
+====
+
+[[data-files]]
+== Data Files And Extra Files
+
+There is no separate data-file DSL. Use `--include` for files that must be
+present but are not found by dependency analysis.
+
+[source,sh]
+----
+luai -b app/main.lua \
+  --include app/assets/schema.sql \
+  --include app/assets/default-config.lua
+----
+
+For application-specific data loading, prefer paths relative to the entry
+script or an explicit runtime configuration option.
+
+[[output-paths]]
+== Output Paths
+
+[cols="1,2,2",options="header"]
+|===
+|Mode |Output argument |Result
+
+|`--dir`
+|`-o build/my-app`
+|Directory `build/my-app/` with executable `build/my-app/my-app`.
+
+|`--file`
+|`-o build/my-app`
+|Executable file `build/my-app`.
+
+|omitted
+|No `-o`
+|A default path derived from the entry script.
+|===
+
+`luainstaller` refuses to overwrite a directory that does not look like a
+previous luainstaller output. This prevents accidental deletion of unrelated
+application directories.
+
+[[platform-profiles]]
+== Platform Profiles
+
+[cols="1,3",options="header"]
+|===
+|Profile |Requirements
+
+|Linux
+|Linux host, `cc`, Lua headers, Lua `pkg-config` metadata, and compatible
+native Lua modules.
+
+|macOS
+|macOS compiler and a Lua prefix that provides headers and `liblua.a`.
+
+|Windows
+|Linux host, MinGW, Windows Lua headers, `lua54.dll`, and Windows builds of
+native Lua modules.
+|===
+
+[[verification]]
+== Verifying A Bundle
+
+Run the generated program without relying on the build shell's Lua:
+
+[source,sh]
+----
+env -i PATH=/usr/bin:/bin build/runtime-demo/runtime-demo clean-env
+----
+
+Inspect dynamic loader behavior on Linux:
+
+[source,sh]
+----
+ldd build/runtime-demo/runtime-demo
+readelf -d build/runtime-demo/runtime-demo | grep -E 'RPATH|RUNPATH'
+----
+
+Inspect the manifest:
+
+[source,sh]
+----
+lua -e 'local m=dofile("build/runtime-demo/.luai/manifest.lua"); print(m.output.mode)'
+----
+
+[[where-next]]
+== Where To Go Next
+
+[cols="1,3",options="header"]
+|===
+|Document |Use it for
+
+|xref:CLI.adoc[CLI Reference]
+|Exact command syntax, output contract, migration from older command forms.
+
+|xref:OPERATING-MODE.adoc[Operating Mode]
+|Understanding analysis, manifest generation, launcher generation, and runtime
+startup.
+
+|xref:TROUBLESHOOTING.adoc[Troubleshooting]
+|Diagnosing missing modules, toolchain failures, output safety checks, and
+runtime loader failures.
+
+|xref:LINUX-ONEDIR-BUNDLING.adoc[Linux Onedir Bundling]
+|Detailed Linux-specific generated layout and native-module handling.
+|===

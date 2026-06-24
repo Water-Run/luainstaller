@@ -74,9 +74,19 @@ set -eu
 
 lua_bin=\${LUAI_LUA:-"$lua_path"}
 prefix_root=\$(CDPATH= cd -- "\$(dirname -- "\$0")/.." && pwd)
-lua_share="\$prefix_root/share/lua/$lua_version"
+to_lua_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "\$1"
+    else
+        printf '%s\n' "\$1"
+    fi
+}
+lua_share_fs="\$prefix_root/share/lua/$lua_version"
+lua_share=\$(to_lua_path "\$lua_share_fs")
+cli_path=\$(to_lua_path "\$lua_share_fs/luainstaller/cli.lua")
 export LUA_PATH="\$lua_share/?.lua;\$lua_share/?/init.lua;\${LUA_PATH:-;;}"
-exec "\$lua_bin" "\$lua_share/luainstaller/cli.lua" "\$@"
+export LUAINSTALLER_CLI_NAME="$name"
+exec "\$lua_bin" "\$cli_path" "\$@"
 SH
     chmod +x "$bin_dir/$name"
 }

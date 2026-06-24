@@ -1,0 +1,199 @@
+= luainstaller Troubleshooting
+:toc: left
+:toclevels: 4
+:sectanchors:
+:sectlinks:
+:icons: font
+:source-highlighter: rouge
+
+[[workflow]]
+== Recommended Workflow
+
+When a build fails, avoid changing options at random. Work in this order:
+
+[arabic]
+. Run the program directly with `lua`.
+. Run `luai -a` to test dependency discovery.
+. Run `luainstaller trace` to inspect resolution decisions.
+. Build `--dir` before `--file`.
+. Run the generated bundle in a clean environment.
+. Inspect `.luai/manifest.lua`.
+
+[[analysis-failures]]
+== Analysis Failures
+
+[[module-not-found]]
+=== ModuleNotFoundError
+
+Example:
+
+[source,text]
+----
+error: ModuleNotFoundError: Cannot resolve module 'cjson'
+----
+
+Common causes:
+
+* the module is not installed for the Lua version used during analysis;
+* `LUA_PATH` or `LUA_CPATH` does not include the module;
+* the module is loaded dynamically and static analysis cannot infer it;
+* the module exists for the host OS but not for the selected target profile.
+
+Diagnosis:
+
+[source,sh]
+----
+lua -e 'require("cjson"); print("ok")'
+luainstaller trace app/main.lua --max-deps 250
+----
+
+Fixes:
+
+* install the missing module for the build Lua;
+* set `LUA_PATH` / `LUA_CPATH`;
+* use `-r runtime` when the module name is dynamic;
+* use `--include` for explicit control.
+
+[[dependency-limit]]
+=== DependencyLimitExceededError
+
+Increase the limit only after confirming the dependency set is expected:
+
+[source,sh]
+----
+luainstaller trace app/main.lua --max-deps 250
+luai -b app/main.lua --max-deps 250
+----
+
+[[toolchain-failures]]
+== Toolchain Failures
+
+[[pkg-config]]
+=== `pkg-config cannot find lua`
+
+Linux builds need Lua compiler and linker metadata:
+
+[source,sh]
+----
+pkg-config --cflags --libs lua
+----
+
+If that fails, install Lua development metadata or set `PKG_CONFIG_PATH` to a
+directory containing `lua.pc`.
+
+[[compiler-missing]]
+=== Compiler Missing
+
+Linux onedir builds need `cc`. Windows profile builds need
+`x86_64-w64-mingw32-gcc` on a Linux host.
+
+[source,sh]
+----
+cc --version
+x86_64-w64-mingw32-gcc --version
+----
+
+[[windows-host]]
+=== Windows Build Attempted On Windows Host
+
+Current Windows bundles are built from Linux with MinGW. On a Windows host,
+the Windows profile reports:
+
+[source,text]
+----
+UnsupportedPlatformError: windows onedir bundling requires a Linux host with MinGW
+----
+
+Use WSL or a Linux build machine with the required Windows Lua prefix.
+
+[[output-safety]]
+== Output Safety Failures
+
+`luainstaller` refuses to delete directories that do not look like previous
+luainstaller output.
+
+Example:
+
+[source,text]
+----
+InvalidOutputError: Refusing to overwrite non-luainstaller output directory
+----
+
+Fixes:
+
+* choose a fresh output path;
+* remove the unrelated directory yourself after verifying its contents;
+* use a `build/` or `dist/` directory dedicated to generated artifacts.
+
+[IMPORTANT]
+====
+This safety check is intentional. The bundler should not recursively delete an
+arbitrary user directory just because it was passed to `-o`.
+====
+
+[[runtime-failures]]
+== Runtime Failures
+
+[[native-load]]
+=== Native Module Load Failure
+
+If a bundle starts but a native module fails to load:
+
+[source,sh]
+----
+find build/app/.luai/native -maxdepth 3 -type f | sort
+lua -e 'local m=dofile("build/app/.luai/manifest.lua"); for _,n in ipairs(m.modules.native or {}) do print(n.destination_path) end'
+----
+
+On Linux, inspect loader dependencies:
+
+[source,sh]
+----
+ldd build/app/app
+ldd build/app/.luai/native/cjson.so
+readelf -d build/app/app | grep -E 'RPATH|RUNPATH'
+----
+
+[[onefile-cache]]
+=== Onefile Extraction Problems
+
+Onefile bundles extract to a content-addressed cache. If extraction fails:
+
+* check that the user can write to the cache location;
+* remove stale cache directories for the application;
+* run the equivalent `--dir` bundle first to isolate extractor issues from
+  launcher issues.
+
+[[clean-env]]
+== Clean Environment Test
+
+After building, test without ambient Lua paths:
+
+[source,sh]
+----
+env -i PATH=/usr/bin:/bin build/app/app test-run
+----
+
+For onefile:
+
+[source,sh]
+----
+env -i PATH=/usr/bin:/bin build/app-onefile test-run
+----
+
+If clean execution fails but normal execution works, the bundle is relying on
+ambient environment state.
+
+[[reporting]]
+== Reporting A Problem
+
+Include:
+
+* exact command;
+* complete error output;
+* host OS and architecture;
+* Lua version;
+* `LUA_PATH` and `LUA_CPATH` if customized;
+* `pkg-config --cflags --libs lua` output for Linux builds;
+* `.luai/manifest.lua` for generated bundles;
+* `ldd`, `otool -L`, or Windows DLL search diagnostics for native failures.

@@ -1,339 +1,190 @@
 .TH LUAI 1 "June 2026" "luainstaller v1.0.0" "User Commands"
 .SH NAME
-luai, luainstaller \- analyze and package Lua projects into same-environment executables
+luai, luainstaller \- package Lua projects into same-environment executables
 
 .SH SYNOPSIS
 .B luai
-.BR a " " \fIentry.lua\fR
+.BR \-h
+.br
+.B luai
+.BR \-v
+.br
+.B luai
+.BR \-a " " \fIentry.lua\fR
 .RI [ options ]
 .br
 .B luai
-.BR t " " \fIentry.lua\fR
+.BR \-t " " \fIentry.lua\fR
 .RI [ options ]
 .br
 .B luai
-.BR b " " \fIentry.lua\fR
+.BR \-b " " \fIentry.lua\fR
+.RI [ options ]
+.PP
+.B luainstaller
+.BR help
+.br
+.B luainstaller
+.BR version
+.br
+.B luainstaller
+.BR analyze " " \fIentry.lua\fR
 .RI [ options ]
 .br
-.B luai
-.BR \-\-version
+.B luainstaller
+.BR trace " " \fIentry.lua\fR
+.RI [ options ]
+.br
+.B luainstaller
+.BR build " " \fIentry.lua\fR
+.RI [ options ]
 
 .SH DESCRIPTION
-\fBluainstaller\fR is a tool that analyzes Lua dependencies and packages Lua projects into
-\fBsame-environment executables\fR. The current verified sample matrix covers Linux,
-macOS, and Windows \fB--onedir\fR and \fB--onefile\fR output through local and lab
-scripts. It is open-sourced on GitHub and licensed under the
-\fBLGPL\fR. See the repository for source code, releases, and documentation:
-https://github.com/Water-Run/luainstaller
+.B luainstaller
+analyzes Lua dependencies and packages Lua projects into same-environment
+executables. The installed package provides two command names with different
+command-line personalities.
+.PP
+.B luai
+is compact, traditional, plain, and script-friendly.
+.B luainstaller
+uses full subcommands and modern human-oriented output.
+.PP
+The compatibility promise for generated bundles is same OS, same architecture,
+same ABI, and same Lua ABI. General cross-platform output and automatic
+external shared-library closure are outside the current support boundary.
 
-\fBluainstaller\fR provides dependency analysis and same-platform directory bundling capabilities, and can
-package non-pure-Lua content inside the wrapper program. It is important to note that
-\fBluainstaller\fR guarantees that the packaged binary will run on the same \fBsystem environment\fR
-as yours. The verified Linux, macOS, and Windows bundles do not require a separate
-\fBlua\fR command, but system ABI and native library compatibility still matter.
+.SH COMMAND SPLIT
+.TP
+.B luai
+Accepts compact commands only:
+.BR \-h ,
+.BR \-v ,
+.BR \-a ,
+.BR \-t ,
+and
+.BR \-b .
+.TP
+.B luainstaller
+Accepts full subcommands only:
+.BR help ,
+.BR version ,
+.BR analyze ,
+.BR trace ,
+.BR build ,
+.BR logs ,
+and
+.BR engines .
+.PP
+For example,
+.B luai \-b
+is valid and
+.B luainstaller build
+is valid.
+.B luai build
+and
+.B luainstaller \-b
+are intentionally invalid.
 
-\fBluainstaller\fR can be used as a CLI tool and (when installed via LuaRocks) as a Lua module via
-\fBrequire("luainstaller")\fR.
+.SH EXAMPLES
+.SS Compact CLI
+.nf
+luai -h
+luai -v
+luai -a test/runtime_bundle/main.lua --max-deps 120
+luai -t test/runtime_bundle/main.lua --max-deps 120
+luai -b --dir test/runtime_bundle/main.lua -o build/runtime
+luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile
+.fi
+
+.SS Modern CLI
+.nf
+luainstaller help
+luainstaller version
+luainstaller analyze test/runtime_bundle/main.lua --max-deps 120
+luainstaller trace test/runtime_bundle/main.lua --max-deps 120
+luainstaller build --dir test/runtime_bundle/main.lua -o build/runtime
+luainstaller build --file test/runtime_bundle/main.lua -o build/runtime-onefile
+.fi
+
+.SH OPTIONS
+The following options apply to dependency actions and build actions where
+meaningful.
+.TP
+.BI \-o ", " \-\-out " " path
+Output path for build actions.
+.TP
+.B \-\-dir ", " \-\-onedir
+Build a directory bundle. This is the default build mode.
+.TP
+.B \-\-file ", " \-\-onefile
+Build a self-extracting onefile bundle.
+.TP
+.BI \-\-include " " path
+Include an additional file. May be repeated.
+.TP
+.BI \-\-exclude " " path
+Exclude a dependency by path or basename. May be repeated.
+.TP
+.BI \-\-target\-os " " os
+Select the target profile: linux, macos, or windows.
+.TP
+.BI \-\-lua\-prefix " " path
+Lua prefix used by targets that require explicit headers or runtime files.
+.TP
+.BI \-r ", " \-\-require\-engine " " engine
+Select dependency discovery: static, manual, or runtime.
+.TP
+.B \-\-no\-depscan
+Disable automatic dependency scanning and use manual dependencies only.
+.TP
+.BI \-\-max\-deps " " n
+Maximum dependency count.
+.TP
+.B \-\-verbose
+Show more detail.
+
+.SH OUTPUT
+.B luai
+uses plain, compact, line-oriented output and never emits color or animation.
+.PP
+.B luainstaller
+uses sectioned, modern output. ANSI color and progress animation are
+presentation features and are disabled for non-interactive fallback,
+.B NO_COLOR ,
+and CI-style output.
 
 .SH INSTALLATION
-Install via LuaRocks:
 .nf
 luarocks install luainstaller
 .fi
-This installs the \fBluai\fR and \fBluainstaller\fR CLI commands, the Lua module,
-and \fBluai(1)\fR / \fBluainstaller(1)\fR man pages.
 .PP
-Install from a source checkout when LuaRocks is unavailable:
+Source checkout installation:
 .nf
 sh tools/install-source.sh --prefix "$HOME/.local"
 export PATH="$HOME/.local/bin:$PATH"
-luai --help
-luainstaller -v
-.fi
-The source installer only requires a \fBlua\fR command. Building \fB--onedir\fR or \fB--onefile\fR bundles
-still requires the local C toolchain and Lua development metadata. Linux uses \fBcc\fR,
-Lua headers, and Lua \fBpkg-config\fR data. macOS uses \fBcc\fR plus a matching Lua
-prefix that provides Lua headers and \fBliblua.a\fR. Windows uses MinGW on a Linux
-build host plus a Windows Lua prefix that provides Lua headers and \fBlua54.dll\fR.
-
-.SH COMMANDS
-.TP
-.B a
-Analyze Lua and native module dependencies.
-.TP
-.B t
-Print trace records for dependency resolution decisions and compatibility diagnostics.
-.TP
-.B b
-Build an onedir bundle or self-extracting onefile bundle.
-.PP
-Compatibility aliases are kept for existing scripts: \fB-a\fR/\fBanalyze\fR,
-\fB-t\fR/\fBtrace\fR, and \fB-c\fR/\fBbuild\fR.
-
-.SH CLI USAGE
-The CLI tool names are \fBluai\fR and \fBluainstaller\fR.
-
-.SS Help
-.nf
-luai --help
-luainstaller -v
-.fi
-Typical output:
-.nf
-luai / luainstaller - Package Lua projects into same-environment executables
-
-Usage:
-  luai a <entry.lua> [options]
-  luai t <entry.lua> [options]
-  luai b <entry.lua> [options]
-
-Options:
-  ...
-.fi
-
-.SS Bundle
-
-Onedir mode:
-.nf
-luai b --dir \fIentry.lua\fR -o \fIoutput_dir\fR
-.fi
-Typical output:
-.nf
-success.
-\fIoutput_dir\fR/\fIapp\fR
-.fi
-
-\fBluai\fR performs static dependency analysis starting from the entry \fB.lua\fR file, embeds
-Lua sources in a generated launcher, copies the linked Lua shared runtime and detected native
-Lua C modules into \fB.luai/native/\fR, and writes \fB.luai/manifest.lua\fR.
-
-Single-file mode:
-.nf
-luai b --file \fIentry.lua\fR -o \fIoutput_executable\fR
-.fi
-The generated executable extracts an inner onedir layout to a content-addressed
-cache directory, then starts the inner launcher.
-
-.SS analyze
-Analyze dependencies only:
-.nf
-luai a \fIentry.lua\fR
-.fi
-Typical output:
-.nf
-success.
-\fIentry.lua\fR
-N script(s), M library(ies)
-.fi
-
-.SS trace
-Trace dependency resolution and compatibility boundaries:
-.nf
-luai t \fIentry.lua\fR
-.fi
-Typical output includes analyzer records followed by a \fBcompatibility\fR section
-that states the same OS, same architecture, same ABI, and same Lua ABI promise.
-
-.SH OPTIONS
-The following options apply to \fBa\fR, \fBt\fR, and/or \fBb\fR as described.
-
-.TP
-.BI \-o ", " \-\-out " " path
-Output path.
-For \fBb --dir\fR: a directory path.
-Examples:
-.nf
-luai b main.lua --out ../dist/app
-.fi
-
-.TP
-.B \-\-dir ", " \-\-onedir
-Generate a Linux, macOS, or Windows directory bundle. This is the default bundle mode.
-
-.TP
-.B \-\-file ", " \-\-onefile
-Generate a self-extracting single-file executable.
-
-.TP
-.BI \-\-target\-os " " os
-Select the target profile. Supported values are \fBlinux\fR, \fBmacos\fR, and
-\fBwindows\fR. If omitted, the host OS is used.
-
-.TP
-.BI \-\-lua\-prefix " " path
-Lua prefix used by targets that need explicit headers or runtime files. macOS
-expects \fBinclude/lua.h\fR and \fBlib/liblua.a\fR. Windows expects
-\fBinclude/lua.h\fR and \fBbin/lua54.dll\fR or \fBlua54.dll\fR.
-
-.TP
-.BI \-v ", " \-\-verbose
-Enable verbose analysis and bundling logs.
-.nf
-luai b main.lua --verbose
-.fi
-
-.TP
-.BI \-\-max\-deps " " n
-Maximum number of dependencies allowed (default: 36).
-.nf
-luai b main.lua --max-deps 100
-luai a main.lua --max-deps 50
-.fi
-
-.TP
-.BI \-\-include " " path
-Manually include additional dependencies. May be specified multiple times.
-Use this for dynamic \fBrequire\fR patterns that static analysis cannot detect.
-.nf
-luai b main.lua --include ./require.lua --include ./plugin.lua
-.fi
-
-.TP
-.BI \-\-exclude " " path
-Manually exclude dependencies. May be specified multiple times.
-Use this to remove false positives (for example, \fBpcall(require, ...)\fR patterns); takes priority
-over \fB--include\fR.
-.nf
-luai b main.lua --exclude ./test_utils.lua
-.fi
-
-.TP
-.B \-\-no\-depscan
-Disable dependency scanning. This is a compatibility alias for
-\fB--require-engine manual\fR, where you must specify all
-dependencies via \fB--include\fR.
-.nf
-luai b main.lua --no-depscan --include ./a.lua --include ./b.lua
-.fi
-
-.TP
-.BI \-r ", " \-\-require\-engine " " engine
-Select dependency discovery. Supported values are \fBstatic\fR, \fBmanual\fR, and
-\fBruntime\fR. \fBstatic\fR is the default analyzer. \fBmanual\fR uses only explicit
-\fB--include\fR inputs. \fBruntime\fR runs the entry script once while tracing
-actual \fBrequire\fR calls; arguments after \fB--\fR are passed to that build-time
-run.
-.nf
-luai b --file main.lua -r runtime -- seed --verbose
+luai -h
+luainstaller version
 .fi
 
 .SH LUA API
-When installed via LuaRocks, \fBluainstaller\fR can be invoked from Lua. The Lua API uses the same
-parameter semantics as the CLI. Dependency scanning is enabled by default; set
-\fBdepscan = false\fR to disable it.
-
+The CLI split does not change the Lua API.
 .nf
 local luainstaller = require("luainstaller")
-.fi
-
-.SS bundle
-Structured result:
-.nf
-local result = luainstaller.bundle({
-  entry = "main.lua",
-  mode = "onedir",
-  out = "dist/app",
+local result = luainstaller.analyze({
+  entry = "test/runtime_bundle/main.lua",
 })
 .fi
-When \fBresult.ok=true\fR, \fBresult.executable\fR is the generated launcher path and
-\fBresult.manifest\fR is the manifest table. Normal user errors return
-\fB{ ok = false, error = { type = "...", message = "..." } }\fR.
-
-Parameters (\fIopts\fR table):
-
-.TS
-lB lB lB lB
-l l l l.
-Parameter	Type	Default	Description
-_
-\fBentry\fR	string	required	Entry script path
-\fBmode\fR	string	\fBonedir\fR	Bundle mode: \fBonedir\fR or \fBonefile\fR
-\fBout\fR	string	\-	Output directory for \fBonedir\fR; executable path for \fBonefile\fR
-\fBtarget_os\fR	string	host OS	Target profile: \fBlinux\fR, \fBmacos\fR, or \fBwindows\fR
-\fBlua_prefix\fR	string	\fBLUAI_LUA_PREFIX\fR	Lua headers/runtime prefix for macOS and Windows
-\fBverbose\fR	boolean	\fBfalse\fR	Whether to output detailed logs
-\fBmax_deps\fR	number	\fB36\fR	Maximum number of dependencies
-\fBinclude\fR	string[]	\fB{}\fR	Manually include dependencies
-\fBexclude\fR	string[]	\fB{}\fR	Manually exclude dependencies (priority over \fBinclude\fR)
-\fBdepscan\fR	boolean	\fBtrue\fR	Enable automatic dependency analysis
-\fBrequire_engine\fR	string	\fBstatic\fR	Dependency engine: \fBstatic\fR, \fBmanual\fR, or \fBruntime\fR
-\fBrun_args\fR	string[]	\fB{}\fR	Arguments for \fBruntime\fR require discovery
-.TE
-
-Example:
-.nf
-local result = luainstaller.bundle({ entry = "main.lua", out = "../dist/app" })
-if result.ok then
-  print("Bundle succeeded: " .. result.executable)
-else
-  print("Bundle failed: " .. result.error.message)
-end
-.fi
-
-.SS analyze
-Structured result:
-.nf
-local result = luainstaller.analyze({ entry = "main.lua" })
-.fi
-When \fBresult.ok=true\fR, \fBresult.dependencies.scripts\fR and
-\fBresult.dependencies.libraries\fR contain discovered files.
-
-Parameters:
-
-.TS
-lB lB lB lB
-l l l l.
-Parameter	Type	Default	Description
-_
-\fBentry\fR	string	required	Entry script path
-\fBmax_deps\fR	number	\fB36\fR	Maximum number of dependencies
-\fBdepscan\fR	boolean	\fBtrue\fR	Enable automatic dependency analysis
-.TE
-
-Example:
-.nf
-local result = luainstaller.analyze({ entry = "main.lua" })
-if result.ok then
-  print("Found " .. #result.dependencies.scripts .. " Lua dependencies")
-else
-  print("Analysis failed: " .. result.error.message)
-end
-.fi
-
-.SH HOW IT WORKS
-The workflow of \fBluainstaller\fR can be summarized as: \fBanalyze entry script\fR \->
-\fBcollect dependencies\fR \-> \fBtrace resolution decisions\fR \-> \fBbuild a same-platform onedir
-or onefile bundle\fR.
-
-When \fBbundle\fR is executed, \fBluainstaller\fR first performs \fBstatic dependency analysis\fR
-starting from the entry \fB.lua\fR file. It scans the source code for common reference patterns
-such as \fBrequire(...)\fR, recursively finding all Lua files the project depends on. For cases
-that static analysis cannot fully cover \(em such as runtime module name concatenation or
-conditional module loading \(em dependencies can be supplemented manually via \fB--include\fR and
-false positives can be removed via \fB--exclude\fR.
-
-Once the dependency set is determined, the onedir bundler generates C source containing
-the Lua bootstrap and embedded Lua payload, compiles it with the local toolchain,
-copies detected native Lua C modules into \fB.luai/native/\fR, and writes
-\fB.luai/manifest.lua\fR. Linux uses a shared-Lua launcher and copies the linked Lua
-shared runtime; macOS links against a static \fBliblua.a\fR from the selected Lua prefix.
-Windows uses \fBx86_64-w64-mingw32-gcc\fR, emits a \fB.exe\fR, and copies
-\fBlua54.dll\fR beside the launcher and into \fB.luai/native/\fR.
-
-For \fB--onefile\fR, \fBluainstaller\fR first stages that same onedir layout, embeds
-the staged files in a native extractor, and writes them to a content-addressed
-cache directory at runtime before launching the inner executable. Matching
-previously extracted files are reused when their size and content hash match.
-
-The first-stage compatibility promise is same OS, same architecture, same ABI, and same Lua
-ABI. The current implementation does not claim cross-platform output, automatic external
-shared-library closure, or complete dynamic-require proof. Runtime require discovery only
-covers code paths that execute during the build-time trace run.
 
 .SH SEE ALSO
-GitHub repository: https://github.com/Water-Run/luainstaller
-.br
-Detailed Linux onedir documentation: docs/LINUX-ONEDIR-BUNDLING.adoc
+Repository documentation:
+.B docs/README.adoc,
+.B docs/USER-GUIDE.adoc,
+.B docs/CLI.adoc,
+.B docs/OPERATING-MODE.adoc,
+.B docs/TROUBLESHOOTING.adoc,
+and
+.B docs/LINUX-ONEDIR-BUNDLING.adoc
 
 .SH LICENSE
-LGPL
+LGPL-3.0-or-later

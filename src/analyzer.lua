@@ -864,8 +864,8 @@ function ModuleResolver:buildSearchTemplates()
     addLua(base .. "/lua_modules/?.lua")
 
     if package.path then
-        for tpl in package.path:gmatch("[^;]+") do
-            tpl = tpl:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
+        for raw_tpl in package.path:gmatch("[^;]+") do
+            local tpl = raw_tpl:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
             if tpl ~= "" and tpl:find("%?") then
                 addLua(tpl)
             end
@@ -873,8 +873,8 @@ function ModuleResolver:buildSearchTemplates()
     end
 
     if package.cpath then
-        for tpl in package.cpath:gmatch("[^;]+") do
-            tpl = tpl:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
+        for raw_tpl in package.cpath:gmatch("[^;]+") do
+            local tpl = raw_tpl:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
             if tpl ~= "" and tpl:find("%?") then
                 addNative(tpl)
             end

@@ -14,7 +14,8 @@ description = {
         into same-environment executables. The current Lua implementation owns
         dependency analysis, trace-oriented diagnostics, manifest generation,
         C launcher generation, onedir bundling, and self-extracting onefile
-        bundling for the verified target profiles.
+        bundling for the verified target profiles. It installs two command
+        names over the same Lua API: compact luai and full-word luainstaller.
     ]],
     homepage = "https://github.com/Water-Run/luainstaller",
     license = "LGPL-3.0-or-later",

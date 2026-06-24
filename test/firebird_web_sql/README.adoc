@@ -165,8 +165,8 @@ Future packaging targets:
 
 [source,sh]
 ----
-luai t test/firebird_web_sql/server.lua
-luai b test/firebird_web_sql/server.lua -o build/firebird-web-sql
+luai -t test/firebird_web_sql/server.lua
+luai -b test/firebird_web_sql/server.lua -o build/firebird-web-sql
 ----
 
 Expected dependency behavior:

@@ -1,9 +1,7 @@
 #!/usr/bin/env lua
 --[[
 Command-line interface for luainstaller.
-Provides commands for dependency analysis, log viewing,
-engine listing, and compilation. Also serves as the
-installed binary entry point via LuaRocks.
+Provides split command personalities for luai and luainstaller.
 
 Author:
     WaterRun
@@ -12,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-02-22
+    2026-06-24
 ]]
 
 local function localFileExists(path)
@@ -73,227 +71,221 @@ end
 installSourcePreloads()
 
 local luainstaller = require("luainstaller")
-local logger       = require("luainstaller.logger")
+local logger = require("luainstaller.logger")
 
-
---@description: Program version string
---@const: VERSION
 local VERSION = "1.0.0"
-
---@description: Project homepage URL
---@const: PROJECT_URL
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
-
---@description: Default maximum dependency count
---@const: DEFAULT_MAX_DEPS
 local DEFAULT_MAX_DEPS = 36
 
+local LUAI_HELP = [=[
+Usage: luai -h
+       luai -v
+       luai -a <entry.lua> [options]
+       luai -t <entry.lua> [options]
+       luai -b <entry.lua> [options]
 
---@description: Full help text displayed by the help command
---@const: HELP_MESSAGE
-local HELP_MESSAGE = string.format([=[
-luai / luainstaller - Package Lua projects into same-environment executables
-
-Usage:
-    luai --help
-    luai --version
-    luai a <entry.lua> [options]
-    luai t <entry.lua> [options]
-    luai b <entry.lua> [options]
-
-Command names:
-  luai, luainstaller
-
-Actions:
-
-  a <entry.lua>
-      Analyze dependencies.
-
-  t <entry.lua>
-      Trace dependency resolution decisions.
-
-  b <entry.lua>
-      Build a bundle. --dir is the default output mode; --file builds a
-      self-extracting executable.
+Commands:
+  -a <entry.lua>    analyze dependencies
+  -t <entry.lua>    trace dependency resolution
+  -b <entry.lua>    build a bundle
 
 Options:
-  --dir, --onedir       Select directory bundle mode (default)
-  --file, --onefile     Select self-extracting single-file bundle mode
-  -o, --out <path>      Output path for bundle actions
-  --include <path>      Include an extra Lua file; repeatable
-  --exclude <path>      Exclude a dependency by path or basename; repeatable
-  --target-os <os>      Target profile: linux, macos, or windows
-  --lua-prefix <path>   Lua prefix for targets that require one
-  -r, --require-engine <e>
-                        Dependency engine: static, manual, or runtime
-  --no-depscan          Disable automatic dependency scanning
-  --max-deps <n>        Maximum dependency count (default: 36)
-  --verbose             Print more detail
+  --dir, --onedir       directory bundle mode
+  --file, --onefile     self-extracting single-file mode
+  -o, --out <path>      output path
+  --include <path>      include an extra file
+  --exclude <path>      exclude a dependency
+  --target-os <os>      linux, macos, or windows
+  --lua-prefix <path>   Lua prefix for profiled targets
+  -r, --require-engine <engine>
+                        static, manual, or runtime
+  --no-depscan          manual dependencies only
+  --max-deps <n>        dependency count limit
+  --verbose             more detail
+]=]
 
-Compatibility commands:
-  -a, analyze <entry.lua>  Compatibility alias for a
-  -t, trace <entry.lua>    Compatibility alias for t
-  -c, build <entry.lua>    Compatibility alias for b
-  logs [options]           View operation logs
-  engines                  List legacy engine names kept for compatibility
+local LUAINSTALLER_HELP = string.format([=[
+luainstaller - Package Lua projects into same-environment executables
 
-Compatibility:
-  The first runtime promise is same OS, same architecture, same ABI, and same
-  Lua ABI. Linux uses a shared-Lua launcher. macOS uses a static Lua prefix.
-  Windows currently uses a MinGW-built launcher and a bundled Lua DLL.
+Usage: luainstaller <command> [arguments] [options]
+
+Commands:
+  help                         Show this help.
+  version                      Show version and license.
+  luainstaller analyze <entry.lua>
+                               Analyze Lua and native module dependencies.
+  luainstaller trace <entry.lua>
+                               Show dependency resolution decisions.
+  luainstaller build <entry.lua>
+                               Build a directory or onefile bundle.
+  luainstaller logs [options]  View operation logs.
+  luainstaller engines         List legacy engine names kept for inspection.
+
+Build options:
+  --dir, --onedir              Directory bundle mode (default).
+  --file, --onefile            Self-extracting single-file mode.
+  -o, --out <path>             Output path.
+  --include <path>             Include an extra file; repeatable.
+  --exclude <path>             Exclude a dependency; repeatable.
+  --target-os <os>             Target profile: linux, macos, or windows.
+  --lua-prefix <path>          Lua prefix for profiled targets.
+  -r, --require-engine <engine>
+                               Dependency engine: static, manual, runtime.
+  --no-depscan                 Manual dependencies only.
+  --max-deps <n>               Dependency count limit (default: 36).
+  --verbose                    Show additional details.
+
+Examples:
+  luainstaller analyze test/student_management_system/main.lua --max-deps 250
+  luainstaller trace test/student_management_system/main.lua --max-deps 250
+  luainstaller build --dir test/student_management_system/main.lua -o build/student-manager
 
 Visit: %s
 ]=], PROJECT_URL)
 
-
---@description: Indicator prefix for successful outcomes
---@const: SYM_OK
-local SYM_OK = "[OK]"
-
---@description: Indicator prefix for failed outcomes
---@const: SYM_FAIL
-local SYM_FAIL = "[FAIL]"
-
---@description: Indicator prefix for warnings
---@const: SYM_WARN
-local SYM_WARN = "[WARN]"
-
---@description: Indicator prefix for debug entries
---@const: SYM_DEBUG
-local SYM_DEBUG = "[DEBUG]"
-
---@description: Indicator prefix for informational entries
---@const: SYM_INFO
-local SYM_INFO = "[INFO]"
-
-
---@description: Map from log level string to display symbol
---@field debug: string
---@field info: string
---@field warning: string
---@field error: string
---@field success: string
-local LEVEL_SYMBOLS = {
-    debug   = SYM_DEBUG,
-    info    = SYM_INFO,
-    warning = SYM_WARN,
-    error   = SYM_FAIL,
-    success = SYM_OK,
-}
-
---@description: Valid log level names for argument validation
---@field [string]: boolean
 local VALID_LEVELS = {
-    debug   = true,
-    info    = true,
+    debug = true,
+    info = true,
     warning = true,
-    error   = true,
+    error = true,
     success = true,
 }
 
+local ENGINE_LIST = {
+    { name = "luastatic", desc = "Compile to true native binary (Linux only)" },
+    { name = "srlua", desc = "Default srlua for current platform" },
+    { name = "winsrlua515", desc = "Windows Lua 5.1.5 (64-bit)" },
+    { name = "winsrlua515-32", desc = "Windows Lua 5.1.5 (32-bit)" },
+    { name = "winsrlua548", desc = "Windows Lua 5.4.8" },
+    { name = "linsrlua515", desc = "Linux Lua 5.1.5 (64-bit)" },
+    { name = "linsrlua515-32", desc = "Linux Lua 5.1.5 (32-bit)" },
+    { name = "linsrlua548", desc = "Linux Lua 5.4.8" },
+}
 
--- ============================================================
--- ArgumentParser
--- ============================================================
-
---[[
-Simple positional argument parser for the CLI.
-Maintains a cursor over the argument list and provides
-peek, consume, and typed-value consumption methods.
-
-Class:
-    ArgumentParser
-Fields:
-    args: table - List of argument strings
-    pos: number - Current cursor position (1-based)
-]]
 local ArgumentParser = {}
 ArgumentParser.__index = ArgumentParser
 
-
---@description: Construct a new ArgumentParser
---@param args: table - List of string arguments
---@return: ArgumentParser - New parser instance
 function ArgumentParser.new(args)
-    local self = setmetatable({}, ArgumentParser)
-    self.args  = args
-    self.pos   = 1
-    return self
+    return setmetatable({
+        args = args or {},
+        pos = 1,
+    }, ArgumentParser)
 end
 
---@description: Test whether unconsumed arguments remain
---@param self: ArgumentParser - Parser instance
---@return: boolean - True when more arguments are available
 function ArgumentParser:hasNext()
     return self.pos <= #self.args
 end
 
---@description: Look at the next argument without consuming it
---@param self: ArgumentParser - Parser instance
---@return: string|nil - Next argument or nil at end
-function ArgumentParser:peek()
-    if self:hasNext() then
-        return self.args[self.pos]
-    end
-    return nil
-end
-
---@description: Consume and return the next argument
---@param self: ArgumentParser - Parser instance
---@return: string|nil - Consumed argument or nil at end
 function ArgumentParser:consume()
-    if self:hasNext() then
-        local val = self.args[self.pos]
-        self.pos = self.pos + 1
-        return val
+    if not self:hasNext() then
+        return nil
     end
-    return nil
+    local value = self.args[self.pos]
+    self.pos = self.pos + 1
+    return value
 end
 
---@description: Consume the next argument as a value for the named option, exiting on failure
---@param self: ArgumentParser - Parser instance
---@param option_name: string - Name of the option (for error display)
---@return: string - The consumed value
 function ArgumentParser:consumeValue(option_name)
-    local val = self:consume()
-    if val == nil or val:sub(1, 1) == "-" then
-        io.stderr:write(string.format("Error: Option '%s' requires a value\n", option_name))
-        os.exit(1)
+    local value = self:consume()
+    if value == nil or value:sub(1, 1) == "-" then
+        return nil, string.format("%s requires a value", option_name)
     end
-    return val
+    return value
 end
 
--- ============================================================
--- Output Helpers
--- ============================================================
-
---@description: Print the version banner to stdout
---@local: true
-local function printVersion()
-    io.write(string.format("luainstaller %s  LGPL 3.0 by WaterRun\n", VERSION))
+local function basename(path)
+    path = tostring(path or ""):gsub("\\", "/")
+    return path:match("[^/]+$") or path
 end
 
-
---@description: Print the full help text to stdout
---@local: true
-local function printHelp()
-    io.write(HELP_MESSAGE)
+local function stripExtension(name)
+    return tostring(name or ""):gsub("%.lua$", ""):gsub("%.cmd$", ""):gsub("%.exe$", "")
 end
 
-
---@description: Write an error message to stderr
---@local: true
---@param message: string - Error text
-local function printError(message)
-    io.stderr:write(string.format("Error: %s\n", message))
+local function detectProgram(context)
+    context = context or {}
+    local name = context.program_name or os.getenv("LUAINSTALLER_CLI_NAME")
+    if not name or name == "" then
+        name = basename(arg and arg[0] or "")
+    end
+    name = stripExtension(basename(name))
+    if name == "luainstaller" then
+        return "luainstaller"
+    end
+    return "luai"
 end
 
+local function supportsColor(context)
+    context = context or {}
+    if context.color ~= nil then
+        return context.color and true or false
+    end
+    if os.getenv("NO_COLOR") or os.getenv("CI") then
+        return false
+    end
+    return context.interactive and true or false
+end
 
---@description: Write an indented informational hint to stdout
---@local: true
---@param message: string - Hint text
-local function printHint(message)
-    io.write(string.format("  %s\n", message))
+local Ui = {}
+Ui.__index = Ui
+
+function Ui.new(context)
+    context = context or {}
+    return setmetatable({
+        color = supportsColor(context),
+        animations = context.animations and true or false,
+    }, Ui)
+end
+
+function Ui:paint(code, text)
+    if not self.color then
+        return text
+    end
+    return string.format("\27[%sm%s\27[0m", code, text)
+end
+
+function Ui:heading(text)
+    return self:paint("1;36", text)
+end
+
+function Ui:ok(text)
+    return self:paint("1;32", text)
+end
+
+function Ui:warn(text)
+    return self:paint("1;33", text)
+end
+
+function Ui:err(text)
+    return self:paint("1;31", text)
+end
+
+function Ui:progress(label)
+    if self.animations then
+        io.write(string.format("%s %s\r", self:paint("36", "|"), label))
+    end
+end
+
+function Ui:clearProgress()
+    if self.animations then
+        io.write("                    \r")
+    end
+end
+
+local function writeClassicError(message)
+    io.stderr:write(string.format("error: %s\n", message))
+end
+
+local function writeClassicHint(message)
+    io.stderr:write(string.format("try: %s\n", message))
+end
+
+local function writeModernError(ui, message)
+    io.stderr:write(string.format("%s %s\n", ui:err("error:"), message))
+end
+
+local function writeModernHint(message)
+    io.stderr:write(string.format("hint: %s\n", message))
 end
 
 local function newOptions()
@@ -302,7 +294,7 @@ local function newOptions()
         exclude = {},
         run_args = {},
         depscan = true,
-        mode    = "onedir",
+        mode = "onedir",
         max_deps = DEFAULT_MAX_DEPS,
         verbose = false,
     }
@@ -319,56 +311,74 @@ end
 local function parseActionOptions(parser, action, first_entry)
     local opts = newOptions()
     opts.action = action
-    opts.entry  = first_entry
+    opts.entry = first_entry
 
     while parser:hasNext() do
-        local arg = parser:consume()
-        if arg == "--dir" or arg == "--onedir" then
+        local item = parser:consume()
+        if item == "--dir" or item == "--onedir" then
             opts.mode = "onedir"
-        elseif arg == "--file" or arg == "--onefile" then
+        elseif item == "--file" or item == "--onefile" then
             opts.mode = "onefile"
-        elseif arg == "-o" or arg == "--out" or arg == "-output" then
-            opts.out = parser:consumeValue(arg)
-        elseif arg == "--include" then
-            opts.include[#opts.include + 1] = parser:consumeValue(arg)
-        elseif arg == "--exclude" then
-            opts.exclude[#opts.exclude + 1] = parser:consumeValue(arg)
-        elseif arg == "--target-os" then
-            opts.target_os = parser:consumeValue(arg)
-        elseif arg == "--lua-prefix" then
-            opts.lua_prefix = parser:consumeValue(arg)
-        elseif arg == "-r" or arg == "--require-engine" then
-            opts.require_engine = parser:consumeValue(arg)
-        elseif arg == "--no-depscan" or arg == "--manual" then
+        elseif item == "-o" or item == "--out" then
+            local value, err = parser:consumeValue(item)
+            if not value then
+                return nil, err
+            end
+            opts.out = value
+        elseif item == "--include" then
+            local value, err = parser:consumeValue(item)
+            if not value then
+                return nil, err
+            end
+            opts.include[#opts.include + 1] = value
+        elseif item == "--exclude" then
+            local value, err = parser:consumeValue(item)
+            if not value then
+                return nil, err
+            end
+            opts.exclude[#opts.exclude + 1] = value
+        elseif item == "--target-os" then
+            local value, err = parser:consumeValue(item)
+            if not value then
+                return nil, err
+            end
+            opts.target_os = value
+        elseif item == "--lua-prefix" then
+            local value, err = parser:consumeValue(item)
+            if not value then
+                return nil, err
+            end
+            opts.lua_prefix = value
+        elseif item == "-r" or item == "--require-engine" then
+            local value, err = parser:consumeValue(item)
+            if not value then
+                return nil, err
+            end
+            opts.require_engine = value
+        elseif item == "--no-depscan" or item == "--manual" then
             opts.depscan = false
             opts.require_engine = "manual"
-        elseif arg == "--max-deps" or arg == "-max" then
-            local number, err = parsePositiveInteger(parser:consumeValue(arg), arg)
+        elseif item == "--max-deps" then
+            local value, value_err = parser:consumeValue(item)
+            if not value then
+                return nil, value_err
+            end
+            local number, err = parsePositiveInteger(value, item)
             if not number then
                 return nil, err
             end
             opts.max_deps = number
-        elseif arg == "--verbose" or arg == "--detail" then
+        elseif item == "--verbose" then
             opts.verbose = true
-        elseif arg == "--" then
+        elseif item == "--" then
             while parser:hasNext() do
                 opts.run_args[#opts.run_args + 1] = parser:consume()
             end
             break
-        elseif arg == "-require" then
-            local val = parser:consumeValue(arg)
-            for req in val:gmatch("[^,]+") do
-                req = req:gsub("^%s+", ""):gsub("%s+$", "")
-                if req ~= "" then
-                    opts.include[#opts.include + 1] = req
-                end
-            end
-        elseif arg == "-engine" then
-            opts.require_engine = parser:consumeValue(arg)
-        elseif not opts.entry and arg:sub(1, 1) ~= "-" then
-            opts.entry = arg
+        elseif not opts.entry and item:sub(1, 1) ~= "-" then
+            opts.entry = item
         else
-            return nil, string.format("Unknown option for %s: %s", action, arg)
+            return nil, string.format("unknown option for %s: %s", action, item)
         end
     end
 
@@ -379,18 +389,18 @@ local function parseActionOptions(parser, action, first_entry)
     return opts
 end
 
-local function printStructuredError(result)
+local function structuredErrorText(result)
     local err = result and result.error or {}
     local err_type = err.type or "LuaInstallerError"
     local message = err.message or "operation failed"
-    printError(string.format("%s: %s", err_type, message))
+    return string.format("%s: %s", err_type, message)
 end
 
-local function renderVerboseTrace(result)
-    io.write(string.format("trace records: %d\n", #(result.trace or {})))
+local function renderClassicVerboseTrace(result)
+    io.write(string.format("trace-records: %d\n", #(result.trace or {})))
     for i, item in ipairs(result.trace or {}) do
         io.write(string.format(
-            "  trace %d: %s %s%s%s\n",
+            "trace[%d]: %s %s%s%s\n",
             i,
             item.requested or "(unknown)",
             item.reason or "unknown",
@@ -400,28 +410,29 @@ local function renderVerboseTrace(result)
     end
 end
 
-local function renderDependencySummary(result, verbose)
+local function renderClassicAnalyze(result, verbose)
     local deps = result.dependencies or { scripts = {}, libraries = {} }
-    io.write("success.\n")
-    io.write(string.format("%s\n", result.entry))
-    io.write(string.format("%d script(s), %d library(ies)\n", #deps.scripts, #deps.libraries))
+    io.write("ok\n")
+    io.write(string.format("entry: %s\n", result.entry))
+    io.write(string.format("scripts: %d\n", #deps.scripts))
+    io.write(string.format("libraries: %d\n", #deps.libraries))
     for i, path in ipairs(deps.scripts) do
-        io.write(string.format("  script %d: %s\n", i, path))
+        io.write(string.format("script[%d]: %s\n", i, path))
     end
     for i, path in ipairs(deps.libraries) do
-        io.write(string.format("  library %d: %s\n", i, path))
+        io.write(string.format("library[%d]: %s\n", i, path))
     end
     if verbose then
-        renderVerboseTrace(result)
+        renderClassicVerboseTrace(result)
     end
 end
 
-local function renderTrace(result)
-    io.write("trace.\n")
-    io.write(string.format("%s\n", result.entry))
+local function renderClassicTrace(result)
+    io.write("trace\n")
+    io.write(string.format("entry: %s\n", result.entry))
     for i, item in ipairs(result.trace or {}) do
         io.write(string.format(
-            "  %d) %s %s %s%s%s\n",
+            "%d: %s %s %s%s%s\n",
             i,
             item.classification or item.selected_type or "unknown",
             item.reason or "unknown",
@@ -431,250 +442,314 @@ local function renderTrace(result)
         ))
     end
     if result.compatibility then
-        io.write("compatibility.\n")
+        io.write(string.format("compatibility: %s\n", result.compatibility.summary or "unknown"))
+        for _, warning in ipairs(result.compatibility.warnings or {}) do
+            io.write(string.format("warning: %s\n", warning))
+        end
+    end
+end
+
+local function renderClassicBundle(result, opts)
+    io.write("ok\n")
+    if result.executable then
+        io.write(string.format("executable: %s\n", result.executable))
+    end
+    if opts.verbose then
+        local manifest = result.manifest or {}
+        local modules = manifest.modules or {}
+        io.write(string.format("mode: %s\n", result.mode or opts.mode or "unknown"))
+        io.write(string.format("lua-modules: %d\n", #(modules.lua or {})))
+        io.write(string.format("native-modules: %d\n", #(modules.native or {})))
+    end
+end
+
+local function renderModernAnalyze(ui, result, verbose)
+    local deps = result.dependencies or { scripts = {}, libraries = {} }
+    io.write(ui:heading("Analysis complete") .. "\n")
+    io.write(string.format("  Entry: %s\n", result.entry))
+    io.write(string.format("  Lua scripts: %s\n", ui:ok(tostring(#deps.scripts))))
+    io.write(string.format("  Native libraries: %s\n", ui:ok(tostring(#deps.libraries))))
+    if verbose then
+        io.write("\nResolution trace\n")
+        for i, item in ipairs(result.trace or {}) do
+            io.write(string.format(
+                "  %d. %s %s%s%s\n",
+                i,
+                item.requested or "(unknown)",
+                item.reason or "unknown",
+                item.selected_path and " -> " or "",
+                item.selected_path or ""
+            ))
+        end
+    end
+end
+
+local function renderModernTrace(ui, result)
+    io.write(ui:heading("Dependency trace") .. "\n")
+    io.write(string.format("  Entry: %s\n", result.entry))
+    for i, item in ipairs(result.trace or {}) do
+        io.write(string.format(
+            "  %d. %s  %s  %s%s%s\n",
+            i,
+            item.classification or item.selected_type or "unknown",
+            item.reason or "unknown",
+            item.requested or "(unknown)",
+            item.selected_path and " -> " or "",
+            item.selected_path or ""
+        ))
+    end
+    if result.compatibility then
+        io.write("\n" .. ui:heading("Compatibility") .. "\n")
         io.write(string.format("  %s\n", result.compatibility.summary or "unknown"))
         for _, note in ipairs(result.compatibility.notes or {}) do
             io.write(string.format("  note: %s\n", note))
         end
         for _, warning in ipairs(result.compatibility.warnings or {}) do
-            io.write(string.format("  warning: %s\n", warning))
+            io.write(string.format("  %s %s\n", ui:warn("warning:"), warning))
         end
     end
 end
 
-local function cmdAction(parser, action, first_entry)
+local function renderModernBundle(ui, result, opts)
+    io.write(ui:heading("Build complete") .. "\n")
+    if result.executable then
+        io.write(string.format("  Executable: %s\n", ui:ok(result.executable)))
+    end
+    if opts.verbose then
+        local manifest = result.manifest or {}
+        local modules = manifest.modules or {}
+        io.write(string.format("  Mode: %s\n", result.mode or opts.mode or "unknown"))
+        io.write(string.format("  Lua modules: %d\n", #(modules.lua or {})))
+        io.write(string.format("  Native modules: %d\n", #(modules.native or {})))
+    end
+end
+
+local function runAction(style, ui, parser, action, first_entry)
     local opts, err = parseActionOptions(parser, action, first_entry)
     if not opts then
-        printError(err)
+        if style == "modern" then
+            writeModernError(ui, err)
+            writeModernHint("run `luainstaller help`")
+        else
+            writeClassicError(err)
+            writeClassicHint("luai -h")
+        end
         return 1
     end
 
     local result
     if action == "analyze" then
+        ui:progress("Analyzing")
         result = luainstaller.analyze(opts)
+        ui:clearProgress()
         if result.ok then
-            renderDependencySummary(result, opts.verbose)
+            if style == "modern" then
+                renderModernAnalyze(ui, result, opts.verbose)
+            else
+                renderClassicAnalyze(result, opts.verbose)
+            end
             return 0
         end
     elseif action == "trace" then
+        ui:progress("Tracing")
         result = luainstaller.trace(opts)
+        ui:clearProgress()
         if result.ok then
-            renderTrace(result)
+            if style == "modern" then
+                renderModernTrace(ui, result)
+            else
+                renderClassicTrace(result)
+            end
             return 0
         end
     elseif action == "bundle" then
+        ui:progress("Building")
         result = luainstaller.bundle(opts)
+        ui:clearProgress()
         if result.ok then
-            io.write("success.\n")
-            if result.executable then
-                io.write(string.format("%s\n", result.executable))
-            end
-            if opts.verbose then
-                local manifest = result.manifest or {}
-                local modules = manifest.modules or {}
-                io.write(string.format("mode: %s\n", result.mode or opts.mode or "unknown"))
-                io.write(string.format("lua modules: %d\n", #(modules.lua or {})))
-                io.write(string.format("native modules: %d\n", #(modules.native or {})))
+            if style == "modern" then
+                renderModernBundle(ui, result, opts)
+            else
+                renderClassicBundle(result, opts)
             end
             return 0
         end
     end
 
-    printStructuredError(result)
+    if style == "modern" then
+        writeModernError(ui, structuredErrorText(result))
+    else
+        writeClassicError(structuredErrorText(result))
+    end
     return 1
 end
 
-
--- ============================================================
--- Command Handlers
--- ============================================================
-
---@description: Handle the engines command, listing all supported engines
---@local: true
---@return: number - Exit code
-local function cmdEngines()
-    io.write("Legacy engine names:\n")
-    io.write("  current bundler ignores -engine; use --require-engine for dependency discovery\n")
-    io.write(string.rep("=", 50) .. "\n")
-
-    local engine_list = {
-        { name = "luastatic",      desc = "Compile to true native binary (Linux only)" },
-        { name = "srlua",          desc = "Default srlua for current platform" },
-        { name = "winsrlua515",    desc = "Windows Lua 5.1.5 (64-bit)" },
-        { name = "winsrlua515-32", desc = "Windows Lua 5.1.5 (32-bit)" },
-        { name = "winsrlua548",    desc = "Windows Lua 5.4.8" },
-        { name = "linsrlua515",    desc = "Linux Lua 5.1.5 (64-bit)" },
-        { name = "linsrlua515-32", desc = "Linux Lua 5.1.5 (32-bit)" },
-        { name = "linsrlua548",    desc = "Linux Lua 5.4.8" },
-    }
-
-    for _, eng in ipairs(engine_list) do
-        io.write(string.format("  %-20s %s\n", eng.name, eng.desc))
+local function renderModernEngines(ui)
+    io.write(ui:heading("Legacy engines") .. "\n")
+    io.write("  These names are retained for inspection of older workflows.\n\n")
+    for _, engine in ipairs(ENGINE_LIST) do
+        io.write(string.format("  %-20s %s\n", engine.name, engine.desc))
     end
-
-    io.write(string.rep("=", 50) .. "\n")
     return 0
 end
 
-
---@description: Handle the logs command with filtering and display options
---@local: true
---@param parser: ArgumentParser - Remaining arguments
---@return: number - Exit code
-local function cmdLogs(parser)
-    local limit     = nil
+local function parseLogOptions(parser, style, ui)
+    local limit = nil
     local ascending = false
-    local level     = nil
+    local level = nil
 
     while parser:hasNext() do
-        local arg = parser:consume()
-        if arg == "-limit" then
-            local val = parser:consumeValue("-limit")
-            limit = tonumber(val)
+        local item = parser:consume()
+        if item == "--limit" or item == "-limit" then
+            local value, value_err = parser:consumeValue(item)
+            if not value then
+                return nil, value_err
+            end
+            limit = tonumber(value)
             if not limit or limit <= 0 or limit ~= math.floor(limit) then
-                printError("-limit must be a positive integer")
-                return 1
+                return nil, "--limit must be a positive integer"
             end
-        elseif arg == "--asc" then
+        elseif item == "--asc" then
             ascending = true
-        elseif arg == "-level" then
-            level = parser:consumeValue("-level")
-            if not VALID_LEVELS[level] then
-                printError(string.format("Invalid level: %s", level))
-                return 1
+        elseif item == "--level" or item == "-level" then
+            local value, value_err = parser:consumeValue(item)
+            if not value then
+                return nil, value_err
             end
+            if not VALID_LEVELS[value] then
+                return nil, string.format("invalid log level: %s", value)
+            end
+            level = value
         else
-            printError(string.format("Unknown option for logs: %s", arg))
-            return 1
+            return nil, string.format("unknown option for logs: %s", item)
         end
     end
 
-    local logs = logger.getLogs({
-        limit      = limit,
-        level      = level,
+    return {
+        limit = limit,
+        level = level,
         descending = not ascending,
-    })
+    }
+end
 
+local function runLogs(parser, style, ui)
+    local opts, err = parseLogOptions(parser, style, ui)
+    if not opts then
+        if style == "modern" then
+            writeModernError(ui, err)
+        else
+            writeClassicError(err)
+        end
+        return 1
+    end
+
+    local logs = logger.getLogs(opts)
     if #logs == 0 then
-        io.write("No logs found.\n")
+        io.write(style == "modern" and "No logs found.\n" or "no logs\n")
         return 0
     end
 
-    io.write(string.format("Showing %d log(s):\n", #logs))
-    io.write(string.rep("=", 60) .. "\n")
-
-    for _, entry in ipairs(logs) do
-        local ts     = entry.timestamp or "Unknown"
-        local lvl    = entry.level or "info"
-        local src    = entry.source or "unknown"
-        local action = entry.action or "unknown"
-        local msg    = entry.message or ""
-        local sym    = LEVEL_SYMBOLS[lvl] or SYM_INFO
-
-        io.write(string.format("[%s] %s [%s:%s] %s\n", ts, sym, src, action, msg))
-
-        if entry.details then
-            for k, v in pairs(entry.details) do
-                io.write(string.format("    %s: %s\n", tostring(k), tostring(v)))
-            end
-        end
-
-        io.write(string.rep("-", 60) .. "\n")
+    if style == "modern" then
+        io.write(ui:heading(string.format("Showing %d log(s)", #logs)) .. "\n")
+    else
+        io.write(string.format("logs: %d\n", #logs))
     end
 
+    for _, entry in ipairs(logs) do
+        local ts = entry.timestamp or "unknown"
+        local lvl = entry.level or "info"
+        local src = entry.source or "unknown"
+        local action = entry.action or "unknown"
+        local msg = entry.message or ""
+        if style == "modern" then
+            io.write(string.format("  [%s] %-7s %s:%s %s\n", ts, lvl, src, action, msg))
+        else
+            io.write(string.format("%s\t%s\t%s:%s\t%s\n", ts, lvl, src, action, msg))
+        end
+    end
     return 0
 end
 
+local function runLuai(args, context)
+    local parser = ArgumentParser.new(args)
+    local ui = Ui.new({ color = false, animations = false })
 
--- ============================================================
--- Main Entry Point
--- ============================================================
+    if not parser:hasNext() then
+        io.write(string.format("luai %s\n", VERSION))
+        return 0
+    end
 
---[[
-Public module interface for the CLI subsystem.
+    local command = parser:consume()
+    if command == "-h" then
+        io.write(LUAI_HELP)
+        return 0
+    elseif command == "-v" then
+        io.write(string.format("luai %s\n", VERSION))
+        return 0
+    elseif command == "-a" then
+        return runAction("classic", ui, parser, "analyze")
+    elseif command == "-t" then
+        return runAction("classic", ui, parser, "trace")
+    elseif command == "-b" then
+        return runAction("classic", ui, parser, "bundle")
+    end
 
-Author:
-    WaterRun
-Module:
-    cli
-]]
+    writeClassicError(string.format("unknown luai command: %s", command))
+    writeClassicHint("luai -h")
+    return 1
+end
+
+local function runLuainstaller(args, context)
+    local parser = ArgumentParser.new(args)
+    local ui = Ui.new(context)
+
+    if not parser:hasNext() then
+        io.write(LUAINSTALLER_HELP)
+        return 0
+    end
+
+    local command = parser:consume()
+    if command == "help" then
+        io.write(LUAINSTALLER_HELP)
+        return 0
+    elseif command == "version" then
+        io.write(string.format("luainstaller %s  LGPL 3.0 by WaterRun\n", VERSION))
+        return 0
+    elseif command == "analyze" then
+        return runAction("modern", ui, parser, "analyze")
+    elseif command == "trace" then
+        return runAction("modern", ui, parser, "trace")
+    elseif command == "build" then
+        return runAction("modern", ui, parser, "bundle")
+    elseif command == "logs" then
+        return runLogs(parser, "modern", ui)
+    elseif command == "engines" then
+        return renderModernEngines(ui)
+    end
+
+    writeModernError(ui, string.format("unknown luainstaller command: %s", command))
+    writeModernHint("run `luainstaller help`")
+    return 1
+end
+
 local M = {}
 
-
---@description: Parse arguments and dispatch to the appropriate command handler
---@param args: table - Argument table (typically the global arg)
---@return: number - Process exit code (0 for success, non-zero for failure)
---@usage: os.exit(cli.main(arg))
-function M.main(args)
+function M.main(args, context)
     args = args or {}
+    context = context or {}
 
     local positional = {}
     for i = 1, #args do
         positional[#positional + 1] = args[i]
     end
 
-    local parser = ArgumentParser.new(positional)
-
-    if not parser:hasNext() then
-        printVersion()
-        return 0
+    local program = detectProgram(context)
+    if program == "luainstaller" then
+        return runLuainstaller(positional, context)
     end
-
-    local command = parser:consume()
-
-    if command == "h" or command == "help" or command == "-h" or command == "--help" then
-        printHelp()
-        return 0
-    end
-
-    if command == "v" or command == "version" or command == "-v" or command == "--version" then
-        printVersion()
-        return 0
-    end
-
-    if command == "eng" or command == "engines" then
-        return cmdEngines()
-    end
-
-    if command == "log" or command == "logs" then
-        return cmdLogs(parser)
-    end
-
-    if command == "a" or command == "-a" then
-        return cmdAction(parser, "analyze")
-    end
-
-    if command == "t" or command == "-t" or command == "trace" then
-        return cmdAction(parser, "trace")
-    end
-
-    if command == "b" or command == "-b" or command == "-c" then
-        return cmdAction(parser, "bundle")
-    end
-
-    if command == "analyze" then
-        return cmdAction(parser, "analyze")
-    end
-
-    if command == "bundle" or command == "build" or command == "pack" then
-        return cmdAction(parser, "bundle")
-    end
-
-    if command:match("%.lua$") then
-        local build_args = { command }
-        for i = parser.pos, #parser.args do
-            build_args[#build_args + 1] = parser.args[i]
-        end
-        return cmdAction(ArgumentParser.new(build_args), "bundle")
-    end
-
-    printError(string.format("Unknown command: %s", command))
-    printHint("Run 'luai --help' for usage information")
-    return 1
+    return runLuai(positional, context)
 end
 
---@description: Detect module vs script context and act accordingly
---@local: true
 local _modname = ...
 if _modname ~= "luainstaller.cli" then
     os.exit(M.main(arg) or 0)
