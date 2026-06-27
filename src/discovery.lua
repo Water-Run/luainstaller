@@ -1,10 +1,10 @@
 --[[
-Dependency discovery engine selection for luainstaller.
+Dependency discovery mode selection for luainstaller.
 
 Author:
     WaterRun
 File:
-    require_engine.lua
+    discovery.lua
 Date:
     2026-06-21
 Updated:
@@ -212,7 +212,7 @@ end
 
 local function staticPlan(opts)
     local ok, result = pcall(analyzer.traceDependencies, opts.entry, {
-        max_dependencies = opts.max_deps or opts.max_dependencies or DEFAULT_MAX_DEPS,
+        max_dependencies = opts.max_deps or DEFAULT_MAX_DEPS,
     })
     if not ok then
         return nil, fromThrownError(result)
@@ -278,7 +278,7 @@ end
 local function parseTraceOutput(path)
     local file = io.open(path, "rb")
     if not file then
-        return nil, makeError("RequireEngineError", "Runtime require trace output was not written", {
+        return nil, makeError("DiscoveryError", "Runtime require trace output was not written", {
             path = path,
         })
     end
@@ -323,7 +323,7 @@ local function runtimePlan(opts)
     removeFile(script_path)
     if not ok then
         removeFile(output_path)
-        return nil, makeError("RequireEngineError", "Runtime require tracing failed", {
+        return nil, makeError("DiscoveryError", "Runtime require tracing failed", {
             command = command,
             output = output,
         })
@@ -379,23 +379,23 @@ end
 
 function M.plan(opts)
     opts = opts or {}
-    local engine = opts.require_engine
+    local mode = opts.discovery_mode
     if opts.depscan == false then
-        engine = "manual"
+        mode = "manual"
     end
-    engine = engine or "static"
+    mode = mode or "static"
 
     local raw
     local err
-    if engine == "static" then
+    if mode == "static" then
         raw, err = staticPlan(opts)
-    elseif engine == "manual" then
+    elseif mode == "manual" then
         raw = { scripts = {}, libraries = {}, trace = {} }
-    elseif engine == "runtime" then
+    elseif mode == "runtime" then
         raw, err = runtimePlan(opts)
     else
-        return nil, makeError("InvalidOptionsError", "Unknown require engine: " .. tostring(engine), {
-            require_engine = engine,
+        return nil, makeError("InvalidOptionsError", "Unknown discovery mode: " .. tostring(mode), {
+            discovery_mode = mode,
         })
     end
     if not raw then

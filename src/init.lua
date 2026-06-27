@@ -1,8 +1,7 @@
 --[[
 Main public interface module for luainstaller.
 Provides a unified API for dependency analysis, log
-management, and build orchestration. Sub-modules are
-loaded on demand where possible to keep startup fast.
+management, and build orchestration.
 
 Author:
     WaterRun
@@ -15,13 +14,12 @@ Updated:
 ]]
 
 
-local analyzer = require("luainstaller.analyzer")
 local bundler  = require("luainstaller.bundler")
 local compat   = require("luainstaller.compat")
 local logger   = require("luainstaller.logger")
 local manifest = require("luainstaller.manifest")
 local onefile  = require("luainstaller.onefile")
-local require_engine = require("luainstaller.require_engine")
+local discovery = require("luainstaller.discovery")
 
 
 --[[
@@ -57,9 +55,6 @@ M.URL = "https://github.com/Water-Run/luainstaller"
 --@description: Re-exported log level constants
 M.LogLevel = logger.LogLevel
 
-local DEFAULT_MAX_DEPS = 36
-
-
 --[[
 Error type identifier strings for programmatic error handling.
 The type field of error tables thrown by luainstaller functions
@@ -73,19 +68,33 @@ Values:
     DYNAMIC_REQUIRE: Non-literal require argument
     DEPENDENCY_LIMIT: Dependency count exceeded
     MODULE_NOT_FOUND: Required module not locatable
-    COMPILATION_FAILED: Engine returned non-zero exit code
-    ENGINE_NOT_FOUND: Unknown engine name specified
-    OUTPUT_NOT_FOUND: Expected output file missing after compilation
+    COMPILATION_FAILED: Compiler returned non-zero exit code
+    DUPLICATE_MODULE: Two files map to the same bundled destination
+    INVALID_OPTIONS: Invalid API or CLI option table
+    INVALID_OUTPUT: Unsafe or unsupported output path
+    TOOLCHAIN: Missing compiler, headers, runtime, or target profile dependency
+    UNSUPPORTED_PLATFORM: Target profile is not supported from this host
+    FILESYSTEM: Required file operation failed
+    DISCOVERY: Runtime dependency discovery failed
+    LAUNCHER_GENERATION: Launcher source generation failed unexpectedly
+    LUA_RUNTIME_NOT_FOUND: Linked Lua runtime could not be located
 ]]
 M.ErrorTypes = {
-    SCRIPT_NOT_FOUND    = "ScriptNotFoundError",
-    CIRCULAR_DEPENDENCY = "CircularDependencyError",
-    DYNAMIC_REQUIRE     = "DynamicRequireError",
-    DEPENDENCY_LIMIT    = "DependencyLimitExceededError",
-    MODULE_NOT_FOUND    = "ModuleNotFoundError",
-    COMPILATION_FAILED  = "CompilationFailedError",
-    ENGINE_NOT_FOUND    = "EngineNotFoundError",
-    OUTPUT_NOT_FOUND    = "OutputFileNotFoundError",
+    SCRIPT_NOT_FOUND      = "ScriptNotFoundError",
+    CIRCULAR_DEPENDENCY   = "CircularDependencyError",
+    DYNAMIC_REQUIRE       = "DynamicRequireError",
+    DEPENDENCY_LIMIT      = "DependencyLimitExceededError",
+    MODULE_NOT_FOUND      = "ModuleNotFoundError",
+    COMPILATION_FAILED    = "CompilationFailedError",
+    DUPLICATE_MODULE      = "DuplicateModuleError",
+    INVALID_OPTIONS       = "InvalidOptionsError",
+    INVALID_OUTPUT        = "InvalidOutputError",
+    TOOLCHAIN             = "ToolchainError",
+    UNSUPPORTED_PLATFORM  = "UnsupportedPlatformError",
+    FILESYSTEM            = "FilesystemError",
+    DISCOVERY             = "DiscoveryError",
+    LAUNCHER_GENERATION   = "LauncherGenerationError",
+    LUA_RUNTIME_NOT_FOUND = "LuaRuntimeNotFoundError",
 }
 
 
@@ -105,13 +114,6 @@ local function makeError(err_type, message, details)
     }
 end
 
-local function fromThrownError(err)
-    if type(err) == "table" then
-        return makeError(err.type or "LuaInstallerError", err.message or tostring(err), err)
-    end
-    return makeError("LuaInstallerError", tostring(err))
-end
-
 local function fileExists(path)
     local handle = io.open(path, "rb")
     if handle then
@@ -121,53 +123,131 @@ local function fileExists(path)
     return false
 end
 
-local function basename(path)
-    path = tostring(path or ""):gsub("\\", "/")
-    return path:match("[^/]+$") or path
+local function copySequence(list)
+    if type(list) ~= "table" then
+        return list
+    end
+    local copy = {}
+    for i = 1, #list do
+        copy[i] = list[i]
+    end
+    return copy
 end
 
+local ALLOWED_OPTIONS = {
+    action = true,
+    depscan = true,
+    discovery_mode = true,
+    entry = true,
+    exclude = true,
+    include = true,
+    launcher_profile = true,
+    lua_prefix = true,
+    max_deps = true,
+    mode = true,
+    out = true,
+    run_args = true,
+    target_os = true,
+    verbose = true,
+}
+
 local function normalizeOptions(opts)
-    if type(opts) == "string" then
-        return { entry = opts }
-    end
     if type(opts) ~= "table" then
         return nil, makeError("InvalidOptionsError", "options must be a table")
+    end
+    for key in pairs(opts) do
+        if not ALLOWED_OPTIONS[key] then
+            return nil, makeError("InvalidOptionsError", "unknown option: " .. tostring(key), {
+                option = key,
+            })
+        end
     end
     if type(opts.entry) ~= "string" or opts.entry == "" then
         return nil, makeError("InvalidOptionsError", "entry is required")
     end
-    return opts
+    local normalized = {}
+    for key, value in pairs(opts) do
+        normalized[key] = value
+    end
+    normalized.include = copySequence(opts.include)
+    normalized.exclude = copySequence(opts.exclude)
+    normalized.run_args = copySequence(opts.run_args)
+    return normalized
 end
 
 local function dependencyPlan(opts)
-    return require_engine.plan(opts)
+    return discovery.plan(opts)
 end
 
---@description: Perform dependency analysis on a Lua entry script
---@param opts: table|string - Options table with entry, or legacy entry string
---@return: table - Structured result table
-function M.analyze(opts)
+local function validateBundleMode(mode)
+    if mode == "onedir" or mode == "onefile" then
+        return nil
+    end
+    return makeError("InvalidOptionsError", string.format("Unknown bundle mode: %s", tostring(mode)))
+end
+
+local function analyzeContext(opts, config)
+    config = config or {}
     local normalized, err = normalizeOptions(opts)
     if not normalized then
-        return err
+        return nil, err
+    end
+    if config.default_mode and (normalized.mode == nil or normalized.mode == "") then
+        normalized.mode = config.default_mode
+    end
+    if normalized.mode ~= nil then
+        local mode_err = validateBundleMode(normalized.mode)
+        if mode_err then
+            return nil, mode_err
+        end
     end
     if not fileExists(normalized.entry) then
-        return makeError("ScriptNotFoundError", string.format("Lua script not found: %s", normalized.entry), {
+        return nil, makeError("ScriptNotFoundError", string.format("Lua script not found: %s", normalized.entry), {
             script_path = normalized.entry,
         })
     end
 
     local dependencies, dep_err = dependencyPlan(normalized)
     if not dependencies then
-        return dep_err
+        return nil, dep_err
+    end
+
+    return {
+        options = normalized,
+        entry = normalized.entry,
+        dependencies = dependencies,
+        trace = dependencies.trace or {},
+    }
+end
+
+local function compatibilityDiagnostics(context)
+    local normalized = context.options
+    return compat.diagnose({
+        entry = context.entry,
+        mode = normalized.mode or "onedir",
+        target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
+        lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
+        launcher_profile = normalized.launcher_profile,
+        dependencies = context.dependencies,
+        trace = context.trace,
+    })
+end
+
+--@description: Perform dependency analysis on a Lua entry script
+--@param opts: table - Options table with entry
+--@return: table - Structured result table
+function M.analyze(opts)
+    local context, err = analyzeContext(opts)
+    if not context then
+        return err
     end
 
     return {
         ok           = true,
         action       = "analyze",
-        entry        = normalized.entry,
-        dependencies = dependencies,
-        trace        = dependencies.trace or {},
+        entry        = context.entry,
+        dependencies = context.dependencies,
+        trace        = context.trace,
     }
 end
 
@@ -186,104 +266,55 @@ function M.clearLogs()
     return logger.clearLogs()
 end
 
---@description: Return legacy compilation engine names kept for compatibility
---@return: table - List of engine name strings
---@usage: local engines = luainstaller.getEngines()
-function M.getEngines()
-    return {
-        "luastatic",
-        "srlua",
-        "winsrlua515",
-        "winsrlua515-32",
-        "winsrlua548",
-        "linsrlua515",
-        "linsrlua515-32",
-        "linsrlua548",
-    }
-end
-
 --@description: Produce trace-oriented dependency diagnostics
---@param opts: table|string - Options table with entry, or legacy entry string
+--@param opts: table - Options table with entry
 --@return: table - Structured trace result
 function M.trace(opts)
-    local normalized, err = normalizeOptions(opts)
-    if not normalized then
+    local context, err = analyzeContext(opts)
+    if not context then
         return err
-    end
-
-    local analyzed = M.analyze(normalized)
-    if not analyzed.ok then
-        return analyzed
     end
 
     return {
         ok            = true,
         action        = "trace",
-        entry         = analyzed.entry,
-        dependencies  = analyzed.dependencies,
-        trace         = analyzed.trace or {},
-        compatibility = compat.diagnose({
-            entry = analyzed.entry,
-            mode = normalized.mode or "onedir",
-            target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
-            lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
-            launcher_profile = normalized.launcher_profile,
-            dependencies = analyzed.dependencies,
-            trace = analyzed.trace,
-        }),
+        entry         = context.entry,
+        dependencies  = context.dependencies,
+        trace         = context.trace,
+        compatibility = compatibilityDiagnostics(context),
     }
 end
 
 function M.compatibility(opts)
-    local normalized, err = normalizeOptions(opts)
-    if not normalized then
+    local context, err = analyzeContext(opts)
+    if not context then
         return err
-    end
-    local analyzed = M.analyze(normalized)
-    if not analyzed.ok then
-        return analyzed
     end
     return {
         ok = true,
         action = "compatibility",
-        entry = analyzed.entry,
-        compatibility = compat.diagnose({
-            entry = analyzed.entry,
-            mode = normalized.mode or "onedir",
-            target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
-            lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
-            launcher_profile = normalized.launcher_profile,
-            dependencies = analyzed.dependencies,
-            trace = analyzed.trace,
-        }),
+        entry = context.entry,
+        compatibility = compatibilityDiagnostics(context),
     }
 end
 
 --@description: Validate bundle options and return the current planned result
---@param opts: table|string - Options table with entry, or legacy entry string
+--@param opts: table - Options table with entry
 --@return: table - Structured bundle result or structured error
 function M.bundle(opts)
-    local normalized, err = normalizeOptions(opts)
-    if not normalized then
+    local context, err = analyzeContext(opts, { default_mode = "onedir" })
+    if not context then
         return err
     end
 
-    normalized.mode = normalized.mode or "onedir"
-    if normalized.mode ~= "onedir" and normalized.mode ~= "onefile" then
-        return makeError("InvalidOptionsError", string.format("Unknown bundle mode: %s", tostring(normalized.mode)))
-    end
-
-    local analyzed = M.analyze(normalized)
-    if not analyzed.ok then
-        return analyzed
-    end
+    local normalized = context.options
 
     local built_manifest = manifest.build({
         entry = normalized.entry,
         mode = normalized.mode,
         out = normalized.out,
-        dependencies = analyzed.dependencies,
-        trace = analyzed.trace,
+        dependencies = context.dependencies,
+        trace = context.trace,
         include = normalized.include,
         exclude = normalized.exclude,
         depscan = normalized.depscan,
@@ -298,8 +329,8 @@ function M.bundle(opts)
         out = normalized.out,
         target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
         lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
-        dependencies = analyzed.dependencies,
-        trace = analyzed.trace,
+        dependencies = context.dependencies,
+        trace = context.trace,
         manifest = built_manifest.manifest,
     }
 
@@ -309,8 +340,5 @@ function M.bundle(opts)
 
     return bundler.bundleOnedir(bundle_opts)
 end
-
-M.bundleToSinglefile = M.bundle
-M.build = M.bundle
 
 return M

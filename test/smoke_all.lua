@@ -26,7 +26,7 @@ package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
 package.preload["luainstaller.launcher"] = function() return dofile("src/launcher.lua") end
 package.preload["luainstaller.bundler"] = function() return dofile("src/bundler.lua") end
-package.preload["luainstaller.require_engine"] = function() return dofile("src/require_engine.lua") end
+package.preload["luainstaller.discovery"] = function() return dofile("src/discovery.lua") end
 package.preload["luainstaller.onefile"] = function() return dofile("src/onefile.lua") end
 package.preload["luainstaller"] = function() return dofile("src/init.lua") end
 package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
@@ -221,6 +221,13 @@ local function check_api_contract()
     local script = SOURCE_LOADER .. [[
 local luainstaller = require("luainstaller")
 
+assert(luainstaller.getEngines == nil)
+assert(luainstaller.ErrorTypes.REQUIRE_ENGINE == nil)
+assert(luainstaller.ErrorTypes.DISCOVERY == "DiscoveryError")
+assert(luainstaller.ErrorTypes.LAUNCHER_GENERATION == "LauncherGenerationError")
+assert(luainstaller.build == nil)
+assert(luainstaller.bundleToSinglefile == nil)
+
 local function find_trace(items, requested)
     for _, item in ipairs(items) do
         if item.requested == requested then
@@ -310,6 +317,18 @@ local missing = luainstaller.analyze({ entry = "test/no-such-file.lua" })
 assert(missing.ok == false)
 assert(missing.error.type == "ScriptNotFoundError")
 
+local non_table = luainstaller.analyze("test/runtime_bundle/main.lua")
+assert(non_table.ok == false)
+assert(non_table.error.type == "InvalidOptionsError")
+
+local old_option = luainstaller.analyze({
+    entry = "test/runtime_bundle/main.lua",
+    require_engine = "runtime",
+})
+assert(old_option.ok == false)
+assert(old_option.error.type == "InvalidOptionsError")
+assert(old_option.error.option == "require_engine")
+
 local unsafe = luainstaller.bundle({
     entry = "test/runtime_bundle/main.lua",
     out = ".",
@@ -327,8 +346,8 @@ print("api contract ok")
     remove_tree(root)
 end
 
-local function check_require_engines()
-    local root = make_temp_dir("require-engine")
+local function check_discovery_modes()
+    local root = make_temp_dir("discovery-mode")
     write_file(root .. "/main.lua", [[
 local name = arg[1] or "dynamic"
 local mod = require(name)
@@ -343,7 +362,7 @@ local luainstaller = require("luainstaller")
 
 local manual = luainstaller.analyze({
     entry = "test/runtime_bundle/main.lua",
-    require_engine = "manual",
+    discovery_mode = "manual",
     include = { "test/runtime_bundle/greeter.lua" },
 })
 assert(manual.ok == true, manual.error and manual.error.message)
@@ -352,7 +371,7 @@ assert(manual.dependencies.scripts[1]:match("runtime_bundle/greeter%%.lua$"))
 
 local runtime = luainstaller.analyze({
     entry = %q,
-    require_engine = "runtime",
+    discovery_mode = "runtime",
     run_args = { "dynamic" },
 })
 assert(runtime.ok == true, runtime.error and runtime.error.message)
@@ -361,10 +380,10 @@ assert(runtime.dependencies.scripts[1]:match("dynamic%%.lua$"))
 assert(#runtime.trace >= 1)
 assert(runtime.trace[1].requested == "dynamic")
 
-print("require engines ok")
+print("discovery modes ok")
 ]], root .. "/main.lua")
 
-    assert_contains(run("lua -e " .. shell_quote(script)), "require engines ok")
+    assert_contains(run("lua -e " .. shell_quote(script)), "discovery modes ok")
     remove_tree(root)
 end
 
@@ -672,6 +691,9 @@ local function check_cli_contract()
     assert_contains(full_help, "luainstaller analyze <entry.lua>")
     assert_contains(full_help, "luainstaller trace <entry.lua>")
     assert_contains(full_help, "luainstaller build <entry.lua>")
+    assert_contains(full_help, "--discovery-mode")
+    assert_not_contains(full_help, "--require-engine")
+    assert_not_contains(full_help, "engines")
 
     assert_equals(
         run(cli_command("luainstaller", { "version" })),
@@ -720,9 +742,20 @@ local function check_cli_contract()
     assert_contains(verbose_analyzed, "trace-records:")
     assert_contains(verbose_analyzed, "model")
 
-    local engines = run(cli_command("luainstaller", { "engines" }))
-    assert_contains(engines, "Legacy engines")
-    assert_contains(engines, "retained for inspection")
+    local bad_engines = run(cli_command("luainstaller", { "engines" }), {
+        expect_failure = true,
+    })
+    assert_contains(bad_engines, "error: unknown luainstaller command: engines")
+
+    local old_discovery_option = run(cli_command("luai", {
+        "-a",
+        "test/runtime_bundle/main.lua",
+        "--require-engine",
+        "runtime",
+    }), {
+        expect_failure = true,
+    })
+    assert_contains(old_discovery_option, "error: unknown option for analyze: --require-engine")
 
     local cli_out = make_temp_dir("cli-onedir")
     local bundled = run(cli_command("luai", {
@@ -1037,8 +1070,8 @@ assert_bundle({
     print("onefile bundles ok")
 end
 
-local function check_cli_require_engine_runtime()
-    local root = make_temp_dir("cli-require-engine")
+local function check_cli_discovery_runtime()
+    local root = make_temp_dir("cli-discovery-runtime")
     write_file(root .. "/main.lua", [[
 local name = arg[1] or "dynamic"
 local mod = require(name)
@@ -1051,7 +1084,7 @@ return { message = function() return "cli runtime dynamic module" end }
     local traced = run(cli_command("luai", {
         "-a",
         root .. "/main.lua",
-        "-r",
+        "-d",
         "runtime",
         "--",
         "dynamic",
@@ -1059,7 +1092,7 @@ return { message = function() return "cli runtime dynamic module" end }
     assert_contains(traced, "ok")
     assert_contains(traced, "dynamic.lua")
     remove_tree(root)
-    print("cli require engine ok")
+    print("cli discovery mode ok")
 end
 
 local function check_installed_cli_bundle()
@@ -1116,7 +1149,7 @@ check_syntax()
 check_samples()
 check_analyzer_visibility()
 check_api_contract()
-check_require_engines()
+check_discovery_modes()
 check_compatibility_diagnostics()
 check_manifest_without_popen()
 check_bundler_without_popen()
@@ -1130,7 +1163,7 @@ check_runtime_cgen()
 check_c_launcher()
 check_onedir_bundles()
 check_onefile_bundles()
-check_cli_require_engine_runtime()
+check_cli_discovery_runtime()
 check_installed_cli_bundle()
 check_source_install_bundle()
 

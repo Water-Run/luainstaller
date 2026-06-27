@@ -72,9 +72,8 @@ Accepts full subcommands only:
 .BR analyze ,
 .BR trace ,
 .BR build ,
-.BR logs ,
 and
-.BR engines .
+.BR logs .
 .PP
 For example,
 .B luai \-b
@@ -132,8 +131,8 @@ Select the target profile: linux, macos, or windows.
 .BI \-\-lua\-prefix " " path
 Lua prefix used by targets that require explicit headers or runtime files.
 .TP
-.BI \-r ", " \-\-require\-engine " " engine
-Select dependency discovery: static, manual, or runtime.
+.BI \-d ", " \-\-discovery\-mode " " mode
+Select dependency discovery mode: static, manual, or runtime.
 .TP
 .B \-\-no\-depscan
 Disable automatic dependency scanning and use manual dependencies only.

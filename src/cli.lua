@@ -57,8 +57,8 @@ local function installSourcePreloads()
     package.preload["luainstaller.bundler"] = package.preload["luainstaller.bundler"] or function()
         return dofile(sourcePath("bundler.lua"))
     end
-    package.preload["luainstaller.require_engine"] = package.preload["luainstaller.require_engine"] or function()
-        return dofile(sourcePath("require_engine.lua"))
+    package.preload["luainstaller.discovery"] = package.preload["luainstaller.discovery"] or function()
+        return dofile(sourcePath("discovery.lua"))
     end
     package.preload["luainstaller.onefile"] = package.preload["luainstaller.onefile"] or function()
         return dofile(sourcePath("onefile.lua"))
@@ -97,7 +97,7 @@ Options:
   --exclude <path>      exclude a dependency
   --target-os <os>      linux, macos, or windows
   --lua-prefix <path>   Lua prefix for profiled targets
-  -r, --require-engine <engine>
+  -d, --discovery-mode <mode>
                         static, manual, or runtime
   --no-depscan          manual dependencies only
   --max-deps <n>        dependency count limit
@@ -119,7 +119,6 @@ Commands:
   luainstaller build <entry.lua>
                                Build a directory or onefile bundle.
   luainstaller logs [options]  View operation logs.
-  luainstaller engines         List legacy engine names kept for inspection.
 
 Build options:
   --dir, --onedir              Directory bundle mode (default).
@@ -129,8 +128,8 @@ Build options:
   --exclude <path>             Exclude a dependency; repeatable.
   --target-os <os>             Target profile: linux, macos, or windows.
   --lua-prefix <path>          Lua prefix for profiled targets.
-  -r, --require-engine <engine>
-                               Dependency engine: static, manual, runtime.
+  -d, --discovery-mode <mode>
+                               Dependency discovery mode: static, manual, runtime.
   --no-depscan                 Manual dependencies only.
   --max-deps <n>               Dependency count limit (default: 36).
   --verbose                    Show additional details.
@@ -149,17 +148,6 @@ local VALID_LEVELS = {
     warning = true,
     error = true,
     success = true,
-}
-
-local ENGINE_LIST = {
-    { name = "luastatic", desc = "Compile to true native binary (Linux only)" },
-    { name = "srlua", desc = "Default srlua for current platform" },
-    { name = "winsrlua515", desc = "Windows Lua 5.1.5 (64-bit)" },
-    { name = "winsrlua515-32", desc = "Windows Lua 5.1.5 (32-bit)" },
-    { name = "winsrlua548", desc = "Windows Lua 5.4.8" },
-    { name = "linsrlua515", desc = "Linux Lua 5.1.5 (64-bit)" },
-    { name = "linsrlua515-32", desc = "Linux Lua 5.1.5 (32-bit)" },
-    { name = "linsrlua548", desc = "Linux Lua 5.4.8" },
 }
 
 local ArgumentParser = {}
@@ -349,15 +337,15 @@ local function parseActionOptions(parser, action, first_entry)
                 return nil, err
             end
             opts.lua_prefix = value
-        elseif item == "-r" or item == "--require-engine" then
+        elseif item == "-d" or item == "--discovery-mode" then
             local value, err = parser:consumeValue(item)
             if not value then
                 return nil, err
             end
-            opts.require_engine = value
-        elseif item == "--no-depscan" or item == "--manual" then
+            opts.discovery_mode = value
+        elseif item == "--no-depscan" then
             opts.depscan = false
-            opts.require_engine = "manual"
+            opts.discovery_mode = "manual"
         elseif item == "--max-deps" then
             local value, value_err = parser:consumeValue(item)
             if not value then
@@ -587,15 +575,6 @@ local function runAction(style, ui, parser, action, first_entry)
     return 1
 end
 
-local function renderModernEngines(ui)
-    io.write(ui:heading("Legacy engines") .. "\n")
-    io.write("  These names are retained for inspection of older workflows.\n\n")
-    for _, engine in ipairs(ENGINE_LIST) do
-        io.write(string.format("  %-20s %s\n", engine.name, engine.desc))
-    end
-    return 0
-end
-
 local function parseLogOptions(parser, style, ui)
     local limit = nil
     local ascending = false
@@ -726,8 +705,6 @@ local function runLuainstaller(args, context)
         return runAction("modern", ui, parser, "bundle")
     elseif command == "logs" then
         return runLogs(parser, "modern", ui)
-    elseif command == "engines" then
-        return renderModernEngines(ui)
     end
 
     writeModernError(ui, string.format("unknown luainstaller command: %s", command))

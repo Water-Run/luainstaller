@@ -96,8 +96,7 @@ controlled runtime images.
 
 |Command surfaces
 |`luai` is the compact script-friendly CLI. `luainstaller` is the
-full-word CLI with logs and legacy engine inspection. Both call the same
-Lua API.
+full-word CLI with log inspection. Both call the same Lua API.
 
 |Dependency discovery
 |Static literal-`require` scanning, manual include/exclude mode, and
@@ -193,10 +192,6 @@ luainstaller build --dir test/runtime_bundle/main.lua -o build/runtime-demo --ma
 |Logs
 |Not exposed
 |`luainstaller logs`
-
-|Legacy engines
-|Not exposed
-|`luainstaller engines`
 |===
 
 Command forms intentionally do not cross over. `luai build app.lua` and
@@ -232,14 +227,6 @@ scripts.
 |Manual page source installed for both `luai(1)` and
 `luainstaller(1)`.
 |===
-
-[#history]
-== History
-
-`luainstaller` used to be a Python library that could bundle only pure
-Lua scripts. The current Lua implementation focuses on dependency
-analysis, native-aware bundle layout, and a precise same-environment
-runtime contract.
 
 Project repository:
 https://github.com/Water-Run/luainstaller[Water-Run/luainstaller].

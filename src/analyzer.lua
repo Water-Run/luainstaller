@@ -1,5 +1,5 @@
 --[[
-Dependency analysis engine for Lua scripts.
+Dependency analyzer for Lua scripts.
 Provides comprehensive static analysis including require
 extraction via a state-machine lexer, module path resolution
 across package.path and package.cpath, native library
@@ -1037,46 +1037,6 @@ function ModuleResolver:inspect(module_name, from_script)
     }
 end
 
---@description: Resolve a relative module path (starting with ./ or ../)
---@param self: ModuleResolver - Resolver instance
---@param module_name: string - Relative module reference
---@param from_script: string - Absolute path of the requiring script
---@return: table - Resolution result {type="lua"|"native", path=string}
---@raise: ModuleNotFoundError when the file does not exist
-function ModuleResolver:resolveRelative(module_name, from_script)
-    local base_dir = pathParent(from_script)
-    local target = normalizePath(base_dir .. "/" .. module_name)
-
-    local ext = pathExtension(target)
-    local candidates_lua = {}
-    local candidates_native = {}
-
-    if ext == ".lua" then
-        candidates_lua[#candidates_lua + 1] = target
-    elseif ext and NATIVE_EXTENSIONS[ext] then
-        candidates_native[#candidates_native + 1] = target
-    else
-        candidates_lua[#candidates_lua + 1] = target .. ".lua"
-        candidates_lua[#candidates_lua + 1] = target .. "/init.lua"
-        candidates_native[#candidates_native + 1] = target .. (IS_WINDOWS and ".dll" or ".so")
-        candidates_native[#candidates_native + 1] = target .. ".a"
-        candidates_native[#candidates_native + 1] = target .. ".dylib"
-    end
-
-    for _, path in ipairs(candidates_lua) do
-        if fileExists(path) then
-            return { type = "lua", path = resolvePath(path) }
-        end
-    end
-    for _, path in ipairs(candidates_native) do
-        if fileExists(path) then
-            return { type = "native", path = resolvePath(path) }
-        end
-    end
-
-    error(errors.moduleNotFound(module_name, from_script, { base_dir }))
-end
-
 --@description: Resolve a module name to an absolute file path
 --@param self: ModuleResolver - Resolver instance
 --@param module_name: string - Dot-separated or relative module name
@@ -1092,41 +1052,6 @@ function ModuleResolver:resolve(module_name, from_script)
         return { type = inspected.type, path = inspected.path }
     end
     error(inspected.error)
-end
-
---@description: Resolve a module name using the original direct resolution algorithm
---@param self: ModuleResolver - Resolver instance
---@param module_name: string - Dot-separated or relative module name
---@param from_script: string - Absolute path of the requiring script
---@return: table|nil - Resolution result
-function ModuleResolver:resolveLegacy(module_name, from_script)
-    if self:isBuiltin(module_name) then
-        return nil
-    end
-
-    if module_name:sub(1, 2) == "./" or module_name:sub(1, 3) == "../" then
-        return self:resolveRelative(module_name, from_script)
-    end
-
-    local module_path = module_name:gsub("%.", "/")
-
-    for _, tpl in ipairs(self.lua_templates) do
-        local candidate = tpl:gsub("%?", module_path)
-        if fileExists(candidate) then
-            return { type = "lua", path = resolvePath(candidate) }
-        end
-    end
-
-    for _, tpl in ipairs(self.native_templates) do
-        local candidate = tpl:gsub("%?", module_path)
-        if fileExists(candidate) then
-            return { type = "native", path = resolvePath(candidate) }
-        end
-    end
-
-    error(errors.moduleNotFound(
-        module_name, from_script, self:getSearchedPaths()
-    ))
 end
 
 -- ============================================================
@@ -1355,16 +1280,12 @@ M.errors             = errors
 
 --@description: Analyze Lua script dependencies starting from an entry script
 --@param entry_script: string - Path to the entry Lua script
---@param opts: table|nil - Options: max_dependencies (number|nil, default 36), manual_mode (boolean|nil)
+--@param opts: table|nil - Options: max_dependencies (number|nil, default 36)
 --@return: table - Result table {scripts=list<string>, libraries=list<string>}
 --@raise: ScriptNotFoundError, CircularDependencyError, DynamicRequireError, DependencyLimitExceededError, ModuleNotFoundError
 --@usage: local result = analyzer.analyzeDependencies("main.lua", {max_dependencies = 100})
 function M.analyzeDependencies(entry_script, opts)
     opts = opts or {}
-
-    if opts.manual_mode then
-        return { scripts = {}, libraries = {} }
-    end
 
     local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies)
     return da:analyze()
@@ -1372,14 +1293,10 @@ end
 
 --@description: Analyze dependencies and return trace records for each require decision
 --@param entry_script: string - Path to the entry Lua script
---@param opts: table|nil - Options: max_dependencies (number|nil), manual_mode (boolean|nil)
+--@param opts: table|nil - Options: max_dependencies (number|nil)
 --@return: table - Result table {scripts=list<string>, libraries=list<string>, trace=list<table>}
 function M.traceDependencies(entry_script, opts)
     opts = opts or {}
-
-    if opts.manual_mode then
-        return { scripts = {}, libraries = {}, trace = {} }
-    end
 
     local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies)
     local result = da:analyze()

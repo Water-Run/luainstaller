@@ -35,6 +35,13 @@ local function makeError(err_type, message, details)
     }
 end
 
+local function fromThrownError(err)
+    if type(err) == "table" then
+        return makeError(err.type or "LauncherGenerationError", err.message or tostring(err), err)
+    end
+    return makeError("LauncherGenerationError", tostring(err))
+end
+
 local function normalizePath(path)
     path = tostring(path or ""):gsub("\\", "/")
     local prefix = ""
@@ -572,7 +579,7 @@ function M.bundleOnedir(opts)
         native_dir = ".luai/native",
     })
     if not ok_generate then
-        return makeError("LauncherGenerationError", tostring(generated))
+        return fromThrownError(generated)
     end
     c_source = generated
 

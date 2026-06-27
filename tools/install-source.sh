@@ -60,7 +60,7 @@ man_dir="$prefix/share/man/man1"
 
 mkdir -p "$module_dir" "$bin_dir" "$man_dir"
 cp "$project_root/src/init.lua" "$lua_share/luainstaller.lua"
-for module in analyzer bundler cgen cli compat launcher logger manifest onefile platform require_engine runtime; do
+for module in analyzer bundler cgen cli compat discovery launcher logger manifest onefile platform runtime; do
     cp "$project_root/src/$module.lua" "$module_dir/$module.lua"
 done
 cp "$project_root/luainstaller.1" "$man_dir/luai.1"

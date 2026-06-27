@@ -25,8 +25,6 @@ description = {
         "packaging",
         "executable",
         "compiler",
-        "luastatic",
-        "srlua",
         "dependency-analysis",
     },
 }
@@ -48,7 +46,7 @@ build = {
         ["luainstaller.cgen"]     = "src/cgen.lua",
         ["luainstaller.launcher"] = "src/launcher.lua",
         ["luainstaller.bundler"]  = "src/bundler.lua",
-        ["luainstaller.require_engine"] = "src/require_engine.lua",
+        ["luainstaller.discovery"]  = "src/discovery.lua",
         ["luainstaller.onefile"]  = "src/onefile.lua",
         ["luainstaller.cli"]      = "src/cli.lua",
     },

@@ -57,7 +57,7 @@ bundling continues through manifest creation and launcher generation.
 ----
 CLI or Lua API
   -> normalize options
-  -> choose dependency engine
+  -> choose discovery mode
   -> produce dependency plan
   -> build manifest
   -> generate Lua bootstrap
@@ -79,7 +79,7 @@ profile.
 |Entry point |Responsibility
 
 |`luainstaller.analyze(opts)`
-|Normalize options, run the selected dependency engine, and return Lua
+|Normalize options, run the selected discovery mode, and return Lua
 source/native module lists plus trace records.
 
 |`luainstaller.trace(opts)`
@@ -141,8 +141,8 @@ rendering, log command options.
 source scanning, trace records.
 |Runtime execution of user code.
 
-|`src/require_engine.lua`
-|Choosing static/manual/runtime discovery and applying include/exclude
+|`src/discovery.lua`
+|Choosing static/manual/runtime discovery modes and applying include/exclude
 rules.
 |Manifest schema and launcher compilation.
 
@@ -186,7 +186,7 @@ runtime paths, Lua prefix.
 [#implementation-discovery]
 == Dependency Discovery
 
-The default static engine is a require-focused lexer, not a full Lua
+The default static mode is a require-focused lexer, not a full Lua
 parser. That is deliberate: it keeps discovery predictable and avoids
 executing user code during the normal path.
 
@@ -226,12 +226,12 @@ Important fields include `requiring_file`, `source_line`, `requested`,
 `optional`, `candidates`, `selected_path`, `selected_type`,
 `classification`, and `reason`.
 
-[#implementation-engines]
-== Discovery Engines
+[#implementation-modes]
+== Discovery Modes
 
 [cols="1,3",options="header"]
 |===
-|Engine |Behavior
+|Mode |Behavior
 
 |`static`
 |Run the analyzer over literal require calls, resolve through Lua and
@@ -387,8 +387,11 @@ are missing.
 |`CompilationFailedError`
 |The compiler was found but returned a non-zero status.
 
-|`RequireEngineError`
+|`DiscoveryError`
 |Runtime discovery could not execute or parse its temporary trace.
+
+|`LauncherGenerationError`
+|Launcher source generation failed before compiler invocation.
 |===
 
 Logs are serialized as Lua source under:

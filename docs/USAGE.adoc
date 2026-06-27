@@ -34,7 +34,7 @@ onefile.
 |xref:#usage-options[Option reference]
 |Supported flags and what each one changes.
 
-|xref:#usage-discovery[Choosing a discovery engine]
+|xref:#usage-discovery[Choosing a discovery mode]
 |When to use static, runtime, or manual discovery.
 
 |xref:#usage-inspection[Inspecting a bundle]
@@ -115,11 +115,6 @@ They call the same Lua API, but their syntax is not interchangeable.
 |Not exposed
 |`luainstaller logs`
 |Reading persistent operation logs.
-
-|Legacy engines
-|Not exposed
-|`luainstaller engines`
-|Inspecting old engine names retained for migration and auditing.
 |===
 
 [IMPORTANT]
@@ -237,13 +232,14 @@ compiler behavior and runtime layout.
 |Point macOS and Windows profiles at a Lua prefix containing headers and
 the required Lua runtime files.
 
-|`-r ENGINE`, `--require-engine ENGINE`
+|`-d MODE`, `--discovery-mode MODE`
 |Analyze, trace, build
-|Select `static`, `manual`, or `runtime` dependency discovery.
+|Select `static`, `manual`, or `runtime` dependency discovery mode.
 
 |`--no-depscan`
 |Analyze, trace, build
-|Disable automatic scanning. This is equivalent to the manual engine.
+|Disable automatic scanning. This is equivalent to the manual discovery
+mode.
 
 |`--max-deps N`
 |Analyze, trace, build
@@ -262,11 +258,11 @@ during a build-time runtime trace.
 |===
 
 [#usage-discovery]
-== Choosing a Discovery Engine
+== Choosing a Discovery Mode
 
 [cols="1,2,3",options="header"]
 |===
-|Engine |Example |Choose it when
+|Mode |Example |Choose it when
 
 |`static`
 |`luai -b app/main.lua -o build/app`
@@ -274,7 +270,7 @@ during a build-time runtime trace.
 source code.
 
 |`runtime`
-|`luai -b app/main.lua -r runtime -o build/app -- demo-profile`
+|`luai -b app/main.lua -d runtime -o build/app -- demo-profile`
 |Module names are assembled dynamically, but one build-time run can
 exercise the paths you need in the bundle.
 
@@ -286,7 +282,7 @@ too much or too little.
 
 [WARNING]
 ====
-`-r runtime` executes the entry program once during dependency
+`--discovery-mode runtime` executes the entry program once during dependency
 discovery. It only records `require` calls reached by that run. If your
 program loads different modules for different subcommands, run a
 representative command or use manual includes for the missing files.
@@ -373,7 +369,7 @@ end
 |Function |Result
 
 |`luainstaller.analyze(opts)`
-|Dependency lists and trace records for the selected discovery engine.
+|Dependency lists and trace records for the selected discovery mode.
 
 |`luainstaller.trace(opts)`
 |Dependency trace plus compatibility diagnostics for the selected
@@ -392,16 +388,14 @@ error.
 
 |`luainstaller.clearLogs()`
 |Clears persistent log entries.
-
-|`luainstaller.getEngines()`
-|Legacy engine names kept for inspection of older workflows.
 |===
 
 Common error types include `InvalidOptionsError`,
 `ScriptNotFoundError`, `DynamicRequireError`, `ModuleNotFoundError`,
 `DependencyLimitExceededError`, `DuplicateModuleError`,
 `InvalidOutputError`, `ToolchainError`, `CompilationFailedError`,
-`LuaRuntimeNotFoundError`, and `RequireEngineError`.
+`LuaRuntimeNotFoundError`, `DiscoveryError`, and
+`LauncherGenerationError`.
 
 == Related Documents
 

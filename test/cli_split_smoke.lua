@@ -20,7 +20,7 @@ package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
 package.preload["luainstaller.launcher"] = function() return dofile("src/launcher.lua") end
 package.preload["luainstaller.bundler"] = function() return dofile("src/bundler.lua") end
-package.preload["luainstaller.require_engine"] = function() return dofile("src/require_engine.lua") end
+package.preload["luainstaller.discovery"] = function() return dofile("src/discovery.lua") end
 package.preload["luainstaller.onefile"] = function() return dofile("src/onefile.lua") end
 package.preload["luainstaller"] = function() return dofile("src/init.lua") end
 package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
@@ -83,7 +83,10 @@ code, out, err = run_cli("luainstaller", { "help" }, { color = false })
 assert(code == 0)
 assert_contains(out, "Usage: luainstaller <command>")
 assert_contains(out, "luainstaller analyze <entry.lua>")
+assert_contains(out, "--discovery-mode")
 assert_not_contains(out, "luai -a <entry.lua>")
+assert_not_contains(out, "--require-engine")
+assert_not_contains(out, "engines")
 assert(err == "")
 
 code, out, err = run_cli("luai", { "build", "test/single_file/01_hello_luainstaller.lua" })
@@ -95,6 +98,11 @@ code, out, err = run_cli("luainstaller", { "-b", "test/single_file/01_hello_luai
 assert(code == 1)
 assert(out == "")
 assert_contains(err, "error: unknown luainstaller command: -b")
+
+code, out, err = run_cli("luainstaller", { "engines" }, { color = false })
+assert(code == 1)
+assert(out == "")
+assert_contains(err, "error: unknown luainstaller command: engines")
 
 code, out, err = run_cli("luai", {
     "-a",

@@ -138,8 +138,14 @@ absolute path.
 
 |`DynamicRequireError`
 |Static analysis found a `require` name that depends on runtime data.
-|Use `-r runtime` with representative arguments, or add manual
+|Use `--discovery-mode runtime` with representative arguments, or add manual
 `--include` files.
+
+|`DiscoveryError`
+|Runtime discovery could not execute the build-time trace run or read
+its trace output.
+|Run the source program with the same arguments, then retry with
+`--discovery-mode runtime` or switch to explicit `--include` files.
 
 |`ModuleNotFoundError`
 |The requested module cannot be resolved through the active Lua search
@@ -167,6 +173,11 @@ runtime files.
 |The compiler exists but failed to compile the launcher or extractor.
 |Read the returned command and compiler output; check headers, library
 paths, and target profile.
+
+|`LauncherGenerationError`
+|The Lua bootstrap or C launcher source could not be generated.
+|Check the structured details first; duplicate bundled module names or
+unreadable source files are usually reported there.
 
 |Generated bundle starts but a native module fails to load
 |The Lua module file was copied, but one of its external libraries is
@@ -209,8 +220,8 @@ path:
 
 [source,sh]
 ----
-luai -a app/main.lua -r runtime -- demo-module
-luai -b app/main.lua -r runtime -o build/app -- demo-module
+luai -a app/main.lua --discovery-mode runtime -- demo-module
+luai -b app/main.lua --discovery-mode runtime -o build/app -- demo-module
 ----
 
 Use manual includes when the runtime path is hard to exercise or you
