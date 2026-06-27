@@ -7,60 +7,116 @@
 
 xref:../README.adoc[Back to README index]
 
-This guide describes the local smoke suite, source-install checks,
-LuaRocks checks, remote platform matrix, sample coverage, and expected
-failures.
+This guide describes how to verify `luainstaller` locally and across the
+lab matrix. It separates fast syntax checks, full smoke tests, install
+checks, remote platform checks, expected failures, and documentation
+checks.
 
 toc::[]
 
-== Local Verification
+== Test Tiers
+
+[cols="1,2,3",options="header"]
+|===
+|Tier |Command |Purpose
+
+|Syntax
+|`luac -p src/*.lua test/smoke_all.lua test/cli_split_smoke.lua`
+|Catch Lua syntax errors before running slower bundle tests.
+
+|Installer shell syntax
+|`sh -n tools/install-source.sh`
+|Catch source installer shell syntax errors.
+
+|CLI split smoke
+|`lua test/cli_split_smoke.lua`
+|Verify `luai` and `luainstaller` accept only their intended command
+forms.
+
+|Full local smoke
+|`lua test/smoke_all.lua`
+|Exercise API contracts, analyzer behavior, compatibility diagnostics,
+manifest safety, launcher generation, onedir bundles, onefile bundles,
+installed CLI behavior, source install behavior, and release safety
+checks.
+|===
+
+Run the local baseline from the repository root:
 
 [source,sh]
 ----
 luac -p src/*.lua test/smoke_all.lua test/cli_split_smoke.lua
 sh -n tools/install-source.sh
-lua test/smoke_all.lua
 lua test/cli_split_smoke.lua
+lua test/smoke_all.lua
 ----
 
-The smoke runner verifies sample execution, analyzer visibility, API
-contracts, require engines, compatibility diagnostics, manifest safety,
-platform profiles, release safety, CLI contracts, runtime generation,
-onedir bundles, onefile bundles, installed CLI behavior, and source
-install behavior.
+Some smoke sections skip deeper compile or inspection checks when
+optional tools such as `cc`, `pkg-config`, `readelf`, `curl`, LuaRocks,
+or native sample dependencies are unavailable. A skip is acceptable only
+when the test says why it skipped.
+
+== What the Full Smoke Covers
+
+The full smoke test is intentionally broad. It checks:
+
+* sample programs still run directly with Lua;
+* static analysis returns expected Lua and native dependencies;
+* `trace` records include requiring file, source line, selected path,
+  classification, and compatibility data;
+* runtime discovery can record dynamic `require` calls reached by a
+  build-time run;
+* public API calls return structured success and error tables;
+* output safety refuses unsafe overwrite targets;
+* generated manifests preserve expected sections and hashes;
+* C launcher source generation produces buildable code where toolchains
+  are available;
+* onedir and onefile bundles run selected samples;
+* source-installed wrapper scripts can analyze and build;
+* LuaRocks-installed wrappers can run when LuaRocks is available;
+* documentation references used by tests point at current files.
 
 == Sample Applications
 
 [cols="1,2,3",options="header"]
 |===
-|Path |Dependency shape |Purpose
+|Path |Dependency shape |Why it exists
 
 |`test/single_file/`
 |Pure Lua, one file per sample.
-|Fast first smoke targets.
+|Fast sanity checks for basic CLI and launcher behavior.
 
 |`test/runtime_bundle/`
 |Pure Lua multi-file payload.
-|Runtime searcher, C generator, launcher, onedir, and onefile basics.
+|Bundled Lua searcher, C generator, onedir, onefile, and runtime
+argument handling.
 
 |`test/student_management_system/`
 |Lua modules plus `cjson`.
-|Moderate multi-file app with native Lua C module dependency.
+|Moderate multi-file application with a common native Lua C module.
 
 |`test/savinglua/`
 |`cjson`, `lsqlite3`, persistent SQLite database.
-|Native module packaging and persistent database arguments.
+|Native module packaging plus runtime arguments that affect persistent
+state.
 
 |`test/firebird_web_sql/`
 |Pegasus, `cjson`, socket modules, optional Firebird/LuaSQL.
-|Web-style app, optional dependencies, and native socket handling.
+|Web-style dependency graph, optional require probes, and native socket
+handling.
 
 |`test/ltokei/`
 |Lua modules plus `lfs`.
-|CLI-style code statistics app and filesystem native module handling.
+|CLI-style filesystem traversal and native module loading.
 |===
 
+The samples are not demos only. They are regression fixtures for
+dependency discovery, native module layout, clean runtime behavior, and
+platform-specific failure reporting.
+
 == Source Install Checks
+
+The source installer should work with only a `lua` command available:
 
 [source,sh]
 ----
@@ -71,7 +127,13 @@ sh tools/install-source.sh --prefix /tmp/luainstaller-source-prefix
 /tmp/luainstaller-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
 ----
 
+On a Linux host with headers, `pkg-config`, and a C compiler, the full
+smoke also verifies that a source-installed `luai` can build and run a
+bundle from a clean runtime environment.
+
 == LuaRocks Check
+
+When LuaRocks is available:
 
 [source,sh]
 ----
@@ -79,7 +141,13 @@ rm -rf /tmp/luainstaller-rocktree
 luarocks make --tree /tmp/luainstaller-rocktree luainstaller-1.0.0-1.rockspec
 ----
 
+The smoke suite uses this to catch packaging metadata regressions in the
+rockspec and installed wrapper behavior.
+
 == Remote Matrix
+
+Remote scripts copy the current checkout to lab machines and verify
+same-environment runtime behavior.
 
 [cols="1,2,3",options="header"]
 |===
@@ -88,8 +156,8 @@ luarocks make --tree /tmp/luainstaller-rocktree luainstaller-1.0.0-1.rockspec
 |`tools/remote-test-linux.sh`
 |`192.168.10.40` Linux x86_64 and `192.168.5.19` Linux aarch64.
 |x86_64 full smoke plus clean-runtime source-installed bundle. aarch64
-source install and analysis; bundle may pass or fail with expected
-toolchain error.
+source install and analysis; bundle may pass or fail with the expected
+toolchain error if Lua development metadata is missing.
 
 |`tools/remote-test-macos.sh`
 |`yymac06` macOS arm64.
@@ -104,43 +172,75 @@ bundles, pure Lua and student onefile bundles, Wine and target-host
 execution.
 |===
 
-Windows remote verification requires:
+Windows remote verification requires credentials:
 
 [source,sh]
 ----
 WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ----
 
-Set `SSH_OPTS` to override default lab SSH options.
+Set `SSH_OPTS` to override the default SSH options used by the remote
+scripts.
 
 == Expected Failures
 
 [cols="1,2,2",options="header"]
 |===
-|Case |Accepted result |Reason
+|Case |Accepted result |Why it is acceptable
 
 |Linux aarch64 host without Lua headers or Lua `pkg-config` data
 |`ToolchainError` from bundle build.
-|Analysis can run without a compiler, but C launcher compilation cannot.
+|Analysis does not require a compiler; building the C launcher does.
 
 |Optional Firebird/LuaSQL module missing
-|Trace classifies it as optional missing.
+|Trace records classify it as optional missing.
 |The sample probes optional support through guarded require behavior.
 
-|Local smoke host without optional tools
-|Specific compile or inspection sections may be skipped.
-|The smoke runner checks command availability before deeper toolchain
-checks.
+|Local host without optional compile or inspection tools
+|A smoke subsection prints a skip message.
+|The suite checks command availability before running deeper checks.
+
+|Windows target without installed Lua or LuaRocks
+|Generated bundles still run when built with the Windows Lua prefix.
+|The target is meant to consume the bundle, not build it.
 |===
+
+Unexpected failures are failures that lack a clear skip reason, produce
+an unstructured Lua traceback for a normal user error, or contradict the
+same-environment contract documented in the platform guide.
 
 == Documentation Checks
 
+The documentation is part of the tested surface. Run:
+
 [source,sh]
 ----
-find docs -maxdepth 1 -type f -name '*.adoc' | wc -l
+find docs -maxdepth 1 -type f -name '*.adoc' -printf '%f\n' | sort
 rg -n 'Back to README index' docs/*.adoc
 rg -n 'xref:|link:' README.adoc docs/*.adoc test/README.adoc
 ----
+
+The repository policy for the main documentation set is:
+
+* `README.adoc` is the index and outline;
+* `docs/` contains exactly six top-level `.adoc` guides;
+* every guide links back to `README.adoc` near the top and at the end;
+* stale split-out documentation paths such as `docs/README.adoc` and
+  `docs/CLI.adoc` should not be referenced by the current docs.
+
+== Release Checklist
+
+Before pushing documentation or packaging changes:
+
+[arabic]
+. Run the local baseline commands.
+. Confirm `docs/` still contains six `.adoc` guides.
+. Confirm every guide links back to the README index.
+. Run `git diff --check`.
+. Inspect the diff for stale CLI syntax such as `luai build` or
+   `luainstaller -b`.
+. If platform behavior changed, run the matching remote script or state
+   why it was not run.
 
 == Related Documents
 

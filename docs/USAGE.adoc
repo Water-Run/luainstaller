@@ -7,104 +7,128 @@
 
 xref:../README.adoc[Back to README index]
 
-This guide covers everyday use of `luainstaller`: command-line
-workflows, option behavior, Lua API calls, logs, and practical choices
-when packaging Lua applications.
+This is the practical guide for using `luainstaller`. It starts with the
+workflow you should use for a new Lua project, then covers the CLI,
+dependency discovery modes, output inspection, logs, and the Lua API.
 
 toc::[]
 
-== Workflow
+== A Normal Packaging Session
+
+Start from a Lua program that already runs with the Lua interpreter you
+intend to build with. Packaging is much easier to debug when the source
+program is known to work first.
+
+[source,sh]
+----
+lua app/main.lua --help
+----
+
+Then run the packaging workflow in this order:
 
 [source,text]
 ----
-source tree
-  -> analyze require graph
-  -> trace resolution decisions
-  -> build onedir
-  -> inspect manifest/native files
-  -> optionally build onefile
+run with lua
+  -> analyze dependencies
+  -> trace suspicious dependency decisions
+  -> build --dir
+  -> inspect manifest and native files
+  -> run the directory bundle
+  -> build --file only after --dir works
 ----
 
-Use analyze before build when you want to see what will be packaged. Use
-trace when a dependency decision needs explanation. Build `--dir` first
-when native modules or target compatibility are uncertain.
+The directory bundle is the debugging format. It leaves the generated C
+source, manifest, copied native modules, and runtime files on disk. The
+onefile bundle is a distribution format layered on top of that same
+layout.
 
-== Command Surfaces
+== Compact and Full-Word CLIs
 
-`luai` and `luainstaller` intentionally have different syntax over the
-same Lua API.
+`luai` and `luainstaller` are deliberately different command surfaces.
+They call the same Lua API, but their syntax is not interchangeable.
 
 [cols="1,2,2,3",options="header"]
 |===
-|Action |`luai` |`luainstaller` |Notes
+|Action |`luai` |`luainstaller` |Use it when
 
 |Help
 |`luai -h`
 |`luainstaller help`
-|Each command describes only its own accepted syntax.
+|Checking the accepted syntax for that command surface.
 
 |Version
 |`luai -v`
 |`luainstaller version`
-|`luai` prints a compact banner; `luainstaller` prints a fuller one.
+|Verifying an install or recording issue data.
 
 |Analyze
 |`luai -a <entry.lua>`
 |`luainstaller analyze <entry.lua>`
-|Find Lua sources and native Lua modules.
+|Seeing what Lua source and native modules will be considered.
 
 |Trace
 |`luai -t <entry.lua>`
 |`luainstaller trace <entry.lua>`
-|Show require-resolution decisions and compatibility notes.
+|Explaining why a module resolved, was optional, or failed.
 
 |Build
 |`luai -b <entry.lua>`
 |`luainstaller build <entry.lua>`
-|Build `--dir` or `--file` bundles.
+|Creating an onedir or onefile bundle.
 
 |Logs
 |Not exposed
 |`luainstaller logs`
-|Operational log review belongs to the full-word CLI.
+|Reading persistent operation logs.
 
 |Legacy engines
 |Not exposed
 |`luainstaller engines`
-|Retained for auditing older workflow names.
+|Inspecting old engine names retained for migration and auditing.
 |===
 
 [IMPORTANT]
 ====
-Command forms do not cross over. `luai -b app.lua` and
-`luainstaller build app.lua` are valid. `luai build app.lua` and
-`luainstaller -b app.lua` are invalid.
+`luai -b app.lua` and `luainstaller build app.lua` are valid.
+`luai build app.lua` and `luainstaller -b app.lua` are invalid. This is
+intentional: scripts get a small compact surface, while the full-word
+CLI remains explicit for humans.
 ====
 
-== Fast Paths
+== First Bundle
 
-Pure Lua bundle:
+Use the pure-Lua runtime sample for a quick local check:
 
 [source,sh]
 ----
 luai -a test/runtime_bundle/main.lua --max-deps 120
+luai -t test/runtime_bundle/main.lua --max-deps 120
 luai -b --dir test/runtime_bundle/main.lua -o build/runtime-demo --max-deps 120
 build/runtime-demo/runtime-demo Ada
 ----
 
-Native module bundle:
+Expected analysis output is small:
 
-[source,sh]
+[source,text]
 ----
-luainstaller trace test/student_management_system/main.lua --max-deps 250
-luainstaller build --dir test/student_management_system/main.lua \
-  -o build/student-manager \
-  --max-deps 250
-build/student-manager/student-manager --data /tmp/students.json seed
-find build/student-manager/.luai/native -maxdepth 3 -type f | sort
+ok
+entry: test/runtime_bundle/main.lua
+scripts: 1
+libraries: 0
 ----
 
-Onefile after onedir validation:
+Expected trace output includes the compatibility boundary:
+
+[source,text]
+----
+trace
+entry: test/runtime_bundle/main.lua
+1: lua resolved greeter -> ...
+compatibility: same OS, same architecture, same ABI, same Lua ABI
+note: does not claim universal cross-platform output
+----
+
+After the directory bundle runs, build the onefile wrapper:
 
 [source,sh]
 ----
@@ -112,99 +136,134 @@ luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile --max-deps 
 build/runtime-onefile Ada
 ----
 
-== Option Matrix
+== Native Module Bundle
+
+Native Lua C modules are the first place where packaging stops being
+pure file copying. Build the directory form first and inspect it before
+trying a onefile:
+
+[source,sh]
+----
+luainstaller trace test/student_management_system/main.lua --max-deps 250
+luainstaller build --dir test/student_management_system/main.lua \
+  -o build/student-manager \
+  --max-deps 250
+
+find build/student-manager/.luai/native -maxdepth 3 -type f | sort
+build/student-manager/student-manager --data /tmp/students.json seed
+----
+
+If a native module appears in `.luai/native/` but the executable fails
+at startup, the missing piece is often an external library used by that
+module, not the Lua module file itself. Use `ldd`, `otool -L`, or a
+Windows DLL dependency tool as appropriate.
+
+== Option Reference
 
 [cols="1,1,3",options="header"]
 |===
-|Option |Applies to |Meaning
+|Option |Applies to |Behavior
 
 |`--dir`, `--onedir`
 |Build
-|Select directory bundle mode. This is the default.
+|Create a directory bundle. This is the default and the recommended
+first build format.
 
 |`--file`, `--onefile`
 |Build
-|Select self-extracting onefile mode.
+|Create a self-extracting onefile wrapper around a staged directory
+bundle.
 
 |`-o PATH`, `--out PATH`
 |Build
-|Output directory for `--dir`; output executable path for `--file`.
+|Choose the output directory for `--dir` or executable path for
+`--file`.
 
 |`--include PATH`
 |Analyze, trace, build
-|Manually include an extra Lua source file. Repeatable.
+|Add an extra Lua source file. Repeat it for multiple files. Manual
+includes are still subject to duplicate-destination checks.
 
 |`--exclude PATH`
 |Analyze, trace, build
-|Exclude by exact path, basename, or path suffix. Repeatable; excludes
-win over includes.
+|Exclude a resolved dependency by exact path, basename, or suffix.
+Excludes win over automatic discovery and manual includes.
 
 |`--target-os OS`
 |Trace, build
-|Select target profile: `linux`, `macos`, or `windows`.
+|Select `linux`, `macos`, or `windows`. The selected profile determines
+compiler behavior and runtime layout.
 
 |`--lua-prefix PATH`
 |Trace, build
-|Lua headers/runtime prefix for macOS and Windows profiles.
+|Point macOS and Windows profiles at a Lua prefix containing headers and
+the required Lua runtime files.
 
 |`-r ENGINE`, `--require-engine ENGINE`
 |Analyze, trace, build
-|Dependency discovery engine: `static`, `manual`, or `runtime`.
+|Select `static`, `manual`, or `runtime` dependency discovery.
 
 |`--no-depscan`
 |Analyze, trace, build
-|Disable automatic dependency scanning; equivalent to manual mode.
+|Disable automatic scanning. This is equivalent to the manual engine.
 
 |`--max-deps N`
 |Analyze, trace, build
-|Maximum dependency count. Default is `36`.
+|Set the dependency limit. The default is `36`; samples with native
+packages often use a larger value.
 
 |`--verbose`
 |Analyze, build
-|Print additional details where supported.
+|Print additional trace or manifest-size detail where the command
+supports it.
 
 |`--`
 |Runtime discovery
-|Stop parsing `luai` options and pass remaining values to the
-build-time runtime trace run.
+|Stop option parsing and pass the remaining values to the entry program
+during a build-time runtime trace.
 |===
 
-== Choosing Dependency Discovery
+== Choosing a Discovery Engine
 
 [cols="1,2,3",options="header"]
 |===
-|Engine |Command |Use when
+|Engine |Example |Choose it when
 
 |`static`
-|`luai -b app/main.lua`
-|Requires use literal names and static analysis can see the code paths.
+|`luai -b app/main.lua -o build/app`
+|Your `require` calls use literal module names that can be read from the
+source code.
 
 |`runtime`
-|`luai -b app/main.lua -r runtime -- profile-a`
-|Requires are dynamic, but one representative build-time run can load
-the modules you need.
+|`luai -b app/main.lua -r runtime -o build/app -- demo-profile`
+|Module names are assembled dynamically, but one build-time run can
+exercise the paths you need in the bundle.
 
 |`manual`
-|`luai -b app/main.lua --no-depscan --include app/plugin.lua`
-|You want full control or need to bypass analyzer limits.
+|`luai -b app/main.lua --no-depscan --include app/plugin.lua -o build/app`
+|You want complete control, or static/runtime discovery would include
+too much or too little.
 |===
 
 [WARNING]
 ====
-`-r runtime` executes the entry program once during analysis. It only
-records `require` calls reached by that run.
+`-r runtime` executes the entry program once during dependency
+discovery. It only records `require` calls reached by that run. If your
+program loads different modules for different subcommands, run a
+representative command or use manual includes for the missing files.
 ====
 
-== Inspecting Output
+== Inspecting a Bundle
 
-Load the manifest:
+The manifest is Lua data. Load it with the same Lua version family used
+for development:
 
 [source,sh]
 ----
 lua -e 'local m = dofile("build/student-manager/.luai/manifest.lua"); print(m.output.mode); print(#m.modules.lua); print(#m.modules.native)'
 ----
 
-Summarize trace records:
+Trace records are useful when a module appears under an unexpected path:
 
 [source,sh]
 ----
@@ -216,7 +275,8 @@ end
 LUA
 ----
 
-Clean environment run on POSIX:
+Run a POSIX directory bundle with a sparse environment to catch hidden
+dependencies on your shell configuration:
 
 [source,sh]
 ----
@@ -225,6 +285,9 @@ env -i PATH=/usr/bin:/bin build/runtime-demo/runtime-demo clean
 
 == Logs
 
+Operational logs are stored under `~/.luainstaller/logs.lua` and read
+through the full-word CLI:
+
 [source,sh]
 ----
 luainstaller logs
@@ -232,17 +295,22 @@ luainstaller logs --limit 20
 luainstaller logs --level error
 ----
 
+Use logs to recover the error type, command, and details after a failed
+operation. Do not treat logs as a build manifest; the generated bundle
+manifest is the authoritative record of what was packaged.
+
 == Lua API
 
-Load:
+Load the public module:
 
 [source,lua]
 ----
 local luainstaller = require("luainstaller")
 ----
 
-Public calls return structured result tables. Normal user errors do not
-need to be caught with `pcall`.
+Public calls return structured result tables. Normal user errors are
+reported as `{ ok = false, error = ... }`; callers do not need `pcall`
+for expected packaging failures.
 
 [source,lua]
 ----
@@ -258,23 +326,24 @@ else
 end
 ----
 
-API summary:
-
 [cols="1,3",options="header"]
 |===
-|Function |Returns
+|Function |Result
 
 |`luainstaller.analyze(opts)`
-|`action = "analyze"`, dependency lists, and trace records.
+|Dependency lists and trace records for the selected discovery engine.
 
 |`luainstaller.trace(opts)`
-|Analyzer trace plus compatibility diagnostics.
+|Dependency trace plus compatibility diagnostics for the selected
+profile.
 
 |`luainstaller.compatibility(opts)`
-|Compatibility summary, host/target profile, Lua ABI, notes, warnings.
+|Host/target profile, Lua ABI, compatibility notes, and native-module
+warnings.
 
 |`luainstaller.bundle(opts)`
-|`action = "bundle"`, mode, executable path, and manifest table.
+|Bundle mode, executable path, generated manifest, or a structured
+error.
 
 |`luainstaller.getLogs(opts)`
 |Filtered persistent log entries.
@@ -283,7 +352,7 @@ API summary:
 |Clears persistent log entries.
 
 |`luainstaller.getEngines()`
-|Legacy engine names kept for compatibility.
+|Legacy engine names kept for inspection of older workflows.
 |===
 
 Common error types include `InvalidOptionsError`,

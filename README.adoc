@@ -5,51 +5,56 @@
 :sectlinks:
 :icons: font
 
-`luainstaller` packages Lua projects into same-environment executable
-bundles. It provides dependency analysis, trace diagnostics, manifest
-generation, C launcher generation, onedir bundles, and self-extracting
-onefile bundles for the verified Linux, macOS, and Windows sample
-matrix.
+`luainstaller` packages Lua applications into executable bundles for
+controlled runtime environments. It analyzes `require` dependencies,
+records resolution decisions, builds a manifest, generates a small C
+launcher, and can produce either an inspectable directory bundle or a
+self-extracting onefile wrapper.
 
 toc::[]
 
-== Status
+== Project Status
 
 [IMPORTANT]
 ====
-The runtime promise is *same OS family, same architecture, same ABI, and
-same Lua ABI*. Verified bundles do not require a separate `lua` command
-on the target machine, but native Lua C modules and their external
-shared libraries must still be compatible.
+The supported runtime contract is *same OS family, same architecture,
+same system ABI, and same Lua ABI*. Bundles can run without a separate
+`lua` command on the target machine, but native Lua C modules and their
+external shared libraries still have to match that environment.
 ====
 
 [cols="1,3",options="header"]
 |===
-|Area |Current state
+|Area |Current behavior
 
-|Use case
-|Package Lua applications into same-environment executables for local
-distribution, lab deployment, and controlled runtime environments.
+|Primary use
+|Ship Lua applications to machines that match the selected build
+profile: local deployment, lab machines, internal tooling, and
+controlled runtime images.
 
 |Command surfaces
-|`luai` is compact and script-oriented. `luainstaller` is full-word and
-human-oriented. Both call the same Lua API.
+|`luai` is the compact script-friendly CLI. `luainstaller` is the
+full-word CLI with logs and legacy engine inspection. Both call the same
+Lua API.
 
 |Dependency discovery
-|Static require analysis, manual include/exclude mode, and runtime
-require tracing are implemented.
+|Static literal-`require` scanning, manual include/exclude mode, and
+runtime `require` tracing are implemented.
 
 |Bundle modes
-|`--dir` / `--onedir` and `--file` / `--onefile` are implemented for the
-verified sample matrix.
+|`--dir` / `--onedir` builds an inspectable directory. `--file` /
+`--onefile` builds a self-extracting wrapper around the same staged
+directory layout.
 
 |Target profiles
-|Linux same-host shared-Lua profile, macOS static-Lua-prefix profile,
-and Windows-from-Linux MinGW profile.
+|Linux shared-Lua profile, macOS static-Lua-prefix profile, and
+Windows-from-Linux MinGW profile are covered by the current sample
+matrix.
 
-|Main limitation
-|Universal cross-platform output and automatic external native-library
-closure are not claimed.
+|Explicit non-goals
+|Universal cross-platform output, native ABI conversion, automatic
+external shared-library closure, no-extract native module loading,
+codesigning, and native installers.
 |===
 
 == Quick Start
@@ -62,7 +67,7 @@ luarocks install luainstaller
 luai -h
 ----
 
-Install from a source checkout:
+Install from a source checkout when LuaRocks is not available:
 
 [source,sh]
 ----
@@ -72,54 +77,109 @@ luai -v
 luainstaller version
 ----
 
-Try analysis, tracing, and both bundle modes:
+Analyze a sample, inspect the trace, build a directory bundle, then try
+a onefile bundle after the directory version works:
 
 [source,sh]
 ----
-luai -a test/student_management_system/main.lua --max-deps 250
-luai -t test/student_management_system/main.lua --max-deps 250
+luai -a test/runtime_bundle/main.lua --max-deps 120
+luai -t test/runtime_bundle/main.lua --max-deps 120
 luai -b --dir test/runtime_bundle/main.lua -o build/runtime-demo --max-deps 120
 build/runtime-demo/runtime-demo world
+
 luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile --max-deps 120
 build/runtime-onefile world
 ----
 
+The short version is useful in scripts. The full-word version says the
+same thing more explicitly:
+
+[source,sh]
+----
+luainstaller analyze test/runtime_bundle/main.lua --max-deps 120
+luainstaller trace test/runtime_bundle/main.lua --max-deps 120
+luainstaller build --dir test/runtime_bundle/main.lua -o build/runtime-demo --max-deps 120
+----
+
 == Documentation
+
+Read the documents in this order when learning the project. Use the
+later entries as references once the basic workflow is clear.
 
 [cols="1,2,3",options="header"]
 |===
-|Focus |Document |Contents
+|Question |Document |What it answers
 
-|Using the tool
+|How do I use it without reading the internals?
 |xref:docs/USAGE.adoc[Usage Guide]
-|End-to-end workflows, compact and full-word CLI reference, Lua API
-summary, logs, and practical command recipes.
+|A normal packaging session, the split CLI syntax, option behavior,
+dependency discovery choices, logs, and Lua API calls.
 
-|Implementation
+|How does the implementation move data through the system?
 |xref:docs/IMPLEMENTATION.adoc[Implementation Guide]
-|Pipeline, module responsibilities, analyzer behavior, require engines,
-manifest contract, runtime bootstrap, and internal boundaries.
+|CLI/API flow, require discovery, manifest generation, launcher
+generation, bundle assembly, public errors, and module boundaries.
 
-|Bundling and runtime
+|What exactly is inside a generated bundle?
 |xref:docs/BUNDLING.adoc[Bundling Guide]
-|Onedir and onefile layouts, launcher behavior, embedded Lua runtime,
-extraction cache, output safety, and rebuild semantics.
+|Onedir layout, C launcher startup, bundled Lua searchers, native module
+paths, onefile extraction, cache reuse, and output safety.
 
-|Platforms and limits
+|Which platforms and native modules are realistic?
 |xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
-|Linux/macOS/Windows target profiles, native module handling, Linux deep
-dive notes, compatibility boundaries, non-goals, and extension points.
+|Linux, macOS, and Windows profile requirements; native Lua C module
+rules; external shared-library boundaries; verified matrix; non-goals.
 
-|Testing
+|How should changes be tested?
 |xref:docs/TESTING.adoc[Testing Guide]
 |Local smoke checks, source install checks, LuaRocks checks, remote
-Linux/macOS/Windows matrix, sample coverage, and expected failures.
+matrix scripts, sample coverage, expected failures, and documentation
+checks.
 
-|Troubleshooting
+|What should I do when analysis or a bundle fails?
 |xref:docs/TROUBLESHOOTING.adoc[Troubleshooting Guide]
-|Dependency discovery failures, `ToolchainError`, native loader errors,
-onefile extraction behavior, logs, and issue-reporting data.
+|Diagnosis order, common error types, dynamic require issues, toolchain
+problems, native loader failures, onefile cache behavior, and issue data.
 |===
+
+== Command Surfaces at a Glance
+
+[cols="1,2,2",options="header"]
+|===
+|Action |Compact CLI |Full-word CLI
+
+|Help
+|`luai -h`
+|`luainstaller help`
+
+|Version
+|`luai -v`
+|`luainstaller version`
+
+|Analyze
+|`luai -a app/main.lua`
+|`luainstaller analyze app/main.lua`
+
+|Trace
+|`luai -t app/main.lua`
+|`luainstaller trace app/main.lua`
+
+|Build
+|`luai -b app/main.lua`
+|`luainstaller build app/main.lua`
+
+|Logs
+|Not exposed
+|`luainstaller logs`
+
+|Legacy engines
+|Not exposed
+|`luainstaller engines`
+|===
+
+Command forms intentionally do not cross over. `luai build app.lua` and
+`luainstaller -b app.lua` are rejected so scripts can depend on a small
+stable compact surface while human-facing commands remain explicit.
 
 == Repository Map
 
@@ -128,29 +188,34 @@ onefile extraction behavior, logs, and issue-reporting data.
 |Path |Purpose
 
 |`src/`
-|Implementation modules.
+|Implementation modules for analysis, compatibility diagnostics,
+manifest creation, launcher generation, bundling, onefile wrapping,
+logging, and CLI rendering.
 
 |`docs/`
-|Six detailed user, implementation, platform, testing, and
-troubleshooting documents. Each page links back to this README index.
+|The six documentation pages linked above. Each page links back to this
+README index at the top and bottom.
 
 |`test/`
-|Sample applications and `test/smoke_all.lua`.
+|Sample applications and smoke tests that exercise pure Lua, native
+module, runtime-discovery, onedir, onefile, installed-CLI, and release
+safety behavior.
 
 |`tools/`
-|Source installer and remote verification scripts.
+|Source installer and remote Linux, macOS, and Windows verification
+scripts.
 
 |`luainstaller.1`
-|Manual page source installed as both `luai(1)` and
+|Manual page source installed for both `luai(1)` and
 `luainstaller(1)`.
 |===
 
 == Project Note
 
-`luainstaller` was previously a Python library that could bundle only
-pure Lua scripts. The current Lua implementation focuses on dependency
-analysis, native-aware bundle layout, and same-environment runtime
-contracts.
+`luainstaller` used to be a Python library that could bundle only pure
+Lua scripts. The current Lua implementation focuses on dependency
+analysis, native-aware bundle layout, and a precise same-environment
+runtime contract.
 
 Project repository:
 https://github.com/Water-Run/luainstaller[Water-Run/luainstaller].
