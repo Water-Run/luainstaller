@@ -3,7 +3,7 @@ Dependency analyzer for Lua scripts.
 Provides comprehensive static analysis including require
 extraction via a state-machine lexer, module path resolution
 across package.path and package.cpath, native library
-detection (.a, .so, .dll, .dylib), and recursive dependency
+detection (.so, .dll, .dylib), and recursive dependency
 graph construction with cycle detection and topological sort.
 
 Author:
@@ -36,7 +36,6 @@ local NATIVE_EXTENSIONS = {
     [".so"]    = true,
     [".dll"]   = true,
     [".dylib"] = true,
-    [".a"]     = true,
 }
 
 --@description: Set of Lua builtin module names that require no file
@@ -53,7 +52,6 @@ local BUILTIN_MODULES = {
     ["table"]     = true,
     ["utf8"]      = true,
     ["bit32"]     = true,
-    ["arg"]       = true,
 }
 
 --@description: Default maximum dependency count
@@ -302,7 +300,7 @@ function LuaLexer:matchKeyword(keyword)
     local next_pos = self.pos + kw_len
     if next_pos <= self.source_len then
         local nxt = self.source:sub(next_pos, next_pos)
-        if nxt:match("[%w_]") then
+        if nxt:match("[%w_.:]") then
             return false
         end
     end
@@ -544,7 +542,7 @@ function LuaLexer:parsePcallRequire()
     local after_req = self.pos + #"require"
     if after_req <= self.source_len then
         local nxt = self.source:sub(after_req, after_req)
-        if nxt:match("[%w_]") then
+        if nxt:match("[%w_.:]") then
             self.pos  = saved_pos
             self.line = saved_line
             return nil
@@ -656,6 +654,9 @@ function LuaLexer:extractRequires()
         if self.state == LexerState.NORMAL then
             if self:matchKeyword("pcall") then
                 local ok, mod = pcall(self.parsePcallRequire, self)
+                if not ok and type(mod) == "table" and mod.type then
+                    error(mod)
+                end
                 if ok and mod then
                     result[#result + 1] = { name = mod, line = self.line, optional = true }
                     goto next_iter
@@ -687,7 +688,7 @@ end
 --[[
 Resolves Lua module names to absolute file paths by searching
 package.path templates for Lua scripts and package.cpath
-templates plus .a variants for native libraries. Handles
+templates for loadable native libraries. Handles
 dot-separated and relative module names.
 
 Class:
@@ -764,21 +765,6 @@ function ModuleResolver:buildSearchTemplates()
         end
     end
 
-    local extra_native_templates = {}
-    for _, tpl in ipairs(self.native_templates) do
-        for ext_from, _ in pairs({ ["%.so"] = true, ["%.dll"] = true, ["%.dylib"] = true }) do
-            local a_variant = tpl:gsub(ext_from .. "$", ".a")
-            if a_variant ~= tpl then
-                extra_native_templates[#extra_native_templates + 1] = a_variant
-            end
-        end
-    end
-    for _, tpl in ipairs(extra_native_templates) do
-        addNative(tpl)
-    end
-
-    addNative(base .. "/?.a")
-    addNative(base .. "/lib/?.a")
     if IS_WINDOWS then
         addNative(base .. "/?.dll")
         addNative(base .. "/lib/?.dll")
@@ -789,13 +775,12 @@ function ModuleResolver:buildSearchTemplates()
     end
 end
 
---@description: Test whether a module name refers to a Lua builtin
+--@description: Test whether a module name refers exactly to a Lua builtin
 --@param self: ModuleResolver - Resolver instance
 --@param module_name: string - Dot-separated module name
---@return: boolean - True when the root segment is a builtin name
+--@return: boolean - True when the module name is a builtin name
 function ModuleResolver:isBuiltin(module_name)
-    local root = module_name:match("^([^%.]+)")
-    return BUILTIN_MODULES[root or module_name] == true
+    return BUILTIN_MODULES[module_name] == true
 end
 
 --@description: Collect a deduplicated list of search directory descriptions
@@ -848,7 +833,6 @@ function ModuleResolver:buildCandidates(module_name, from_script)
             lua_paths[#lua_paths + 1] = target .. ".lua"
             lua_paths[#lua_paths + 1] = target .. "/init.lua"
             native_paths[#native_paths + 1] = target .. (IS_WINDOWS and ".dll" or ".so")
-            native_paths[#native_paths + 1] = target .. ".a"
             native_paths[#native_paths + 1] = target .. ".dylib"
         end
 

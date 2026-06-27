@@ -148,8 +148,13 @@ local function validateOutputPath(path)
     if isSymlink(normalized) then
         return unsafeOutputError(path)
     end
-    if pathExists(normalized) and directoryExists(normalized) then
-        return makeError("InvalidOutputError", "Onefile output path is an existing directory: " .. tostring(path), {
+    if pathExists(normalized) then
+        if directoryExists(normalized) then
+            return makeError("InvalidOutputError", "Onefile output path is an existing directory: " .. tostring(path), {
+                path = path,
+            })
+        end
+        return makeError("InvalidOutputError", "Onefile output path already exists: " .. tostring(path), {
             path = path,
         })
     end

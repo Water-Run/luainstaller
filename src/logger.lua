@@ -14,6 +14,7 @@ Updated:
     2026-02-22
 ]]
 
+local process = require("luainstaller.process")
 
 --[[
 Log level enumeration.
@@ -55,6 +56,10 @@ local IS_WINDOWS = (PATH_SEP == "\\")
 --@local: true
 local cached_log_file_path = nil
 
+local function commandSucceeded(status)
+    return status == true or status == 0
+end
+
 
 --@description: Determine the log storage directory under the user home
 --@local: true
@@ -70,9 +75,12 @@ end
 --@param path: string - Directory path to create
 local function ensureDirectory(path)
     if IS_WINDOWS then
-        os.execute(string.format('if not exist "%s" mkdir "%s"', path, path))
+        if tostring(path):find('[\r\n"&|<>^]') then
+            return false
+        end
+        return commandSucceeded(os.execute(string.format('if not exist "%s" mkdir "%s"', path, path)))
     else
-        os.execute(string.format('mkdir -p "%s" 2>/dev/null', path))
+        return commandSucceeded(os.execute("mkdir -p " .. process.shellQuote(path) .. " 2>/dev/null"))
     end
 end
 
@@ -171,7 +179,9 @@ end
 --@param logs: table - List of log entry tables
 --@return: boolean - True when the write succeeds
 local function saveToFile(logs)
-    ensureDirectory(getLogDirectory())
+    if not ensureDirectory(getLogDirectory()) then
+        return false
+    end
     local path = getLogFilePath()
     local handle = io.open(path, "w")
     if not handle then

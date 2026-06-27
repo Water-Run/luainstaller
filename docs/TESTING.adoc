@@ -54,7 +54,7 @@ toc::[]
 |Tier |Command |Purpose
 
 |Syntax
-|`luac -p src/*.lua test/smoke_all.lua test/cli_split_smoke.lua`
+|`find src test -type f -name '*.lua' -print0 \| xargs -0 -n1 luac -p`
 |Catch Lua syntax errors before running slower bundle tests.
 
 |Installer shell syntax
@@ -65,6 +65,13 @@ toc::[]
 |`lua test/cli_split_smoke.lua`
 |Verify `luai` and `luainstaller` accept only their intended command
 forms.
+
+|Documentation contract
+|`lua test/contract_docs.lua`
+|Verify behavior promised by README and `docs/*.adoc`: command
+surfaces, discovery modes, manual include/exclude rules, bundled
+searcher order, structured errors, output safety, inspectable
+manifests, logs, and documentation index policy.
 
 |Full local smoke
 |`lua test/smoke_all.lua`
@@ -78,9 +85,10 @@ Run the local baseline from the repository root:
 
 [source,sh]
 ----
-luac -p src/*.lua test/smoke_all.lua test/cli_split_smoke.lua
+find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
 sh -n tools/install-source.sh
 lua test/cli_split_smoke.lua
+lua test/contract_docs.lua
 lua test/smoke_all.lua
 ----
 
@@ -193,9 +201,10 @@ same-environment runtime behavior.
 
 |`tools/remote-test-linux.sh`
 |`192.168.10.40` Linux x86_64 and `192.168.5.19` Linux aarch64.
-|x86_64 full smoke plus clean-runtime source-installed bundle. aarch64
-source install and analysis; bundle may pass or fail with the expected
-toolchain error if Lua development metadata is missing.
+|x86_64 local baseline, full smoke, source install, and clean-runtime
+source-installed bundle. aarch64 local baseline, source install, and
+analysis; bundle may pass or fail with the expected toolchain error if
+Lua development metadata is missing.
 
 |`tools/remote-test-macos.sh`
 |`yymac06` macOS arm64.
@@ -204,7 +213,8 @@ sample onedir bundles, pure Lua and student onefile bundles, clean
 `env -i` execution.
 
 |`tools/remote-test-windows.sh`
-|`192.168.69.130` Windows 10 x64, built from Linux with MinGW.
+|`WINDOWS_TARGETS`, defaulting to Win10 at `192.168.69.130` and Win7 at
+`192.168.69.134`, built from Linux with MinGW.
 |Windows Lua 5.4.8 build, selected native DLL builds, Windows onedir
 bundles, pure Lua and student onefile bundles, Wine and target-host
 execution.
@@ -218,7 +228,8 @@ WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ----
 
 Set `SSH_OPTS` to override the default SSH options used by the remote
-scripts.
+scripts. Set `WINDOWS_TARGETS='Win10=user@host Win7=user@host'` when the
+lab VM addresses differ from the defaults.
 
 [#testing-failures]
 == Expected Failures
@@ -277,6 +288,9 @@ Before pushing documentation or packaging changes:
 . Run the local baseline commands.
 . Confirm `docs/` still contains six `.adoc` guides.
 . Confirm every guide links back to the README index.
+. Confirm the rockspec source tag exists locally and on `origin`, for
+  example `git tag --list v1.0.0` and
+  `git ls-remote --tags origin refs/tags/v1.0.0`.
 . Run `git diff --check`.
 . Inspect the diff for stale CLI syntax such as `luai build` or
    `luainstaller -b`.

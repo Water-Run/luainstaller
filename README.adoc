@@ -215,9 +215,9 @@ logging, and CLI rendering.
 page links back to the index near the top and at the end.
 
 |`test/`
-|Sample applications and smoke tests that exercise pure Lua, native
-module, runtime-discovery, onedir, onefile, installed-CLI, and release
-safety behavior.
+|Sample applications, documentation-derived contract tests, and smoke
+tests that exercise pure Lua, native module, runtime-discovery, onedir,
+onefile, installed-CLI, and release safety behavior.
 
 |`tools/`
 |Source installer and remote Linux, macOS, and Windows verification

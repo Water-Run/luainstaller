@@ -97,6 +97,15 @@ local function assert_file_exists(path)
     handle:close()
 end
 
+local function file_exists(path)
+    local handle = io.open(path, "rb")
+    if not handle then
+        return false
+    end
+    handle:close()
+    return true
+end
+
 local function remove_tree(path)
     if path and path ~= "" and path:match("^/tmp/luainstaller%-") then
         run("rm -rf " .. shell_quote(path))
@@ -156,7 +165,7 @@ local function assert_file_has_style_header(path)
 end
 
 local function list_lua_files()
-    local out = run("find test -type f -name '*.lua' | sort")
+    local out = run("find src test -type f -name '*.lua' | sort")
     local files = {}
     for line in out:gmatch("[^\n]+") do
         files[#files + 1] = line
@@ -168,14 +177,14 @@ local function check_style()
     for _, path in ipairs(list_lua_files()) do
         assert_file_has_style_header(path)
     end
-    local whitespace = run("rg -n '\\t|[ \\t]+$|\\r$' test || true")
+    local whitespace = run("rg -n '\\t|[ \\t]+$|\\r$' src test || true")
     if whitespace ~= "" then
         error("whitespace style violations:\n" .. whitespace, 2)
     end
 end
 
 local function check_syntax()
-    run("find test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p")
+    run("find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p")
 end
 
 local function check_samples()
@@ -332,6 +341,31 @@ assert(old_option.ok == false)
 assert(old_option.error.type == "InvalidOptionsError")
 assert(old_option.error.option == "require_engine")
 
+local invalid_include = luainstaller.analyze({
+    entry = "test/runtime_bundle/main.lua",
+    include = "test/runtime_bundle/greeter.lua",
+})
+assert(invalid_include.ok == false)
+assert(invalid_include.error.type == "InvalidOptionsError")
+assert(invalid_include.error.option == "include")
+
+local invalid_run_args = luainstaller.analyze({
+    entry = "test/runtime_bundle/main.lua",
+    discovery_mode = "runtime",
+    run_args = "dynamic",
+})
+assert(invalid_run_args.ok == false)
+assert(invalid_run_args.error.type == "InvalidOptionsError")
+assert(invalid_run_args.error.option == "run_args")
+
+local invalid_max_deps = luainstaller.analyze({
+    entry = "test/runtime_bundle/main.lua",
+    max_deps = "abc",
+})
+assert(invalid_max_deps.ok == false)
+assert(invalid_max_deps.error.type == "InvalidOptionsError")
+assert(invalid_max_deps.error.option == "max_deps")
+
 local unsafe = luainstaller.bundle({
     entry = "test/runtime_bundle/main.lua",
     out = ".",
@@ -340,11 +374,22 @@ local unsafe = luainstaller.bundle({
 assert(unsafe.ok == false)
 assert(unsafe.error.type == "InvalidOutputError")
 
+assert(luainstaller.clearLogs() == true)
+local logged_missing = luainstaller.analyze({ entry = "test/no-such-file.lua" })
+assert(logged_missing.ok == false)
+local error_logs = luainstaller.getLogs({
+    level = luainstaller.LogLevel.ERROR,
+    action = "analyze",
+})
+assert(#error_logs >= 1, "failed API operation must be recorded in logs")
+assert(error_logs[1].details.error_type == "ScriptNotFoundError")
+
 print("api contract ok")
 ]]
     local root = make_temp_dir("api-onefile")
     local onefile_out = root .. "/student-onefile"
-    assert_contains(run("LUAI_API_ONEFILE_OUT=" .. shell_quote(onefile_out)
+    assert_contains(run("HOME=" .. shell_quote(root .. "/home")
+        .. " LUAI_API_ONEFILE_OUT=" .. shell_quote(onefile_out)
         .. " lua -e " .. shell_quote(script)), "api contract ok")
     remove_tree(root)
 end
@@ -387,6 +432,130 @@ print("discovery modes ok")
 ]], root .. "/main.lua")
 
     assert_contains(run("lua -e " .. shell_quote(script)), "discovery modes ok")
+    remove_tree(root)
+end
+
+local function check_dependency_edge_cases()
+    local root = make_temp_dir("dependency-edges")
+    run("mkdir -p " .. shell_quote(root .. "/manual/foo") .. " " .. shell_quote(root .. "/fakebin")
+        .. " " .. shell_quote(root .. "/native") .. " " .. shell_quote(root .. "/builtin")
+        .. " " .. shell_quote(root .. "/dynamic") .. " " .. shell_quote(root .. "/lexer"))
+
+    write_file(root .. "/manual/main.lua", [[
+local mod = require("foo.bar")
+print(mod.message())
+]])
+    write_file(root .. "/manual/foo/bar.lua", [[
+return { message = function() return "manual include nested ok" end }
+]])
+
+    write_file(root .. "/native/main.lua", [[
+local mod = require("fake_native")
+print(mod)
+]])
+    write_file(root .. "/native/fake_native.a", "not a loadable lua native module")
+
+    write_file(root .. "/builtin/main.lua", [[
+local mod = require("arg")
+print(mod.value)
+]])
+    write_file(root .. "/builtin/arg.lua", [[
+return { value = "local arg module" }
+]])
+
+    write_file(root .. "/dynamic/main.lua", [[
+local suffix = "module"
+pcall(require, "dynamic_" .. suffix)
+]])
+
+    write_file(root .. "/lexer/main.lua", [[
+local value = require.foo
+print(type(value))
+]])
+
+    write_file(root .. "/fakebin/lua", [[
+#!/bin/sh
+echo fake lua should not run >&2
+exit 37
+]])
+    run("chmod +x " .. shell_quote(root .. "/fakebin/lua"))
+    write_file(root .. "/runtime_main.lua", [[
+local mod = require(arg[1])
+print(mod.message())
+]])
+    write_file(root .. "/runtime_dep.lua", [[
+return { message = function() return "runtime interpreter ok" end }
+]])
+
+    local lua_bin = command_output_trimmed("command -v lua")
+    local script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+
+local manual = luainstaller.bundle({
+    entry = %q,
+    discovery_mode = "manual",
+    include = { %q },
+    out = %q,
+    max_deps = 20,
+})
+assert(manual.ok == true, manual.error and manual.error.message)
+local handle = assert(io.popen(%q .. " 2>&1", "r"))
+local output = handle:read("*a") or ""
+local ok = handle:close()
+assert(ok == true or ok == 0, output)
+assert(output:find("manual include nested ok", 1, true), output)
+
+local native = luainstaller.analyze({
+    entry = %q,
+    max_deps = 20,
+})
+assert(native.ok == false, "static .a archives must not be accepted as loadable native modules")
+assert(native.error.type == "ModuleNotFoundError")
+
+local builtin = luainstaller.trace({
+    entry = %q,
+    max_deps = 20,
+})
+assert(builtin.ok == true, builtin.error and builtin.error.message)
+local found_arg = false
+for _, item in ipairs(builtin.trace) do
+    if item.requested == "arg" and item.selected_path and item.selected_path:match("builtin/arg%%.lua$") then
+        found_arg = true
+    end
+end
+assert(found_arg, "local arg.lua must not be treated as a builtin module")
+
+local dynamic = luainstaller.analyze({
+    entry = %q,
+    max_deps = 20,
+})
+assert(dynamic.ok == false, "dynamic pcall(require, ...) must be reported")
+assert(dynamic.error.type == "DynamicRequireError")
+
+local lexer = luainstaller.analyze({
+    entry = %q,
+    max_deps = 20,
+})
+assert(lexer.ok == true, lexer.error and lexer.error.message)
+
+local runtime = luainstaller.analyze({
+    entry = %q,
+    discovery_mode = "runtime",
+    run_args = { "runtime_dep" },
+    max_deps = 20,
+})
+assert(runtime.ok == true, runtime.error and runtime.error.message)
+assert(#runtime.dependencies.scripts == 1)
+assert(runtime.dependencies.scripts[1]:match("runtime_dep%%.lua$"))
+
+print("dependency edge cases ok")
+]], root .. "/manual/main.lua", root .. "/manual/foo/bar.lua", root .. "/manual/out",
+        shell_quote(root .. "/manual/out/out"), root .. "/native/main.lua", root .. "/builtin/main.lua",
+        root .. "/dynamic/main.lua", root .. "/lexer/main.lua", root .. "/runtime_main.lua")
+
+    assert_contains(run("PATH=" .. shell_quote(root .. "/fakebin:" .. os.getenv("PATH"))
+        .. " LUAI_LUA=" .. shell_quote(lua_bin)
+        .. " " .. shell_quote(lua_bin) .. " -e " .. shell_quote(script)), "dependency edge cases ok")
     remove_tree(root)
 end
 
@@ -433,6 +602,26 @@ io.popen = saved_popen
 assert(built.ok == true, built.error and built.error.message)
 assert(type(built.manifest.platform.os) == "string")
 assert(type(built.manifest.platform.arch) == "string")
+local windows = manifest.build({
+    entry = os.getenv("PWD") .. "/test/runtime_bundle/main.lua",
+    dependencies = { scripts = {}, libraries = {} },
+    mode = "onedir",
+    out = "build/runtime.exe",
+    target_os = "windows",
+})
+assert(windows.ok == true, windows.error and windows.error.message)
+assert(windows.manifest.platform.os == "windows")
+assert(windows.manifest.launcher.profile == "windows-shared-lua")
+local macos = manifest.build({
+    entry = os.getenv("PWD") .. "/test/runtime_bundle/main.lua",
+    dependencies = { scripts = {}, libraries = {} },
+    mode = "onedir",
+    out = "build/runtime",
+    target_os = "macos",
+})
+assert(macos.ok == true, macos.error and macos.error.message)
+assert(macos.manifest.platform.os == "macos")
+assert(macos.manifest.launcher.profile == "static-lua")
 print("manifest no popen ok")
 ]]
     assert_contains(run("lua -e " .. shell_quote(script)), "manifest no popen ok")
@@ -547,12 +736,32 @@ local function check_remote_onefile_script_coverage()
     assert_contains(macos, "--file")
     assert_contains(macos, "mac-onefile-runtime")
     assert_contains(macos, "mac-onefile-student")
+    assert_contains(macos, "LUAROCKS_TARBALL")
+    assert_contains(macos, "stage_source \"$LUAROCKS_TARBALL\"")
+    assert_not_contains(macos, "curl -fsSLO https://luarocks.org/releases")
+    assert_contains(macos, "quote_remote()")
+    assert_contains(macos, "copy_tree_macos()")
+    assert_contains(macos, "REMOTE_ROOT=$(quote_remote \"$REMOTE_ROOT\")")
+    assert_contains(macos, "rm -rf \"\\$ROCKTREE\"")
+    assert_contains(macos, "mkdir -p \"\\$ROCKTREE\"")
+    assert_contains(macos, "install --force lua-cjson")
+    assert_contains(macos, "install --force luafilesystem")
+    assert_contains(macos, "install --force luasocket")
+    assert_contains(macos, "install --force pegasus")
 
     local windows = read_file("tools/remote-test-windows.sh")
     assert_contains(windows, "bundle_demo_onefile()")
     assert_contains(windows, "--file")
     assert_contains(windows, "runtime-onefile.exe")
     assert_contains(windows, "student-onefile.exe")
+    assert_contains(windows, "WINDOWS_TARGETS")
+    assert_contains(windows, "Win7")
+    assert_contains(windows, "Win10")
+
+    local linux = read_file("tools/remote-test-linux.sh")
+    assert_contains(linux, "test/contract_docs.lua")
+    assert_contains(linux, "test/cli_split_smoke.lua")
+    assert_contains(linux, "sh -n tools/install-source.sh")
     print("remote onefile script coverage ok")
 end
 
@@ -605,6 +814,68 @@ print("forged manifest safety ok")
 ]], forged_out)
     assert_contains(run("lua -e " .. shell_quote(forged_script)), "forged manifest safety ok")
     assert(read_file(forged_out .. "/sentinel.txt") == "user data")
+
+    local forged_allowed_out = root .. "/forged-allowed-generated"
+    run("mkdir -p " .. shell_quote(forged_allowed_out .. "/.luai"))
+    write_file(forged_allowed_out .. "/.luai/manifest.lua", "-- generated by luainstaller\nreturn {}\n")
+    write_file(forged_allowed_out .. "/forged-allowed-generated", "user executable")
+    local forged_allowed_script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+local forged = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    out = %q,
+    max_deps = 120,
+})
+assert(forged.ok == false, "forged generated manifest with allowed names must not authorize deleting user files")
+assert(forged.error.type == "InvalidOutputError")
+print("forged allowed manifest safety ok")
+]], forged_allowed_out)
+    assert_contains(run("lua -e " .. shell_quote(forged_allowed_script)), "forged allowed manifest safety ok")
+    assert(read_file(forged_allowed_out .. "/forged-allowed-generated") == "user executable")
+
+    local onefile_path = root .. "/existing-onefile"
+    write_file(onefile_path, "user executable")
+    local onefile_script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+local result = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    mode = "onefile",
+    out = %q,
+    max_deps = 120,
+})
+assert(result.ok == false, "existing onefile output must be rejected unless explicitly forced")
+assert(result.error.type == "InvalidOutputError")
+print("onefile existing file safety ok")
+]], onefile_path)
+    assert_contains(run("lua -e " .. shell_quote(onefile_script)), "onefile existing file safety ok")
+    assert(read_file(onefile_path) == "user executable")
+
+    local marker = root .. "/logger-injected"
+    local evil_home = root .. '/home"; touch ' .. marker .. '; echo "'
+    local logger_script = SOURCE_LOADER .. [[
+local logger = require("luainstaller.logger")
+assert(logger.clearLogs() == true)
+print("logger clear ok")
+]]
+    assert_contains(run("HOME=" .. shell_quote(evil_home) .. " lua -e " .. shell_quote(logger_script)), "logger clear ok")
+    if file_exists(marker) then
+        error("logger directory creation must not execute shell metacharacters from HOME", 2)
+    end
+
+    local rebuild_out = root .. "/rebuild-generated"
+    local rebuild_script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+for i = 1, 2 do
+    local result = luainstaller.bundle({
+        entry = "test/runtime_bundle/main.lua",
+        out = %q,
+        max_deps = 120,
+    })
+    assert(result.ok == true, result.error and result.error.message)
+end
+print("generated marker rebuild ok")
+]], rebuild_out)
+    assert_contains(run("lua -e " .. shell_quote(rebuild_script)), "generated marker rebuild ok")
 
     local pkg_root = root .. "/init-packages"
     run("mkdir -p " .. shell_quote(pkg_root .. "/a") .. " " .. shell_quote(pkg_root .. "/b"))
@@ -695,6 +966,7 @@ local function check_cli_contract()
     assert_contains(full_help, "luainstaller trace <entry.lua>")
     assert_contains(full_help, "luainstaller build <entry.lua>")
     assert_contains(full_help, "--discovery-mode")
+    assert_contains(full_help, "--lua <path>")
     assert_not_contains(full_help, "--require-engine")
     assert_not_contains(full_help, "engines")
 
@@ -773,6 +1045,20 @@ local function check_cli_contract()
     assert_contains(bundled, "ok")
     assert_contains(bundled, cli_out .. "/")
     remove_tree(cli_out)
+
+    run("rm -rf -- -dash-out")
+    local dash_bundled = run(cli_command("luai", {
+        "-b",
+        "--dir",
+        "test/runtime_bundle/main.lua",
+        "-o",
+        "-dash-out",
+        "--max-deps",
+        "120",
+    }))
+    assert_contains(dash_bundled, "ok")
+    assert_file_exists("-dash-out/-dash-out")
+    run("rm -rf -- -dash-out")
 
     print("cli contract ok")
 end
@@ -853,9 +1139,39 @@ local single = cgen.generateBootstrap({
 })
 assert(assert(load(single, "@generated-single-file")))
 
+local order_root = assert(os.getenv("LUAI_CGEN_ORDER_ROOT"))
+local function write_temp(path, content)
+    local file = assert(io.open(path, "wb"))
+    file:write(content)
+    file:close()
+end
+write_temp(order_root .. "/entry.lua", "print('entry')\n")
+write_temp(order_root .. "/b.lua", "return { name = 'b' }\n")
+write_temp(order_root .. "/c.lua", "return { name = 'c' }\n")
+local ordered = cgen.generateBootstrap({
+    entry = order_root .. "/entry.lua",
+    dependencies = {
+        scripts = {
+            order_root .. "/c.lua",
+            order_root .. "/b.lua",
+        },
+        libraries = {},
+    },
+    module_names = {
+        [order_root .. "/c.lua"] = "c",
+        [order_root .. "/b.lua"] = "b",
+    },
+})
+local b_pos = ordered:find("%[\"b\"%] =")
+local c_pos = ordered:find("%[\"c\"%] =")
+assert(b_pos and c_pos and b_pos < c_pos, "generated payload modules must be emitted in sorted order")
+
 print("runtime cgen ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "runtime cgen ok")
+    local root = make_temp_dir("cgen-order")
+    assert_contains(run("LUAI_CGEN_ORDER_ROOT=" .. shell_quote(root)
+        .. " lua -e " .. shell_quote(script)), "runtime cgen ok")
+    remove_tree(root)
 end
 
 local function check_c_launcher()
@@ -1153,6 +1469,7 @@ check_samples()
 check_analyzer_visibility()
 check_api_contract()
 check_discovery_modes()
+check_dependency_edge_cases()
 check_compatibility_diagnostics()
 check_manifest_without_popen()
 check_bundler_without_popen()

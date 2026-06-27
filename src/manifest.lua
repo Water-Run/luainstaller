@@ -80,8 +80,29 @@ local function luaInfo()
     }
 end
 
-local function platformInfo()
-    return platform.detectHost()
+local function platformInfo(opts)
+    opts = opts or {}
+    local host = platform.detectHost()
+    local profile = platform.profile({
+        target_os = opts.target_os,
+        lua_prefix = opts.lua_prefix,
+    })
+    host.os = profile.target_os or host.os
+    return host
+end
+
+local function launcherProfile(opts)
+    opts = opts or {}
+    if opts.launcher_profile and opts.launcher_profile ~= "" then
+        return opts.launcher_profile
+    end
+    if opts.target_os == "macos" then
+        return "static-lua"
+    end
+    if opts.target_os == "windows" then
+        return "windows-shared-lua"
+    end
+    return "shared-lua"
 end
 
 local function fileEntry(path, destination_root, entry_dir, preserve_relative)
@@ -154,9 +175,9 @@ function M.build(opts)
             path = opts.out,
         },
         lua = luaInfo(),
-        platform = platformInfo(),
+        platform = platformInfo(opts),
         launcher = {
-            profile = opts.launcher_profile or "shared-lua",
+            profile = launcherProfile(opts),
         },
         modules = {
             lua = {},

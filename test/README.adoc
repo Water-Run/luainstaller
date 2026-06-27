@@ -12,6 +12,17 @@ The test programs are grouped by packaging difficulty.
 
 === Layout
 
+* `contract_docs.lua` Documentation-derived contract tests. These build
+temporary fixtures and assert behavior promised in README and
+`docs/*.adoc`, rather than mirroring implementation internals.
+* `support/` Shared test harness helpers for loading source-tree modules,
+creating temporary fixtures, invoking CLI entry points, and making common
+assertions.
+* `cli_split_smoke.lua` Focused command-surface checks for the compact
+`luai` CLI and full-word `luainstaller` CLI.
+* `smoke_all.lua` Full local smoke suite covering analysis, manifests,
+launcher generation, bundle execution, install paths, and safety
+regressions.
 * `single_file/` Simple one-file programs. These are basic
 beginner-level programming tasks and are useful first smoke tests for
 `luai -b`.
@@ -72,7 +83,8 @@ WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 
 The Windows script requires `WINDOWS_PASSWORD` in the environment
 and accepts `SSH_OPTS` when the default lab SSH options need to be
-overridden.
+overridden. Set `WINDOWS_TARGETS='Win10=user@host Win7=user@host'` when
+the lab VM addresses differ from the defaults.
 
 The source-install checks also verify deployment when LuaRocks is
 unavailable.

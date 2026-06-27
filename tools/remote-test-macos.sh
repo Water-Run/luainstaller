@@ -11,10 +11,20 @@ ROCKTREE=${ROCKTREE:-"/tmp/luainstaller-mac-rocktree"}
 PREFIX=${PREFIX:-"/tmp/luainstaller-mac-prefix"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
 PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+LUA_TARBALL=lua-5.4.8.tar.gz
+LUA_URL=https://www.lua.org/ftp/$LUA_TARBALL
+LUAROCKS_TARBALL=luarocks-3.12.2.tar.gz
+LUAROCKS_URL=https://luarocks.org/releases/$LUAROCKS_TARBALL
 LSQLITE3_ZIP=lsqlite3_v096.zip
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
 LSQLITE3_URL='https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6'
 SQLITE_URL='https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip'
+
+quote_remote() {
+    printf "'"
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+    printf "'"
+}
 
 stage_source() {
     name=$1
@@ -26,29 +36,46 @@ stage_source() {
 }
 
 stage_macos_sources() {
+    stage_source "$LUA_TARBALL" "$LUA_URL"
+    stage_source "$LUAROCKS_TARBALL" "$LUAROCKS_URL"
     stage_source "$LSQLITE3_ZIP" "$LSQLITE3_URL"
     stage_source "$SQLITE_ZIP" "$SQLITE_URL"
-    scp -P "$BASTION_PORT" "$SOURCE_CACHE/$LSQLITE3_ZIP" "$SOURCE_CACHE/$SQLITE_ZIP" "$BASTION:/tmp/" >/dev/null
-    ssh -p "$BASTION_PORT" "$BASTION" "scp /tmp/$LSQLITE3_ZIP /tmp/$SQLITE_ZIP $MAC_HOST:/tmp/" >/dev/null
+    scp -P "$BASTION_PORT" \
+        "$SOURCE_CACHE/$LUA_TARBALL" \
+        "$SOURCE_CACHE/$LUAROCKS_TARBALL" \
+        "$SOURCE_CACHE/$LSQLITE3_ZIP" \
+        "$SOURCE_CACHE/$SQLITE_ZIP" \
+        "$BASTION:/tmp/" >/dev/null
+    mac_tmp=$(quote_remote "$MAC_HOST:/tmp/")
+    ssh -p "$BASTION_PORT" "$BASTION" \
+        "scp /tmp/$LUA_TARBALL /tmp/$LUAROCKS_TARBALL /tmp/$LSQLITE3_ZIP /tmp/$SQLITE_ZIP $mac_tmp" >/dev/null
+}
+
+copy_tree_macos() {
+    mac_host=$(quote_remote "$MAC_HOST")
+    remote_root=$(quote_remote "$REMOTE_ROOT")
+    mac_cmd=$(quote_remote "rm -rf $remote_root && mkdir -p $remote_root && tar -xf - -C $remote_root")
+    tar --exclude=.git -C "$PROJECT_ROOT" -cf - . \
+        | ssh -p "$BASTION_PORT" "$BASTION" "ssh $mac_host $mac_cmd"
 }
 
 remote_sh() {
-    ssh -p "$BASTION_PORT" "$BASTION" "ssh $MAC_HOST 'sh -s'"
+    mac_host=$(quote_remote "$MAC_HOST")
+    ssh -p "$BASTION_PORT" "$BASTION" "ssh $mac_host 'sh -s'"
 }
 
 stage_macos_sources
 
 remote_sh <<EOF
 set -eu
-LUA_PREFIX="$LUA_PREFIX"
-LUAROCKS_PREFIX="$LUAROCKS_PREFIX"
-ROCKTREE="$ROCKTREE"
+LUA_PREFIX=$(quote_remote "$LUA_PREFIX")
+LUAROCKS_PREFIX=$(quote_remote "$LUAROCKS_PREFIX")
+ROCKTREE=$(quote_remote "$ROCKTREE")
 
 if [ ! -x "\$LUA_PREFIX/bin/lua" ]; then
-    rm -rf "\$LUA_PREFIX" /tmp/lua-5.4.8 /tmp/lua-5.4.8.tar.gz
+    rm -rf "\$LUA_PREFIX" /tmp/lua-5.4.8
     cd /tmp
-    curl -fsSLO https://www.lua.org/ftp/lua-5.4.8.tar.gz
-    tar -xzf lua-5.4.8.tar.gz
+    tar -xzf "$LUA_TARBALL"
     cd lua-5.4.8
     make clean >/tmp/luainstaller-macos-lua-clean.log 2>&1 || true
     make macosx >/tmp/luainstaller-macos-lua-build.log 2>&1
@@ -57,10 +84,9 @@ fi
 "\$LUA_PREFIX/bin/lua" -v
 
 if [ ! -x "\$LUAROCKS_PREFIX/bin/luarocks" ]; then
-    rm -rf "\$LUAROCKS_PREFIX" /tmp/luarocks-3.12.2 /tmp/luarocks-3.12.2.tar.gz
+    rm -rf "\$LUAROCKS_PREFIX" /tmp/luarocks-3.12.2
     cd /tmp
-    curl -fsSLO https://luarocks.org/releases/luarocks-3.12.2.tar.gz
-    tar -xzf luarocks-3.12.2.tar.gz
+    tar -xzf "$LUAROCKS_TARBALL"
     cd luarocks-3.12.2
     ./configure --prefix="\$LUAROCKS_PREFIX" --with-lua="\$LUA_PREFIX" >/tmp/luainstaller-macos-luarocks-configure.log
     make >/tmp/luainstaller-macos-luarocks-build.log
@@ -71,10 +97,12 @@ fi
 DEPS_LUA_PATH="\$ROCKTREE/share/lua/5.4/?.lua;\$ROCKTREE/share/lua/5.4/?/init.lua;;"
 DEPS_LUA_CPATH="\$ROCKTREE/lib/lua/5.4/?.so;\$ROCKTREE/lib/lua/5.4/?/init.so;;"
 if ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("cjson"); require("lfs"); require("socket.core"); require("pegasus")' >/tmp/luainstaller-macos-native-check.log 2>&1; then
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install lua-cjson >/tmp/luainstaller-macos-cjson.log 2>&1
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install luafilesystem >/tmp/luainstaller-macos-lfs.log 2>&1
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install luasocket >/tmp/luainstaller-macos-luasocket.log 2>&1
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install pegasus >/tmp/luainstaller-macos-pegasus.log 2>&1
+    rm -rf "\$ROCKTREE"
+    mkdir -p "\$ROCKTREE"
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force lua-cjson >/tmp/luainstaller-macos-cjson.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force luafilesystem >/tmp/luainstaller-macos-lfs.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force luasocket >/tmp/luainstaller-macos-luasocket.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force pegasus >/tmp/luainstaller-macos-pegasus.log 2>&1
 fi
 if ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("lsqlite3")' >/tmp/luainstaller-macos-lsqlite-check.log 2>&1; then
     rm -rf /tmp/luainstaller-mac-lsqlite-build
@@ -96,15 +124,14 @@ fi
 LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("cjson"); require("lfs"); require("socket.core"); require("pegasus"); require("lsqlite3"); print("mac native deps ok")'
 EOF
 
-tar --exclude=.git -C "$PROJECT_ROOT" -cf - . \
-    | ssh -p "$BASTION_PORT" "$BASTION" "ssh $MAC_HOST 'rm -rf \"$REMOTE_ROOT\" && mkdir -p \"$REMOTE_ROOT\" && tar -xf - -C \"$REMOTE_ROOT\"'"
+copy_tree_macos
 
 remote_sh <<EOF
 set -eu
-REMOTE_ROOT="$REMOTE_ROOT"
-LUA_PREFIX="$LUA_PREFIX"
-ROCKTREE="$ROCKTREE"
-PREFIX="$PREFIX"
+REMOTE_ROOT=$(quote_remote "$REMOTE_ROOT")
+LUA_PREFIX=$(quote_remote "$LUA_PREFIX")
+ROCKTREE=$(quote_remote "$ROCKTREE")
+PREFIX=$(quote_remote "$PREFIX")
 DEPS_LUA_PATH="\$ROCKTREE/share/lua/5.4/?.lua;\$ROCKTREE/share/lua/5.4/?/init.lua;;"
 DEPS_LUA_CPATH="\$ROCKTREE/lib/lua/5.4/?.so;\$ROCKTREE/lib/lua/5.4/?/init.so;;"
 

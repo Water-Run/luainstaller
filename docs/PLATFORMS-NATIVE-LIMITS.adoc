@@ -209,6 +209,11 @@ architecture, Lua ABI, and compiler/runtime family. `luainstaller`
 preserves and lays out native modules; it does not rebuild them for a
 new platform.
 
+Static archives such as `.a` are not Lua `require()` native modules and
+are not discovered as dependencies. They are used only by target profiles
+that explicitly link a launcher against a static Lua runtime, such as the
+macOS `liblua.a` profile.
+
 [#platforms-external]
 == External Library Boundary
 

@@ -2,6 +2,7 @@
 set -eu
 
 WINDOWS_HOST=${WINDOWS_HOST:-"WaterRun@192.168.69.130"}
+WINDOWS_TARGETS=${WINDOWS_TARGETS:-"Win10=$WINDOWS_HOST Win7=WaterRun@192.168.69.134"}
 SSH_OPTS=${SSH_OPTS:-"-o StrictHostKeyChecking=no"}
 REMOTE_TEMP=${REMOTE_TEMP:-"C:/Users/WaterRun/AppData/Local/Temp"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
@@ -304,9 +305,14 @@ try {
 
 Write-Output 'windows remote bundles ok'
 PS1
-    SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$archive" "$WINDOWS_HOST:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
-    SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$runner" "$WINDOWS_HOST:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
-    SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh $SSH_OPTS "$WINDOWS_HOST" "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\WaterRun\\AppData\\Local\\Temp\\luainstaller-run-windows-bundles.ps1"
+    for target in $WINDOWS_TARGETS; do
+        label=${target%%=*}
+        host=${target#*=}
+        echo "windows remote target $label"
+        SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
+        SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
+        SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh $SSH_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\WaterRun\\AppData\\Local\\Temp\\luainstaller-run-windows-bundles.ps1"
+    done
 }
 
 need_cmd curl

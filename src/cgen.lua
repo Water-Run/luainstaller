@@ -36,6 +36,15 @@ local function quote(value)
     return string.format("%q", tostring(value or ""))
 end
 
+local function sortedKeys(tbl)
+    local keys = {}
+    for key in pairs(tbl or {}) do
+        keys[#keys + 1] = key
+    end
+    table.sort(keys)
+    return keys
+end
+
 function M.moduleNameFromPath(path)
     path = normalizePath(path)
     if path:match("/init%.lua$") then
@@ -65,7 +74,9 @@ function M.buildPayload(opts)
     }
 
     for _, path in ipairs(dependencies.scripts or {}) do
-        local module_name = opts.module_names and opts.module_names[path] or M.moduleNameFromPath(path)
+        local normalized = normalizePath(path)
+        local module_name = opts.module_names and (opts.module_names[path] or opts.module_names[normalized])
+            or M.moduleNameFromPath(path)
         if payload.modules[module_name] then
             error({
                 type = "DuplicateModuleError",
@@ -91,7 +102,8 @@ local function emitPayload(payload)
     lines[#lines + 1] = "    source = " .. quote(payload.entry.source) .. ","
     lines[#lines + 1] = "  },"
     lines[#lines + 1] = "  modules = {"
-    for name, record in pairs(payload.modules or {}) do
+    for _, name in ipairs(sortedKeys(payload.modules or {})) do
+        local record = payload.modules[name]
         lines[#lines + 1] = "    [" .. quote(name) .. "] = {"
         lines[#lines + 1] = "      path = " .. quote(record.path) .. ","
         lines[#lines + 1] = "      source = " .. quote(record.source) .. ","

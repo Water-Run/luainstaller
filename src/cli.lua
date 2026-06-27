@@ -105,6 +105,7 @@ Options:
   --include <path>      include an extra file
   --exclude <path>      exclude a dependency
   --target-os <os>      linux, macos, or windows
+  --lua <path>          Lua interpreter for runtime discovery
   --lua-prefix <path>   Lua prefix for profiled targets
   -d, --discovery-mode <mode>
                         static, manual, or runtime
@@ -136,6 +137,7 @@ Build options:
   --include <path>             Include an extra file; repeatable.
   --exclude <path>             Exclude a dependency; repeatable.
   --target-os <os>             Target profile: linux, macos, or windows.
+  --lua <path>                 Lua interpreter for runtime discovery.
   --lua-prefix <path>          Lua prefix for profiled targets.
   -d, --discovery-mode <mode>
                                Dependency discovery mode: static, manual, runtime.
@@ -184,7 +186,7 @@ end
 
 function ArgumentParser:consumeValue(option_name)
     local value = self:consume()
-    if value == nil or value:sub(1, 1) == "-" then
+    if value == nil then
         return nil, string.format("%s requires a value", option_name)
     end
     return value
@@ -340,6 +342,12 @@ local function parseActionOptions(parser, action, first_entry)
                 return nil, err
             end
             opts.target_os = value
+        elseif item == "--lua" then
+            local value, err = parser:consumeValue(item)
+            if not value then
+                return nil, err
+            end
+            opts.lua = value
         elseif item == "--lua-prefix" then
             local value, err = parser:consumeValue(item)
             if not value then

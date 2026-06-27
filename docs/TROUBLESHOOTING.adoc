@@ -347,6 +347,11 @@ If you intentionally want to replace an old generated output, remove it
 yourself after inspecting it. Do not rely on the tool to decide whether
 unknown files are disposable.
 
+Generated onedir rebuilds are allowed only when the previous output has
+both `.luai/manifest.lua` and `.luai/generated-output.txt`, and the
+recorded top-level generated file hashes still match. Older generated
+directories without the marker must be inspected and removed manually.
+
 [#troubleshooting-logs]
 == Logs
 

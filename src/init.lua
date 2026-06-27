@@ -110,15 +110,84 @@ local function fileExists(path)
     return false
 end
 
-local function copySequence(list)
-    if type(list) ~= "table" then
-        return list
+local function invalidOption(option, message)
+    return makeError("InvalidOptionsError", message or ("invalid option: " .. tostring(option)), {
+        option = option,
+    })
+end
+
+local function normalizeSequenceOption(opts, key)
+    local value = opts[key]
+    if value == nil then
+        return {}
+    end
+    if type(value) ~= "table" then
+        return nil, invalidOption(key, key .. " must be a list of strings")
     end
     local copy = {}
-    for i = 1, #list do
-        copy[i] = list[i]
+    local count = 0
+    for item_key, item_value in pairs(value) do
+        if type(item_key) ~= "number" or item_key < 1 or item_key ~= math.floor(item_key) then
+            return nil, invalidOption(key, key .. " must be a sequence")
+        end
+        if type(item_value) ~= "string" then
+            return nil, invalidOption(key, key .. " entries must be strings")
+        end
+        if item_key > count then
+            count = item_key
+        end
+    end
+    for i = 1, count do
+        if type(value[i]) ~= "string" then
+            return nil, invalidOption(key, key .. " must be a dense sequence")
+        end
+        copy[i] = value[i]
     end
     return copy
+end
+
+local function validateOptionalString(opts, key)
+    local value = opts[key]
+    if value ~= nil and type(value) ~= "string" then
+        return invalidOption(key, key .. " must be a string")
+    end
+    return nil
+end
+
+local function validateOptionalBoolean(opts, key)
+    local value = opts[key]
+    if value ~= nil and type(value) ~= "boolean" then
+        return invalidOption(key, key .. " must be a boolean")
+    end
+    return nil
+end
+
+local function validateMaxDeps(opts)
+    local value = opts.max_deps
+    if value == nil then
+        return nil
+    end
+    if type(value) ~= "number" or value < 1 or value ~= math.floor(value) then
+        return invalidOption("max_deps", "max_deps must be a positive integer")
+    end
+    return nil
+end
+
+local VALID_TARGET_OS = {
+    linux = true,
+    macos = true,
+    windows = true,
+}
+
+local function validateTargetOs(opts)
+    local value = opts.target_os
+    if value == nil or value == "" then
+        return nil
+    end
+    if not VALID_TARGET_OS[value] then
+        return invalidOption("target_os", "target_os must be one of: linux, macos, windows")
+    end
+    return nil
 end
 
 local ALLOWED_OPTIONS = {
@@ -129,6 +198,7 @@ local ALLOWED_OPTIONS = {
     exclude = true,
     include = true,
     launcher_profile = true,
+    lua = true,
     lua_prefix = true,
     max_deps = true,
     mode = true,
@@ -152,14 +222,58 @@ local function normalizeOptions(opts)
     if type(opts.entry) ~= "string" or opts.entry == "" then
         return nil, makeError("InvalidOptionsError", "entry is required")
     end
+    local include, include_err = normalizeSequenceOption(opts, "include")
+    if not include then
+        return nil, include_err
+    end
+    local exclude, exclude_err = normalizeSequenceOption(opts, "exclude")
+    if not exclude then
+        return nil, exclude_err
+    end
+    local run_args, run_args_err = normalizeSequenceOption(opts, "run_args")
+    if not run_args then
+        return nil, run_args_err
+    end
+    local max_deps_err = validateMaxDeps(opts)
+    if max_deps_err then
+        return nil, max_deps_err
+    end
+    for _, key in ipairs({ "action", "discovery_mode", "launcher_profile", "lua", "lua_prefix", "mode", "out", "target_os" }) do
+        local err = validateOptionalString(opts, key)
+        if err then
+            return nil, err
+        end
+    end
+    local target_os_err = validateTargetOs(opts)
+    if target_os_err then
+        return nil, target_os_err
+    end
+    for _, key in ipairs({ "depscan", "verbose" }) do
+        local err = validateOptionalBoolean(opts, key)
+        if err then
+            return nil, err
+        end
+    end
+
     local normalized = {}
     for key, value in pairs(opts) do
         normalized[key] = value
     end
-    normalized.include = copySequence(opts.include)
-    normalized.exclude = copySequence(opts.exclude)
-    normalized.run_args = copySequence(opts.run_args)
+    normalized.include = include
+    normalized.exclude = exclude
+    normalized.run_args = run_args
     return normalized
+end
+
+local function recordFailure(action, failure)
+    if failure and failure.ok == false and failure.error then
+        logger.logError("api", action, failure.error.message or "operation failed", {
+            error_type = failure.error.type,
+            entry = failure.error.script_path,
+            option = failure.error.option,
+        })
+    end
+    return failure
 end
 
 local function dependencyPlan(opts)
@@ -226,7 +340,7 @@ end
 function M.analyze(opts)
     local context, err = analyzeContext(opts)
     if not context then
-        return err
+        return recordFailure("analyze", err)
     end
 
     return {
@@ -259,7 +373,7 @@ end
 function M.trace(opts)
     local context, err = analyzeContext(opts)
     if not context then
-        return err
+        return recordFailure("trace", err)
     end
 
     return {
@@ -275,7 +389,7 @@ end
 function M.compatibility(opts)
     local context, err = analyzeContext(opts)
     if not context then
-        return err
+        return recordFailure("compatibility", err)
     end
     return {
         ok = true,
@@ -291,7 +405,7 @@ end
 function M.bundle(opts)
     local context, err = analyzeContext(opts, { default_mode = "onedir" })
     if not context then
-        return err
+        return recordFailure("bundle", err)
     end
 
     local normalized = context.options
@@ -306,9 +420,11 @@ function M.bundle(opts)
         exclude = normalized.exclude,
         depscan = normalized.depscan,
         launcher_profile = normalized.launcher_profile,
+        target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
+        lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
     })
     if not built_manifest.ok then
-        return built_manifest
+        return recordFailure("bundle", built_manifest)
     end
 
     local bundle_opts = {
@@ -322,10 +438,10 @@ function M.bundle(opts)
     }
 
     if normalized.mode == "onefile" then
-        return onefile.bundleOnefile(bundle_opts)
+        return recordFailure("bundle", onefile.bundleOnefile(bundle_opts))
     end
 
-    return bundler.bundleOnedir(bundle_opts)
+    return recordFailure("bundle", bundler.bundleOnedir(bundle_opts))
 end
 
 return M

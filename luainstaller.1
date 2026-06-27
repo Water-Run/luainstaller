@@ -128,6 +128,10 @@ Exclude a dependency by path or basename. May be repeated.
 .BI \-\-target\-os " " os
 Select the target profile: linux, macos, or windows.
 .TP
+.BI \-\-lua " " path
+Lua interpreter used by runtime dependency discovery. Defaults to
+LUAI_LUA, then the current interpreter, then lua from PATH.
+.TP
 .BI \-\-lua\-prefix " " path
 Lua prefix used by targets that require explicit headers or runtime files.
 .TP

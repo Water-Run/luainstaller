@@ -57,6 +57,21 @@ local function removeFile(path)
     os.remove(path)
 end
 
+local function luaInterpreter(opts)
+    opts = opts or {}
+    if type(opts.lua) == "string" and opts.lua ~= "" then
+        return opts.lua
+    end
+    local env_lua = os.getenv("LUAI_LUA")
+    if env_lua and env_lua ~= "" then
+        return env_lua
+    end
+    if type(arg) == "table" and type(arg[-1]) == "string" and arg[-1] ~= "" then
+        return arg[-1]
+    end
+    return "lua"
+end
+
 local function listContains(list, value)
     for i = 1, #list do
         if list[i] == value then
@@ -77,10 +92,34 @@ local function isExcluded(path, excludes)
     return false
 end
 
+local function moduleNameFromLuaPath(lua_path, entry)
+    local source = normalizePath(absolutePath(lua_path))
+    local entry_dir = dirname(absolutePath(entry))
+    local prefix = entry_dir == "/" and "/" or (entry_dir .. "/")
+    local relative = nil
+    if source:sub(1, #prefix) == prefix then
+        relative = source:sub(#prefix + 1)
+    else
+        relative = basename(source)
+    end
+    relative = normalizePath(relative)
+    if relative:match("/init%.lua$") then
+        relative = relative:gsub("/init%.lua$", "")
+    else
+        relative = relative:gsub("%.lua$", "")
+    end
+    return (relative:gsub("/", "."))
+end
+
 local function applyManualInputs(result, opts)
     local scripts = {}
     local libraries = {}
+    local trace = {}
     local excludes = opts.exclude or {}
+
+    for _, item in ipairs(result.trace or {}) do
+        trace[#trace + 1] = item
+    end
 
     for _, path in ipairs(result.scripts or {}) do
         if not isExcluded(path, excludes) and not listContains(scripts, path) then
@@ -95,20 +134,34 @@ local function applyManualInputs(result, opts)
     end
 
     for _, path in ipairs(opts.include or {}) do
-        if not fileExists(path) then
-            return nil, makeError("ScriptNotFoundError", string.format("Included path not found: %s", path), {
-                script_path = path,
+        local normalized = normalizePath(path)
+        if not fileExists(normalized) then
+            return nil, makeError("ScriptNotFoundError", string.format("Included path not found: %s", normalized), {
+                script_path = normalized,
             })
         end
-        if not isExcluded(path, excludes) and not listContains(scripts, path) then
-            scripts[#scripts + 1] = path
+        if not isExcluded(normalized, excludes) and not listContains(scripts, normalized) then
+            scripts[#scripts + 1] = normalized
+            if normalized:match("%.lua$") then
+                trace[#trace + 1] = {
+                    requiring_file = opts.entry,
+                    source_line = 0,
+                    requested = moduleNameFromLuaPath(normalized, opts.entry),
+                    optional = false,
+                    selected_path = normalized,
+                    selected_type = "lua",
+                    classification = "lua",
+                    reason = "manual-include",
+                    candidates = { normalized },
+                }
+            end
         end
     end
 
     return {
         scripts = scripts,
         libraries = libraries,
-        trace = result.trace or {},
+        trace = trace,
     }
 end
 
@@ -216,7 +269,7 @@ local function runtimePlan(opts)
         args[#args + 1] = shellQuote(value)
     end
     local command = table.concat({
-        "lua",
+        shellQuote(luaInterpreter(opts)),
         shellQuote(script_path),
         table.concat(args, " "),
     }, " ")

@@ -227,6 +227,12 @@ Excludes win over automatic discovery and manual includes.
 |Select `linux`, `macos`, or `windows`. The selected profile determines
 compiler behavior and runtime layout.
 
+|`--lua PATH`
+|Analyze, trace, build
+|Select the Lua interpreter used by runtime dependency discovery. When
+omitted, runtime discovery uses `LUAI_LUA`, then the current interpreter,
+then `lua` from `PATH`.
+
 |`--lua-prefix PATH`
 |Trace, build
 |Point macOS and Windows profiles at a Lua prefix containing headers and
@@ -286,6 +292,8 @@ too much or too little.
 discovery. It only records `require` calls reached by that run. If your
 program loads different modules for different subcommands, run a
 representative command or use manual includes for the missing files.
+Use `--lua PATH` or `LUAI_LUA` when runtime discovery must use a specific
+Lua interpreter.
 ====
 
 [#usage-inspection]

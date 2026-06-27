@@ -7,27 +7,38 @@ LINUX_ARM64=${LINUX_ARM64:-"lyf@192.168.5.19"}
 REMOTE_ROOT=${REMOTE_ROOT:-"/tmp/luainstaller-linux-current"}
 PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
+quote_remote() {
+    printf "'"
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+    printf "'"
+}
+
 copy_tree_ssh() {
     target=$1
     port=$2
     remote_root=$3
+    quoted_root=$(quote_remote "$remote_root")
     tar --exclude=.git -C "$PROJECT_ROOT" -cf - . \
-        | ssh -p "$port" "$target" "rm -rf '$remote_root' && mkdir -p '$remote_root' && tar -xf - -C '$remote_root'"
+        | ssh -p "$port" "$target" "rm -rf $quoted_root && mkdir -p $quoted_root && tar -xf - -C $quoted_root"
 }
 
 copy_tree_default_ssh() {
     target=$1
     remote_root=$2
+    quoted_root=$(quote_remote "$remote_root")
     tar --exclude=.git -C "$PROJECT_ROOT" -cf - . \
-        | ssh "$target" "rm -rf '$remote_root' && mkdir -p '$remote_root' && tar -xf - -C '$remote_root'"
+        | ssh "$target" "rm -rf $quoted_root && mkdir -p $quoted_root && tar -xf - -C $quoted_root"
 }
 
 copy_tree_ssh "$LINUX_X64" "$LINUX_X64_PORT" "$REMOTE_ROOT"
 
-ssh -p "$LINUX_X64_PORT" "$LINUX_X64" "sh -s" <<EOF
+ssh -p "$LINUX_X64_PORT" "$LINUX_X64" "REMOTE_ROOT=$(quote_remote "$REMOTE_ROOT") sh -s" <<'EOF'
 set -eu
 cd "$REMOTE_ROOT"
-luac -p src/*.lua test/smoke_all.lua
+find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
+sh -n tools/install-source.sh
+lua test/cli_split_smoke.lua
+lua test/contract_docs.lua
 lua test/smoke_all.lua
 rm -rf /tmp/luainstaller-linux-source-prefix /tmp/luainstaller-linux-runtime
 sh tools/install-source.sh --prefix /tmp/luainstaller-linux-source-prefix
@@ -39,9 +50,12 @@ EOF
 
 copy_tree_default_ssh "$LINUX_ARM64" "$REMOTE_ROOT"
 
-ssh "$LINUX_ARM64" "sh -s" <<EOF
+ssh "$LINUX_ARM64" "REMOTE_ROOT=$(quote_remote "$REMOTE_ROOT") sh -s" <<'EOF'
 set -eu
 cd "$REMOTE_ROOT"
+find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
+sh -n tools/install-source.sh
+lua test/cli_split_smoke.lua
 rm -rf /tmp/luainstaller-linux-arm64-source-prefix /tmp/luainstaller-linux-arm64-runtime
 sh tools/install-source.sh --prefix /tmp/luainstaller-linux-arm64-source-prefix
 /tmp/luainstaller-linux-arm64-source-prefix/bin/luai -v
