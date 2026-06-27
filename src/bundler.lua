@@ -12,12 +12,23 @@ Updated:
 ]]
 
 local launcher = require("luainstaller.launcher")
+local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
+local process = require("luainstaller.process")
 
 local M = {}
 
 local PATH_SEP = package.config:sub(1, 1)
 local IS_WINDOWS = PATH_SEP == "\\"
+
+local normalizePath = path.normalize
+local absolutePath = path.absolute
+local currentDirectory = path.currentDirectory
+local dirname = path.dirname
+local basename = path.basename
+local stem = path.stem
+local commandOutput = process.output
+local shellQuote = process.shellQuote
 
 local function makeError(err_type, message, details)
     local err = {
@@ -40,99 +51,6 @@ local function fromThrownError(err)
         return makeError(err.type or "LauncherGenerationError", err.message or tostring(err), err)
     end
     return makeError("LauncherGenerationError", tostring(err))
-end
-
-local function normalizePath(path)
-    path = tostring(path or ""):gsub("\\", "/")
-    local prefix = ""
-    if path:match("^//") then
-        prefix = "//"
-        path = path:sub(3)
-    elseif path:match("^%a:/") then
-        prefix = path:sub(1, 3)
-        path = path:sub(4)
-    elseif path:sub(1, 1) == "/" then
-        prefix = "/"
-        path = path:sub(2)
-    end
-
-    local parts = {}
-    for segment in path:gmatch("[^/]+") do
-        if segment == ".." then
-            if #parts > 0 and parts[#parts] ~= ".." then
-                parts[#parts] = nil
-            elseif prefix == "" then
-                parts[#parts + 1] = ".."
-            end
-        elseif segment ~= "." and segment ~= "" then
-            parts[#parts + 1] = segment
-        end
-    end
-
-    local result = prefix .. table.concat(parts, "/")
-    if result == "" then
-        return "."
-    end
-    return result
-end
-
-local function isAbsolutePath(path)
-    return path:sub(1, 1) == "/" or path:match("^%a:/") ~= nil
-end
-
-local function commandOutput(command)
-    if type(io.popen) ~= "function" then
-        return false, "io.popen is not available in this Lua runtime"
-    end
-    local popen_ok, pipe = pcall(io.popen, command .. " 2>&1", "r")
-    if not popen_ok or not pipe then
-        return false, tostring(pipe)
-    end
-    local output = pipe:read("*a") or ""
-    local ok = pipe:close()
-    if ok == true or ok == 0 then
-        return true, output
-    end
-    return false, output
-end
-
-local function currentDirectory()
-    local ok, dir = commandOutput(IS_WINDOWS and "cd" or "pwd")
-    if ok then
-        local first_line = dir:match("^[^\r\n]+")
-        if first_line and first_line ~= "" then
-            return normalizePath(first_line)
-        end
-    end
-    return "."
-end
-
-local function absolutePath(path)
-    path = normalizePath(path)
-    if isAbsolutePath(path) then
-        return path
-    end
-    return normalizePath(currentDirectory() .. "/" .. path)
-end
-
-local function dirname(path)
-    path = normalizePath(path)
-    return path:match("^(.+)/[^/]+$") or "."
-end
-
-local function basename(path)
-    path = normalizePath(path)
-    return path:match("[^/]+$") or path
-end
-
-local function stem(path)
-    local name = basename(path)
-    return name:match("^(.+)%.[^%.]+$") or name
-end
-
-local function shellQuote(value)
-    value = tostring(value or "")
-    return "'" .. value:gsub("'", "'\\''") .. "'"
 end
 
 local function ensureDirectory(path)

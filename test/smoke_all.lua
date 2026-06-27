@@ -21,6 +21,8 @@ package.preload["luainstaller.analyzer"] = function() return dofile("src/analyze
 package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
 package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
+package.preload["luainstaller.process"] = function() return dofile("src/process.lua") end
+package.preload["luainstaller.path"] = function() return dofile("src/path.lua") end
 package.preload["luainstaller.platform"] = function() return dofile("src/platform.lua") end
 package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
@@ -189,8 +191,8 @@ local function check_samples()
 end
 
 local function check_analyzer_visibility()
-    local script = [[
-local analyzer = dofile("src/analyzer.lua")
+    local script = SOURCE_LOADER .. [[
+local analyzer = require("luainstaller.analyzer")
 local entries = {
     ["test/student_management_system/main.lua"] = { scripts = 5, libraries = 1 },
     ["test/firebird_web_sql/server.lua"] = { scripts_min = 17, libraries_min = 2 },

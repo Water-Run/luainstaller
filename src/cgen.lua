@@ -11,16 +11,12 @@ Updated:
     2026-06-16
 ]]
 
+local path = require("luainstaller.path")
+
 local M = {}
 
-local function normalizePath(path)
-    return tostring(path or ""):gsub("\\", "/")
-end
-
-local function basename(path)
-    path = normalizePath(path)
-    return path:match("[^/]+$") or path
-end
+local normalizePath = path.normalize
+local basename = path.basename
 
 local function readFile(path)
     local handle = io.open(path, "rb")

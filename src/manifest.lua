@@ -11,89 +11,17 @@ Updated:
     2026-06-16
 ]]
 
+local path = require("luainstaller.path")
+local platform = require("luainstaller.platform")
+
 local M = {}
 
 local HASH_ALGORITHM = "fnv1a32"
 
-local function normalizePath(path)
-    path = tostring(path or ""):gsub("\\", "/")
-    local prefix = ""
-    if path:match("^//") then
-        prefix = "//"
-        path = path:sub(3)
-    elseif path:match("^%a:/") then
-        prefix = path:sub(1, 3)
-        path = path:sub(4)
-    elseif path:sub(1, 1) == "/" then
-        prefix = "/"
-        path = path:sub(2)
-    end
-
-    local parts = {}
-    for segment in path:gmatch("[^/]+") do
-        if segment == ".." then
-            if #parts > 0 and parts[#parts] ~= ".." then
-                parts[#parts] = nil
-            elseif prefix == "" then
-                parts[#parts + 1] = ".."
-            end
-        elseif segment ~= "." and segment ~= "" then
-            parts[#parts + 1] = segment
-        end
-    end
-
-    local result = prefix .. table.concat(parts, "/")
-    if result == "" then
-        return "."
-    end
-    return result
-end
-
-local function isAbsolutePath(path)
-    return path:sub(1, 1) == "/" or path:match("^%a:/") ~= nil
-end
-
-local function commandLine(command)
-    if type(io.popen) ~= "function" then
-        return nil
-    end
-    local ok, pipe = pcall(io.popen, command)
-    if not ok or not pipe then
-        return nil
-    end
-    local value = pipe:read("*l")
-    pipe:close()
-    if value and value ~= "" then
-        return value
-    end
-    return nil
-end
-
-local function currentDirectory()
-    local dir = commandLine(package.config:sub(1, 1) == "\\" and "cd" or "pwd")
-    if dir then
-        return normalizePath(dir)
-    end
-    return "."
-end
-
-local function absolutePath(path)
-    path = normalizePath(path)
-    if isAbsolutePath(path) then
-        return path
-    end
-    return normalizePath(currentDirectory() .. "/" .. path)
-end
-
-local function basename(path)
-    path = normalizePath(path)
-    return path:match("[^/]+$") or path
-end
-
-local function dirname(path)
-    path = normalizePath(path)
-    return path:match("^(.+)/[^/]+$") or "."
-end
+local normalizePath = path.normalize
+local absolutePath = path.absolute
+local basename = path.basename
+local dirname = path.dirname
 
 local function readFile(path)
     local handle = io.open(path, "rb")
@@ -153,26 +81,7 @@ local function luaInfo()
 end
 
 local function platformInfo()
-    local sep = package.config:sub(1, 1)
-    local os_name = sep == "\\" and "windows" or "unknown"
-    local arch = "unknown"
-
-    if sep ~= "\\" then
-        local os_value = commandLine("uname -s 2>/dev/null")
-        if os_value then
-            os_name = os_value:lower()
-        end
-
-        local arch_value = commandLine("uname -m 2>/dev/null")
-        if arch_value then
-            arch = arch_value
-        end
-    end
-
-    return {
-        os = os_name,
-        arch = arch,
-    }
+    return platform.detectHost()
 end
 
 local function fileEntry(path, destination_root, entry_dir, preserve_relative)

@@ -16,6 +16,7 @@ Updated:
     2026-02-22
 ]]
 
+local path = require("luainstaller.path")
 
 -- ============================================================
 -- Path Utilities
@@ -59,6 +60,12 @@ local BUILTIN_MODULES = {
 --@const: DEFAULT_MAX_DEPS
 local DEFAULT_MAX_DEPS = 36
 
+local normalizePath = path.normalize
+local resolvePath = path.absolute
+local pathParent = path.dirname
+local pathBasename = path.basename
+local pathExtension = path.extension
+
 
 --@description: Check whether a file exists and is readable
 --@local: true
@@ -71,130 +78,6 @@ local function fileExists(path)
         return true
     end
     return false
-end
-
-
---@description: Determine whether a path is absolute
---@local: true
---@param path: string - Path to test
---@return: boolean - True when the path is absolute
-local function isAbsolutePath(path)
-    if IS_WINDOWS then
-        return path:match("^%a:[/\\]") ~= nil
-    end
-    return path:sub(1, 1) == "/"
-end
-
-
---@description: Obtain the current working directory from the platform shell
---@local: true
---@return: string - Working directory path
-local function getCurrentDirectory()
-    local cmd = IS_WINDOWS and "cd" or "pwd"
-    local pipe = io.popen(cmd)
-    if pipe then
-        local dir = pipe:read("*l")
-        pipe:close()
-        if dir then
-            return dir
-        end
-    end
-    return "."
-end
-
-
---@description: Normalize a path by resolving . and .. and unifying separators
---@local: true
---@param path: string - Raw path string
---@return: string - Normalized path with forward slashes
-local function normalizePath(path)
-    path = path:gsub("\\", "/")
-
-    local prefix = ""
-    if path:match("^//") then
-        prefix = "//"
-        path = path:sub(3)
-    elseif path:match("^%a:/") then
-        prefix = path:sub(1, 3)
-        path = path:sub(4)
-    elseif path:sub(1, 1) == "/" then
-        prefix = "/"
-        path = path:sub(2)
-    end
-
-    local parts = {}
-    for segment in path:gmatch("[^/]+") do
-        if segment == ".." then
-            if #parts > 0 and parts[#parts] ~= ".." then
-                parts[#parts] = nil
-            elseif prefix == "" then
-                parts[#parts + 1] = ".."
-            end
-        elseif segment ~= "." then
-            parts[#parts + 1] = segment
-        end
-    end
-
-    local result = prefix .. table.concat(parts, "/")
-    if result == "" then
-        return "."
-    end
-    return result
-end
-
-
---@description: Resolve a path to an absolute normalized form
---@local: true
---@param path: string - Possibly relative path
---@return: string - Absolute normalized path
-local function resolvePath(path)
-    path = path:gsub("\\", "/")
-    if not isAbsolutePath(path) then
-        local cwd = getCurrentDirectory():gsub("\\", "/")
-        path = cwd .. "/" .. path
-    end
-    return normalizePath(path)
-end
-
-
---@description: Extract the parent directory from a path
---@local: true
---@param path: string - File or directory path
---@return: string - Parent directory path
-local function pathParent(path)
-    path = path:gsub("\\", "/")
-    local parent = path:match("^(.+)/[^/]+$")
-    return parent or "."
-end
-
-
---@description: Extract the filename component from a path
---@local: true
---@param path: string - File path
---@return: string - Filename including extension
-local function pathBasename(path)
-    path = path:gsub("\\", "/")
-    return path:match("[^/]+$") or path
-end
-
-
---@description: Extract the stem (name without extension) from a path
---@local: true
---@param path: string - File path
---@return: string - Filename without extension
-local function pathStem(path)
-    local base = pathBasename(path)
-    return base:match("^(.+)%.[^%.]+$") or base
-end
-
-
---@description: Extract the file extension including the leading dot
---@local: true
---@param path: string - File path
---@return: string|nil - Extension string or nil when absent
-local function pathExtension(path)
-    local base = pathBasename(path)
-    return base:match("(%.[^%.]+)$")
 end
 
 

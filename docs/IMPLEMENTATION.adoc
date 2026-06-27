@@ -151,6 +151,15 @@ rules.
 destination checks.
 |Copying files into the output directory.
 
+|`src/path.lua`
+|Slash-normalized path helpers shared by analysis, manifests, and
+bundle assembly.
+|Running shell commands or touching the filesystem.
+
+|`src/process.lua`
+|Command execution helpers and shell quoting.
+|Path normalization or bundle-specific error policy.
+
 |`src/cgen.lua`
 |Lua bootstrap generation and embedded Lua payload table.
 |Native module copying or C compiler invocation.

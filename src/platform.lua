@@ -11,26 +11,11 @@ Updated:
     2026-06-21
 ]]
 
+local process = require("luainstaller.process")
+
 local M = {}
 
 local PATH_SEP = package.config:sub(1, 1)
-
-local function commandLine(command)
-    if type(io.popen) ~= "function" then
-        return nil
-    end
-    local ok, pipe = pcall(io.popen, command .. " 2>&1", "r")
-    if not ok or not pipe then
-        return nil
-    end
-    local output = pipe:read("*a") or ""
-    pipe:close()
-    return output
-end
-
-local function firstLine(value)
-    return value and value:match("^[^\r\n]+") or nil
-end
 
 function M.detectHost()
     if PATH_SEP == "\\" then
@@ -40,8 +25,8 @@ function M.detectHost()
         }
     end
 
-    local uname_s = firstLine(commandLine("uname -s"))
-    local uname_m = firstLine(commandLine("uname -m"))
+    local uname_s = process.firstLine("uname -s")
+    local uname_m = process.firstLine("uname -m")
     local os_name = "unknown"
     if uname_s == "Linux" then
         os_name = "linux"
