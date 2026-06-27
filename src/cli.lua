@@ -443,6 +443,9 @@ local function renderClassicTrace(result)
     end
     if result.compatibility then
         io.write(string.format("compatibility: %s\n", result.compatibility.summary or "unknown"))
+        for _, note in ipairs(result.compatibility.notes or {}) do
+            io.write(string.format("note: %s\n", note))
+        end
         for _, warning in ipairs(result.compatibility.warnings or {}) do
             io.write(string.format("warning: %s\n", warning))
         end

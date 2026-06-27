@@ -1,0 +1,153 @@
+= Testing Guide
+:toc: macro
+:toclevels: 4
+:sectanchors:
+:sectlinks:
+:icons: font
+
+xref:../README.adoc[Back to README index]
+
+This guide describes the local smoke suite, source-install checks,
+LuaRocks checks, remote platform matrix, sample coverage, and expected
+failures.
+
+toc::[]
+
+== Local Verification
+
+[source,sh]
+----
+luac -p src/*.lua test/smoke_all.lua test/cli_split_smoke.lua
+sh -n tools/install-source.sh
+lua test/smoke_all.lua
+lua test/cli_split_smoke.lua
+----
+
+The smoke runner verifies sample execution, analyzer visibility, API
+contracts, require engines, compatibility diagnostics, manifest safety,
+platform profiles, release safety, CLI contracts, runtime generation,
+onedir bundles, onefile bundles, installed CLI behavior, and source
+install behavior.
+
+== Sample Applications
+
+[cols="1,2,3",options="header"]
+|===
+|Path |Dependency shape |Purpose
+
+|`test/single_file/`
+|Pure Lua, one file per sample.
+|Fast first smoke targets.
+
+|`test/runtime_bundle/`
+|Pure Lua multi-file payload.
+|Runtime searcher, C generator, launcher, onedir, and onefile basics.
+
+|`test/student_management_system/`
+|Lua modules plus `cjson`.
+|Moderate multi-file app with native Lua C module dependency.
+
+|`test/savinglua/`
+|`cjson`, `lsqlite3`, persistent SQLite database.
+|Native module packaging and persistent database arguments.
+
+|`test/firebird_web_sql/`
+|Pegasus, `cjson`, socket modules, optional Firebird/LuaSQL.
+|Web-style app, optional dependencies, and native socket handling.
+
+|`test/ltokei/`
+|Lua modules plus `lfs`.
+|CLI-style code statistics app and filesystem native module handling.
+|===
+
+== Source Install Checks
+
+[source,sh]
+----
+rm -rf /tmp/luainstaller-source-prefix
+sh tools/install-source.sh --prefix /tmp/luainstaller-source-prefix
+/tmp/luainstaller-source-prefix/bin/luai -v
+/tmp/luainstaller-source-prefix/bin/luainstaller version
+/tmp/luainstaller-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
+----
+
+== LuaRocks Check
+
+[source,sh]
+----
+rm -rf /tmp/luainstaller-rocktree
+luarocks make --tree /tmp/luainstaller-rocktree luainstaller-1.0.0-1.rockspec
+----
+
+== Remote Matrix
+
+[cols="1,2,3",options="header"]
+|===
+|Script |Default target |Coverage
+
+|`tools/remote-test-linux.sh`
+|`192.168.10.40` Linux x86_64 and `192.168.5.19` Linux aarch64.
+|x86_64 full smoke plus clean-runtime source-installed bundle. aarch64
+source install and analysis; bundle may pass or fail with expected
+toolchain error.
+
+|`tools/remote-test-macos.sh`
+|`yymac06` macOS arm64.
+|Temporary user-local Lua/LuaRocks, source install, pure Lua and native
+sample onedir bundles, pure Lua and student onefile bundles, clean
+`env -i` execution.
+
+|`tools/remote-test-windows.sh`
+|`192.168.69.130` Windows 10 x64, built from Linux with MinGW.
+|Windows Lua 5.4.8 build, selected native DLL builds, Windows onedir
+bundles, pure Lua and student onefile bundles, Wine and target-host
+execution.
+|===
+
+Windows remote verification requires:
+
+[source,sh]
+----
+WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
+----
+
+Set `SSH_OPTS` to override default lab SSH options.
+
+== Expected Failures
+
+[cols="1,2,2",options="header"]
+|===
+|Case |Accepted result |Reason
+
+|Linux aarch64 host without Lua headers or Lua `pkg-config` data
+|`ToolchainError` from bundle build.
+|Analysis can run without a compiler, but C launcher compilation cannot.
+
+|Optional Firebird/LuaSQL module missing
+|Trace classifies it as optional missing.
+|The sample probes optional support through guarded require behavior.
+
+|Local smoke host without optional tools
+|Specific compile or inspection sections may be skipped.
+|The smoke runner checks command availability before deeper toolchain
+checks.
+|===
+
+== Documentation Checks
+
+[source,sh]
+----
+find docs -maxdepth 1 -type f -name '*.adoc' | wc -l
+rg -n 'Back to README index' docs/*.adoc
+rg -n 'xref:|link:' README.adoc docs/*.adoc test/README.adoc
+----
+
+== Related Documents
+
+* xref:USAGE.adoc[Usage Guide]
+* xref:IMPLEMENTATION.adoc[Implementation Guide]
+* xref:BUNDLING.adoc[Bundling Guide]
+* xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
+* xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
+
+xref:../README.adoc[Back to README index]

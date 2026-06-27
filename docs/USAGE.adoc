@@ -1,0 +1,302 @@
+= Usage Guide
+:toc: macro
+:toclevels: 4
+:sectanchors:
+:sectlinks:
+:icons: font
+
+xref:../README.adoc[Back to README index]
+
+This guide covers everyday use of `luainstaller`: command-line
+workflows, option behavior, Lua API calls, logs, and practical choices
+when packaging Lua applications.
+
+toc::[]
+
+== Workflow
+
+[source,text]
+----
+source tree
+  -> analyze require graph
+  -> trace resolution decisions
+  -> build onedir
+  -> inspect manifest/native files
+  -> optionally build onefile
+----
+
+Use analyze before build when you want to see what will be packaged. Use
+trace when a dependency decision needs explanation. Build `--dir` first
+when native modules or target compatibility are uncertain.
+
+== Command Surfaces
+
+`luai` and `luainstaller` intentionally have different syntax over the
+same Lua API.
+
+[cols="1,2,2,3",options="header"]
+|===
+|Action |`luai` |`luainstaller` |Notes
+
+|Help
+|`luai -h`
+|`luainstaller help`
+|Each command describes only its own accepted syntax.
+
+|Version
+|`luai -v`
+|`luainstaller version`
+|`luai` prints a compact banner; `luainstaller` prints a fuller one.
+
+|Analyze
+|`luai -a <entry.lua>`
+|`luainstaller analyze <entry.lua>`
+|Find Lua sources and native Lua modules.
+
+|Trace
+|`luai -t <entry.lua>`
+|`luainstaller trace <entry.lua>`
+|Show require-resolution decisions and compatibility notes.
+
+|Build
+|`luai -b <entry.lua>`
+|`luainstaller build <entry.lua>`
+|Build `--dir` or `--file` bundles.
+
+|Logs
+|Not exposed
+|`luainstaller logs`
+|Operational log review belongs to the full-word CLI.
+
+|Legacy engines
+|Not exposed
+|`luainstaller engines`
+|Retained for auditing older workflow names.
+|===
+
+[IMPORTANT]
+====
+Command forms do not cross over. `luai -b app.lua` and
+`luainstaller build app.lua` are valid. `luai build app.lua` and
+`luainstaller -b app.lua` are invalid.
+====
+
+== Fast Paths
+
+Pure Lua bundle:
+
+[source,sh]
+----
+luai -a test/runtime_bundle/main.lua --max-deps 120
+luai -b --dir test/runtime_bundle/main.lua -o build/runtime-demo --max-deps 120
+build/runtime-demo/runtime-demo Ada
+----
+
+Native module bundle:
+
+[source,sh]
+----
+luainstaller trace test/student_management_system/main.lua --max-deps 250
+luainstaller build --dir test/student_management_system/main.lua \
+  -o build/student-manager \
+  --max-deps 250
+build/student-manager/student-manager --data /tmp/students.json seed
+find build/student-manager/.luai/native -maxdepth 3 -type f | sort
+----
+
+Onefile after onedir validation:
+
+[source,sh]
+----
+luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile --max-deps 120
+build/runtime-onefile Ada
+----
+
+== Option Matrix
+
+[cols="1,1,3",options="header"]
+|===
+|Option |Applies to |Meaning
+
+|`--dir`, `--onedir`
+|Build
+|Select directory bundle mode. This is the default.
+
+|`--file`, `--onefile`
+|Build
+|Select self-extracting onefile mode.
+
+|`-o PATH`, `--out PATH`
+|Build
+|Output directory for `--dir`; output executable path for `--file`.
+
+|`--include PATH`
+|Analyze, trace, build
+|Manually include an extra Lua source file. Repeatable.
+
+|`--exclude PATH`
+|Analyze, trace, build
+|Exclude by exact path, basename, or path suffix. Repeatable; excludes
+win over includes.
+
+|`--target-os OS`
+|Trace, build
+|Select target profile: `linux`, `macos`, or `windows`.
+
+|`--lua-prefix PATH`
+|Trace, build
+|Lua headers/runtime prefix for macOS and Windows profiles.
+
+|`-r ENGINE`, `--require-engine ENGINE`
+|Analyze, trace, build
+|Dependency discovery engine: `static`, `manual`, or `runtime`.
+
+|`--no-depscan`
+|Analyze, trace, build
+|Disable automatic dependency scanning; equivalent to manual mode.
+
+|`--max-deps N`
+|Analyze, trace, build
+|Maximum dependency count. Default is `36`.
+
+|`--verbose`
+|Analyze, build
+|Print additional details where supported.
+
+|`--`
+|Runtime discovery
+|Stop parsing `luai` options and pass remaining values to the
+build-time runtime trace run.
+|===
+
+== Choosing Dependency Discovery
+
+[cols="1,2,3",options="header"]
+|===
+|Engine |Command |Use when
+
+|`static`
+|`luai -b app/main.lua`
+|Requires use literal names and static analysis can see the code paths.
+
+|`runtime`
+|`luai -b app/main.lua -r runtime -- profile-a`
+|Requires are dynamic, but one representative build-time run can load
+the modules you need.
+
+|`manual`
+|`luai -b app/main.lua --no-depscan --include app/plugin.lua`
+|You want full control or need to bypass analyzer limits.
+|===
+
+[WARNING]
+====
+`-r runtime` executes the entry program once during analysis. It only
+records `require` calls reached by that run.
+====
+
+== Inspecting Output
+
+Load the manifest:
+
+[source,sh]
+----
+lua -e 'local m = dofile("build/student-manager/.luai/manifest.lua"); print(m.output.mode); print(#m.modules.lua); print(#m.modules.native)'
+----
+
+Summarize trace records:
+
+[source,sh]
+----
+lua - <<'LUA'
+local m = dofile("build/student-manager/.luai/manifest.lua")
+for _, item in ipairs(m.trace or {}) do
+  print(item.classification, item.requested, item.reason, item.selected_path or "")
+end
+LUA
+----
+
+Clean environment run on POSIX:
+
+[source,sh]
+----
+env -i PATH=/usr/bin:/bin build/runtime-demo/runtime-demo clean
+----
+
+== Logs
+
+[source,sh]
+----
+luainstaller logs
+luainstaller logs --limit 20
+luainstaller logs --level error
+----
+
+== Lua API
+
+Load:
+
+[source,lua]
+----
+local luainstaller = require("luainstaller")
+----
+
+Public calls return structured result tables. Normal user errors do not
+need to be caught with `pcall`.
+
+[source,lua]
+----
+local result = luainstaller.analyze({
+  entry = "test/student_management_system/main.lua",
+  max_deps = 250,
+})
+
+if result.ok then
+  print(#result.dependencies.scripts, #result.dependencies.libraries)
+else
+  io.stderr:write(result.error.type .. ": " .. result.error.message .. "\n")
+end
+----
+
+API summary:
+
+[cols="1,3",options="header"]
+|===
+|Function |Returns
+
+|`luainstaller.analyze(opts)`
+|`action = "analyze"`, dependency lists, and trace records.
+
+|`luainstaller.trace(opts)`
+|Analyzer trace plus compatibility diagnostics.
+
+|`luainstaller.compatibility(opts)`
+|Compatibility summary, host/target profile, Lua ABI, notes, warnings.
+
+|`luainstaller.bundle(opts)`
+|`action = "bundle"`, mode, executable path, and manifest table.
+
+|`luainstaller.getLogs(opts)`
+|Filtered persistent log entries.
+
+|`luainstaller.clearLogs()`
+|Clears persistent log entries.
+
+|`luainstaller.getEngines()`
+|Legacy engine names kept for compatibility.
+|===
+
+Common error types include `InvalidOptionsError`,
+`ScriptNotFoundError`, `DynamicRequireError`, `ModuleNotFoundError`,
+`DependencyLimitExceededError`, `DuplicateModuleError`,
+`InvalidOutputError`, `ToolchainError`, `CompilationFailedError`,
+`LuaRuntimeNotFoundError`, and `RequireEngineError`.
+
+== Related Documents
+
+* xref:IMPLEMENTATION.adoc[Implementation Guide]
+* xref:BUNDLING.adoc[Bundling Guide]
+* xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
+* xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
+
+xref:../README.adoc[Back to README index]

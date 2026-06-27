@@ -634,9 +634,9 @@ print(result.executable)
     assert_contains(test_readme, "WINDOWS_PASSWORD=...")
     assert_contains(test_readme, "tools/remote-test-windows.sh")
 
-    local test_matrix = read_file("docs/CROSS-PLATFORM-TEST-MATRIX.adoc")
-    assert_contains(test_matrix, "WINDOWS_PASSWORD=...")
-    assert_contains(test_matrix, "tools/remote-test-windows.sh")
+    local testing_guide = read_file("docs/TESTING.adoc")
+    assert_contains(testing_guide, "WINDOWS_PASSWORD=...")
+    assert_contains(testing_guide, "tools/remote-test-windows.sh")
 
     remove_tree(root)
     print("release safety contract ok")
