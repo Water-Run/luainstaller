@@ -160,6 +160,10 @@ bundle assembly.
 |Command execution helpers and shell quoting.
 |Path normalization or bundle-specific error policy.
 
+|`src/result.lua`
+|Shared construction for structured error result tables.
+|Choosing subsystem-specific error types or recovery behavior.
+
 |`src/cgen.lua`
 |Lua bootstrap generation and embedded Lua payload table.
 |Native module copying or C compiler invocation.

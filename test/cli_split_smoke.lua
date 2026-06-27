@@ -17,6 +17,7 @@ package.preload["luainstaller.manifest"] = function() return dofile("src/manifes
 package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
 package.preload["luainstaller.process"] = function() return dofile("src/process.lua") end
 package.preload["luainstaller.path"] = function() return dofile("src/path.lua") end
+package.preload["luainstaller.result"] = function() return dofile("src/result.lua") end
 package.preload["luainstaller.platform"] = function() return dofile("src/platform.lua") end
 package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
 package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end

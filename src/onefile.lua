@@ -15,6 +15,7 @@ local bundler = require("luainstaller.bundler")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
+local result = require("luainstaller.result")
 
 local M = {}
 
@@ -26,22 +27,7 @@ local basename = path.basename
 local stem = path.stem
 local commandOutput = process.output
 local shellQuote = process.shellQuote
-
-local function makeError(err_type, message, details)
-    local err = {
-        type = err_type,
-        message = message,
-    }
-    if details then
-        for k, v in pairs(details) do
-            err[k] = v
-        end
-    end
-    return {
-        ok = false,
-        error = err,
-    }
-end
+local makeError = result.error
 
 local function ensureDirectory(path)
     local ok, output = commandOutput("mkdir -p " .. shellQuote(path))

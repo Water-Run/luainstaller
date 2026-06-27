@@ -15,6 +15,7 @@ local launcher = require("luainstaller.launcher")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
+local result = require("luainstaller.result")
 
 local M = {}
 
@@ -29,28 +30,10 @@ local basename = path.basename
 local stem = path.stem
 local commandOutput = process.output
 local shellQuote = process.shellQuote
-
-local function makeError(err_type, message, details)
-    local err = {
-        type = err_type,
-        message = message,
-    }
-    if details then
-        for k, v in pairs(details) do
-            err[k] = v
-        end
-    end
-    return {
-        ok = false,
-        error = err,
-    }
-end
+local makeError = result.error
 
 local function fromThrownError(err)
-    if type(err) == "table" then
-        return makeError(err.type or "LauncherGenerationError", err.message or tostring(err), err)
-    end
-    return makeError("LauncherGenerationError", tostring(err))
+    return result.fromThrown(err, "LauncherGenerationError")
 end
 
 local function ensureDirectory(path)

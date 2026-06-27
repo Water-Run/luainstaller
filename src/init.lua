@@ -20,6 +20,7 @@ local logger   = require("luainstaller.logger")
 local manifest = require("luainstaller.manifest")
 local onefile  = require("luainstaller.onefile")
 local discovery = require("luainstaller.discovery")
+local result = require("luainstaller.result")
 
 
 --[[
@@ -98,21 +99,7 @@ M.ErrorTypes = {
 }
 
 
-local function makeError(err_type, message, details)
-    local err = {
-        type    = err_type,
-        message = message,
-    }
-    if details then
-        for k, v in pairs(details) do
-            err[k] = v
-        end
-    end
-    return {
-        ok    = false,
-        error = err,
-    }
-end
+local makeError = result.error
 
 local function fileExists(path)
     local handle = io.open(path, "rb")

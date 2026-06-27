@@ -14,6 +14,7 @@ Updated:
 local analyzer = require("luainstaller.analyzer")
 local path = require("luainstaller.path")
 local process = require("luainstaller.process")
+local result = require("luainstaller.result")
 
 local M = {}
 
@@ -25,28 +26,10 @@ local dirname = path.dirname
 local basename = path.basename
 local commandOutput = process.output
 local shellQuote = process.shellQuote
-
-local function makeError(err_type, message, details)
-    local err = {
-        type = err_type,
-        message = message,
-    }
-    if details then
-        for k, v in pairs(details) do
-            err[k] = v
-        end
-    end
-    return {
-        ok = false,
-        error = err,
-    }
-end
+local makeError = result.error
 
 local function fromThrownError(err)
-    if type(err) == "table" then
-        return makeError(err.type or "LuaInstallerError", err.message or tostring(err), err)
-    end
-    return makeError("LuaInstallerError", tostring(err))
+    return result.fromThrown(err)
 end
 
 local function fileExists(path)
