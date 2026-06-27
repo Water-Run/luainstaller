@@ -5,15 +5,48 @@
 :sectlinks:
 :icons: font
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]
 
 Use this guide when analysis, bundling, or a generated executable does
 not behave as expected. Work from the first diagnostic pass before
 changing options; most failures become clearer once you know whether the
 problem is dependency discovery, bundle assembly, or runtime loading.
 
+[#troubleshooting-page-index]
+== Page Index
+
+[cols="1,3",options="header"]
+|===
+|Section |Use it for
+
+|xref:#troubleshooting-first-pass[First diagnostic pass]
+|The first commands to run before changing options.
+
+|xref:#troubleshooting-cli[CLI syntax problems]
+|Distinguishing compact and full-word command forms.
+
+|xref:#troubleshooting-common-errors[Common errors]
+|Mapping error names to likely causes and next actions.
+
+|xref:#troubleshooting-discovery[Dependency discovery problems]
+|Dynamic require, runtime discovery, and manual includes.
+
+|xref:#troubleshooting-toolchain[Toolchain problems]
+|Linux, macOS, and Windows compiler/runtime checks.
+
+|xref:#troubleshooting-native[Native module loader problems]
+|Missing `.so`, `.dylib`, `.dll`, ABI, and external library issues.
+
+|xref:#troubleshooting-onefile[Onefile cache problems]
+|Extraction roots and cache reuse.
+
+|xref:#troubleshooting-issue-data[Issue data]
+|What to include when reporting a failure.
+|===
+
 toc::[]
 
+[#troubleshooting-first-pass]
 == First Diagnostic Pass
 
 Run the source program directly:
@@ -55,6 +88,7 @@ For native loader issues, inspect the executable and the native modules:
 files; use a DLL dependency inspector when needed.
 |===
 
+[#troubleshooting-cli]
 == CLI Syntax Problems
 
 The two command surfaces are intentionally separate.
@@ -89,6 +123,7 @@ luai -h
 luainstaller help
 ----
 
+[#troubleshooting-common-errors]
 == Common Errors
 
 [cols="1,2,3",options="header"]
@@ -150,6 +185,7 @@ debugging extraction.
 output yourself.
 |===
 
+[#troubleshooting-discovery]
 == Dependency Discovery Problems
 
 Static discovery works best when module names are literal:
@@ -191,6 +227,7 @@ If a module is optional, wrap it with `pcall(require, "name")` so the
 trace can record it as optional instead of turning it into a hard
 failure.
 
+[#troubleshooting-toolchain]
 == Toolchain Problems
 
 Analysis and trace can run without a compiler. Building bundles cannot.
@@ -224,6 +261,7 @@ test -f "$LUAI_LUA_PREFIX/bin/lua54.dll" || test -f "$LUAI_LUA_PREFIX/lua54.dll"
 Do not point a Windows build at a Linux Lua prefix. The headers and DLL
 must belong to the Windows Lua runtime you intend to ship.
 
+[#troubleshooting-native]
 == Native Module Loader Problems
 
 Native Lua C modules must be real files. They cannot be loaded directly
@@ -255,6 +293,7 @@ Common causes are missing external libraries, a Lua ABI mismatch,
 architecture mismatch, or a module built for a different compiler/runtime
 family.
 
+[#troubleshooting-onefile]
 == Onefile Cache Problems
 
 Onefile extraction roots:
@@ -279,6 +318,7 @@ If a onefile fails:
 . Compare `.luai/manifest.lua` in the directory bundle and extracted
    bundle.
 
+[#troubleshooting-output-safety]
 == Output Safety Problems
 
 `InvalidOutputError` is usually protective, not mysterious. The bundler
@@ -296,6 +336,7 @@ If you intentionally want to replace an old generated output, remove it
 yourself after inspecting it. Do not rely on the tool to decide whether
 unknown files are disposable.
 
+[#troubleshooting-logs]
 == Logs
 
 Read recent errors:
@@ -308,6 +349,7 @@ luainstaller logs --limit 20 --level error
 Logs help recover recent error details. The bundle manifest is still the
 source of truth for a generated artifact.
 
+[#troubleshooting-issue-data]
 == Issue Data
 
 Include the following when reporting a failure:
@@ -331,4 +373,4 @@ Include the following when reporting a failure:
 * xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
 * xref:TESTING.adoc[Testing Guide]
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]

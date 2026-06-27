@@ -5,15 +5,48 @@
 :sectlinks:
 :icons: font
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]
 
 This guide explains the platform model behind `luainstaller`: what a
 target profile means, how native Lua C modules are copied, which
 external dependencies remain outside the bundle, and which portability
 claims the project intentionally does not make.
 
+[#platforms-page-index]
+== Page Index
+
+[cols="1,3",options="header"]
+|===
+|Section |Use it for
+
+|xref:#platforms-compatibility[Compatibility model]
+|The exact same-environment runtime promise.
+
+|xref:#platforms-targets[Target profiles]
+|Linux, macOS, and Windows prerequisites and runtime strategy.
+
+|xref:#platforms-linux[Linux profile]
+|Shared-Lua launcher behavior and `pkg-config` requirements.
+
+|xref:#platforms-macos[macOS profile]
+|Static Lua prefix requirements and macOS-specific boundaries.
+
+|xref:#platforms-windows[Windows profile]
+|Linux-to-Windows MinGW build requirements.
+
+|xref:#platforms-native[Native Lua C modules]
+|How Lua C modules are copied and why ABI matching matters.
+
+|xref:#platforms-external[External library boundary]
+|Dependencies that remain outside Lua module copying.
+
+|xref:#platforms-limits[Boundaries and non-goals]
+|What the project intentionally does not promise.
+|===
+
 toc::[]
 
+[#platforms-compatibility]
 == Compatibility Model
 
 The core rule is simple but strict:
@@ -30,6 +63,7 @@ Lua runtime libraries, libc families, compiler runtimes, and third-party
 shared libraries still have platform rules that `luainstaller` does not
 rewrite.
 
+[#platforms-targets]
 == Target Profiles
 
 [cols="1,2,3,3",options="header"]
@@ -86,6 +120,7 @@ Environment variables:
 |Default source install prefix and Lua command.
 |===
 
+[#platforms-linux]
 == Linux Profile
 
 Linux onedir output uses a shared-Lua launcher. The build relies on the
@@ -113,6 +148,7 @@ Linux portability remains ABI-bound. A bundle built against glibc is not
 made musl-compatible by packaging. A native module built for one
 architecture is not translated to another architecture.
 
+[#platforms-macos]
 == macOS Profile
 
 The macOS profile expects a Lua prefix with a static Lua library:
@@ -128,6 +164,7 @@ but native modules still have their own loader dependencies. Frameworks,
 `.dylib` dependencies, deployment targets, codesigning, notarization,
 and `.app` bundle layout are outside the current scope.
 
+[#platforms-windows]
 == Windows Profile
 
 The Windows profile is currently built from Linux with MinGW. The Lua
@@ -143,6 +180,7 @@ test -f "$LUAI_LUA_PREFIX/bin/lua54.dll" || test -f "$LUAI_LUA_PREFIX/lua54.dll"
 Native Lua C modules must also be Windows builds. Cross-compiling the
 launcher does not turn Linux `.so` files into Windows `.dll` files.
 
+[#platforms-native]
 == Native Lua C Modules
 
 Lua C modules are files loaded by Lua's native loader:
@@ -171,6 +209,7 @@ architecture, Lua ABI, and compiler/runtime family. `luainstaller`
 preserves and lays out native modules; it does not rebuild them for a
 new platform.
 
+[#platforms-external]
 == External Library Boundary
 
 A native Lua module can depend on libraries that are not Lua modules:
@@ -196,7 +235,8 @@ runtime files. It does not automatically compute and copy the full
 external shared-library dependency closure of every native module.
 ====
 
-== Current Verification Matrix
+[#platforms-verification]
+== Verified Matrix
 
 The current local and lab verification loop covers:
 
@@ -214,7 +254,8 @@ The matrix is evidence for the sample set, not a promise that arbitrary
 native packages or OS distributions will work without target-specific
 inspection.
 
-== Explicit Non-Goals
+[#platforms-limits]
+== Boundaries and Non-Goals
 
 Not promised:
 
@@ -228,6 +269,7 @@ Not promised:
 * codesigning, notarization, app bundles, MSI/PKG/DEB/RPM installers;
 * sandboxing or permission isolation.
 
+[#platforms-security]
 == Security Notes
 
 `luainstaller` is a packaging tool, not a sandbox:
@@ -246,4 +288,4 @@ Not promised:
 * xref:IMPLEMENTATION.adoc[Implementation Guide]
 * xref:TESTING.adoc[Testing Guide]
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]

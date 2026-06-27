@@ -5,15 +5,48 @@
 :sectlinks:
 :icons: font
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]
 
 This guide is for maintainers and advanced users who need to understand
 how `luainstaller` turns an entry script into an executable bundle. It
 describes the data flow, module boundaries, internal contracts, and the
 failure style used by the public API.
 
+[#implementation-page-index]
+== Page Index
+
+[cols="1,3",options="header"]
+|===
+|Section |Use it for
+
+|xref:#implementation-flow[End-to-end flow]
+|The full path from CLI/API input to onedir or onefile output.
+
+|xref:#implementation-entry-points[Public entry points]
+|Public API responsibilities and result shape.
+
+|xref:#implementation-boundaries[Module boundaries]
+|Which source file owns which part of the pipeline.
+
+|xref:#implementation-discovery[Dependency discovery]
+|Static analyzer scope and trace-record shape.
+
+|xref:#implementation-manifest[Manifest contract]
+|Schema, invariants, and generated-output marker.
+
+|xref:#implementation-runtime[Runtime generation]
+|Lua bootstrap generation and C launcher startup behavior.
+
+|xref:#implementation-errors[Error and logging strategy]
+|Public error names and persistent log behavior.
+
+|xref:#implementation-maintainer[Maintainer checklist]
+|Files to update when changing user-facing contracts.
+|===
+
 toc::[]
 
+[#implementation-flow]
 == End-to-End Flow
 
 Every public operation starts from an entry script and a normalized
@@ -38,6 +71,7 @@ assembly are separate phases. A dependency plan says what should be
 packaged. The bundler decides how those files are laid out for a target
 profile.
 
+[#implementation-entry-points]
 == Public Entry Points
 
 [cols="1,3",options="header"]
@@ -85,6 +119,7 @@ Internal modules may throw structured tables while doing file or
 compiler work. `src/init.lua` converts those into public result tables
 at the API boundary.
 
+[#implementation-boundaries]
 == Module Boundaries
 
 [cols="1,2,3",options="header"]
@@ -148,6 +183,7 @@ runtime paths, Lua prefix.
 |The generated bundle manifest.
 |===
 
+[#implementation-discovery]
 == Dependency Discovery
 
 The default static engine is a require-focused lexer, not a full Lua
@@ -190,6 +226,7 @@ Important fields include `requiring_file`, `source_line`, `requested`,
 `optional`, `candidates`, `selected_path`, `selected_type`,
 `classification`, and `reason`.
 
+[#implementation-engines]
 == Discovery Engines
 
 [cols="1,3",options="header"]
@@ -215,6 +252,7 @@ executed during the build-time run. If an application loads modules
 behind different subcommands, the caller must pass representative
 arguments after `--` or add manual includes.
 
+[#implementation-manifest]
 == Manifest Contract
 
 `.luai/manifest.lua` is executable Lua data so users can inspect it with
@@ -259,6 +297,7 @@ Manifest invariants:
 * file hashes use the manifest's declared `fnv1a32` algorithm;
 * trace and compatibility data stay with the generated artifact.
 
+[#implementation-runtime]
 == Runtime Generation
 
 The generated executable embeds Lua source in a bootstrap rather than
@@ -291,6 +330,7 @@ launcher, installs a bundled Lua source searcher at searcher position 2,
 strips BOM and shebang lines from bundled source, and runs the entry
 chunk.
 
+[#implementation-dispatch]
 == Onedir and Onefile Dispatch
 
 `luainstaller.bundle(opts)` always builds a dependency plan and manifest
@@ -307,6 +347,7 @@ embeds that staged file set into an extractor, and compiles the outer
 executable. This is why onefile behavior should be debugged by first
 building the corresponding onedir bundle.
 
+[#implementation-errors]
 == Error and Logging Strategy
 
 The public error names are part of the user-facing contract. Tests check
@@ -362,6 +403,7 @@ details. The newest 1000 entries are kept. Logs help diagnose recent
 operations; the manifest remains the authoritative record for a
 specific bundle.
 
+[#implementation-maintainer]
 == Maintainer Checklist
 
 When changing implementation behavior, update the matching user-facing
@@ -385,4 +427,4 @@ contract:
 * xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
 * xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]

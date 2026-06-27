@@ -13,7 +13,64 @@ self-extracting onefile wrapper.
 
 toc::[]
 
-== Project Status
+[#documentation-index]
+== Documentation Index
+
+The documentation is intentionally split into six guides. Start with
+the usage guide when packaging an application. Use the implementation
+and bundling guides when changing internals. Use the platform, testing,
+and troubleshooting guides when native modules, target profiles, or
+failure diagnosis matter.
+
+[cols="1,2,4",options="header"]
+|===
+|Need |Start here |Useful sections
+
+|Package an application
+|xref:docs/USAGE.adoc[Usage Guide]
+|xref:docs/USAGE.adoc#usage-session[Normal packaging session],
+xref:docs/USAGE.adoc#usage-first-bundle[first bundle],
+xref:docs/USAGE.adoc#usage-native-bundle[native module bundle],
+xref:docs/USAGE.adoc#usage-options[option reference].
+
+|Understand generated output
+|xref:docs/BUNDLING.adoc[Bundling Guide]
+|xref:docs/BUNDLING.adoc#bundling-onedir-layout[onedir layout],
+xref:docs/BUNDLING.adoc#bundling-launcher-startup[launcher startup],
+xref:docs/BUNDLING.adoc#bundling-onefile-runtime[onefile runtime],
+xref:docs/BUNDLING.adoc#bundling-output-safety[output safety].
+
+|Work on implementation
+|xref:docs/IMPLEMENTATION.adoc[Implementation Guide]
+|xref:docs/IMPLEMENTATION.adoc#implementation-flow[end-to-end flow],
+xref:docs/IMPLEMENTATION.adoc#implementation-boundaries[module boundaries],
+xref:docs/IMPLEMENTATION.adoc#implementation-manifest[manifest contract],
+xref:docs/IMPLEMENTATION.adoc#implementation-errors[errors and logging].
+
+|Choose or debug target platforms
+|xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
+|xref:docs/PLATFORMS-NATIVE-LIMITS.adoc#platforms-compatibility[compatibility model],
+xref:docs/PLATFORMS-NATIVE-LIMITS.adoc#platforms-targets[target profiles],
+xref:docs/PLATFORMS-NATIVE-LIMITS.adoc#platforms-native[native modules],
+xref:docs/PLATFORMS-NATIVE-LIMITS.adoc#platforms-limits[explicit limits].
+
+|Verify changes
+|xref:docs/TESTING.adoc[Testing Guide]
+|xref:docs/TESTING.adoc#testing-tiers[test tiers],
+xref:docs/TESTING.adoc#testing-smoke[full smoke coverage],
+xref:docs/TESTING.adoc#testing-remote[remote matrix],
+xref:docs/TESTING.adoc#testing-release[release checklist].
+
+|Diagnose failures
+|xref:docs/TROUBLESHOOTING.adoc[Troubleshooting Guide]
+|xref:docs/TROUBLESHOOTING.adoc#troubleshooting-first-pass[first diagnostic pass],
+xref:docs/TROUBLESHOOTING.adoc#troubleshooting-common-errors[common errors],
+xref:docs/TROUBLESHOOTING.adoc#troubleshooting-native[native loader failures],
+xref:docs/TROUBLESHOOTING.adoc#troubleshooting-issue-data[issue data].
+|===
+
+[#overview]
+== Overview
 
 [IMPORTANT]
 ====
@@ -23,9 +80,14 @@ same system ABI, and same Lua ABI*. Bundles can run without a separate
 external shared libraries still have to match that environment.
 ====
 
+`luainstaller` is aimed at Lua applications that need a repeatable
+same-environment executable, not a universal cross-platform binary. The
+normal workflow is to inspect dependencies, build an onedir bundle,
+verify the generated layout, and only then build a onefile wrapper.
+
 [cols="1,3",options="header"]
 |===
-|Area |Current behavior
+|Area |Behavior
 
 |Primary use
 |Ship Lua applications to machines that match the selected build
@@ -57,6 +119,7 @@ external shared-library closure, no-extract native module loading,
 codesigning, and native installers.
 |===
 
+[#quick-start]
 == Quick Start
 
 Install with LuaRocks:
@@ -91,8 +154,7 @@ luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile --max-deps 
 build/runtime-onefile world
 ----
 
-The short version is useful in scripts. The full-word version says the
-same thing more explicitly:
+The same workflow through the full-word CLI:
 
 [source,sh]
 ----
@@ -101,48 +163,8 @@ luainstaller trace test/runtime_bundle/main.lua --max-deps 120
 luainstaller build --dir test/runtime_bundle/main.lua -o build/runtime-demo --max-deps 120
 ----
 
-== Documentation
-
-Read the documents in this order when learning the project. Use the
-later entries as references once the basic workflow is clear.
-
-[cols="1,2,3",options="header"]
-|===
-|Question |Document |What it answers
-
-|How do I use it without reading the internals?
-|xref:docs/USAGE.adoc[Usage Guide]
-|A normal packaging session, the split CLI syntax, option behavior,
-dependency discovery choices, logs, and Lua API calls.
-
-|How does the implementation move data through the system?
-|xref:docs/IMPLEMENTATION.adoc[Implementation Guide]
-|CLI/API flow, require discovery, manifest generation, launcher
-generation, bundle assembly, public errors, and module boundaries.
-
-|What exactly is inside a generated bundle?
-|xref:docs/BUNDLING.adoc[Bundling Guide]
-|Onedir layout, C launcher startup, bundled Lua searchers, native module
-paths, onefile extraction, cache reuse, and output safety.
-
-|Which platforms and native modules are realistic?
-|xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
-|Linux, macOS, and Windows profile requirements; native Lua C module
-rules; external shared-library boundaries; verified matrix; non-goals.
-
-|How should changes be tested?
-|xref:docs/TESTING.adoc[Testing Guide]
-|Local smoke checks, source install checks, LuaRocks checks, remote
-matrix scripts, sample coverage, expected failures, and documentation
-checks.
-
-|What should I do when analysis or a bundle fails?
-|xref:docs/TROUBLESHOOTING.adoc[Troubleshooting Guide]
-|Diagnosis order, common error types, dynamic require issues, toolchain
-problems, native loader failures, onefile cache behavior, and issue data.
-|===
-
-== Command Surfaces at a Glance
+[#commands]
+== Command Surfaces
 
 [cols="1,2,2",options="header"]
 |===
@@ -181,7 +203,8 @@ Command forms intentionally do not cross over. `luai build app.lua` and
 `luainstaller -b app.lua` are rejected so scripts can depend on a small
 stable compact surface while human-facing commands remain explicit.
 
-== Repository Map
+[#repository-layout]
+== Repository Layout
 
 [cols="1,3",options="header"]
 |===
@@ -193,8 +216,8 @@ manifest creation, launcher generation, bundling, onefile wrapping,
 logging, and CLI rendering.
 
 |`docs/`
-|The six documentation pages linked above. Each page links back to this
-README index at the top and bottom.
+|The six documentation pages linked from the documentation index. Each
+page links back to the index near the top and at the end.
 
 |`test/`
 |Sample applications and smoke tests that exercise pure Lua, native
@@ -210,7 +233,8 @@ scripts.
 `luainstaller(1)`.
 |===
 
-== Project Note
+[#history]
+== History
 
 `luainstaller` used to be a Python library that could bundle only pure
 Lua scripts. The current Lua implementation focuses on dependency

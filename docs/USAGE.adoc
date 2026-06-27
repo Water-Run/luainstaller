@@ -5,14 +5,48 @@
 :sectlinks:
 :icons: font
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]
 
 This is the practical guide for using `luainstaller`. It starts with the
 workflow you should use for a new Lua project, then covers the CLI,
 dependency discovery modes, output inspection, logs, and the Lua API.
 
+[#usage-page-index]
+== Page Index
+
+[cols="1,3",options="header"]
+|===
+|Section |Use it for
+
+|xref:#usage-session[Normal packaging session]
+|The recommended order for analysis, tracing, onedir, inspection, and
+onefile.
+
+|xref:#usage-cli-surfaces[Compact and full-word CLIs]
+|The split `luai` / `luainstaller` command grammar.
+
+|xref:#usage-first-bundle[First bundle]
+|A small pure-Lua bundle with expected output.
+
+|xref:#usage-native-bundle[Native module bundle]
+|A bundle that includes Lua C modules and `.luai/native/` inspection.
+
+|xref:#usage-options[Option reference]
+|Supported flags and what each one changes.
+
+|xref:#usage-discovery[Choosing a discovery engine]
+|When to use static, runtime, or manual discovery.
+
+|xref:#usage-inspection[Inspecting a bundle]
+|Manifest and trace-record inspection commands.
+
+|xref:#usage-api[Lua API]
+|Public functions and structured error handling.
+|===
+
 toc::[]
 
+[#usage-session]
 == A Normal Packaging Session
 
 Start from a Lua program that already runs with the Lua interpreter you
@@ -42,6 +76,7 @@ source, manifest, copied native modules, and runtime files on disk. The
 onefile bundle is a distribution format layered on top of that same
 layout.
 
+[#usage-cli-surfaces]
 == Compact and Full-Word CLIs
 
 `luai` and `luainstaller` are deliberately different command surfaces.
@@ -95,6 +130,7 @@ intentional: scripts get a small compact surface, while the full-word
 CLI remains explicit for humans.
 ====
 
+[#usage-first-bundle]
 == First Bundle
 
 Use the pure-Lua runtime sample for a quick local check:
@@ -136,6 +172,7 @@ luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile --max-deps 
 build/runtime-onefile Ada
 ----
 
+[#usage-native-bundle]
 == Native Module Bundle
 
 Native Lua C modules are the first place where packaging stops being
@@ -158,6 +195,7 @@ at startup, the missing piece is often an external library used by that
 module, not the Lua module file itself. Use `ldd`, `otool -L`, or a
 Windows DLL dependency tool as appropriate.
 
+[#usage-options]
 == Option Reference
 
 [cols="1,1,3",options="header"]
@@ -223,6 +261,7 @@ supports it.
 during a build-time runtime trace.
 |===
 
+[#usage-discovery]
 == Choosing a Discovery Engine
 
 [cols="1,2,3",options="header"]
@@ -253,6 +292,7 @@ program loads different modules for different subcommands, run a
 representative command or use manual includes for the missing files.
 ====
 
+[#usage-inspection]
 == Inspecting a Bundle
 
 The manifest is Lua data. Load it with the same Lua version family used
@@ -283,6 +323,7 @@ dependencies on your shell configuration:
 env -i PATH=/usr/bin:/bin build/runtime-demo/runtime-demo clean
 ----
 
+[#usage-logs]
 == Logs
 
 Operational logs are stored under `~/.luainstaller/logs.lua` and read
@@ -299,6 +340,7 @@ Use logs to recover the error type, command, and details after a failed
 operation. Do not treat logs as a build manifest; the generated bundle
 manifest is the authoritative record of what was packaged.
 
+[#usage-api]
 == Lua API
 
 Load the public module:
@@ -368,4 +410,4 @@ Common error types include `InvalidOptionsError`,
 * xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
 * xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]

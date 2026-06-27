@@ -5,14 +5,44 @@
 :sectlinks:
 :icons: font
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]
 
 This guide describes what `luainstaller` writes to disk, how generated
 executables start, how bundled Lua and native modules are found, how
 onefile extraction works, and why output safety checks are strict.
 
+[#bundling-page-index]
+== Page Index
+
+[cols="1,3",options="header"]
+|===
+|Section |Use it for
+
+|xref:#bundling-what[What a bundle is]
+|The runtime model and what a bundle is not.
+
+|xref:#bundling-onedir-layout[Onedir layout]
+|The generated directory tree and which files are physical.
+
+|xref:#bundling-launcher-startup[Launcher startup]
+|The process startup chain from OS loader to entry chunk.
+
+|xref:#bundling-native-loading[Native module loading]
+|Native search paths and dotted module destinations.
+
+|xref:#bundling-onefile-runtime[Onefile runtime]
+|Extraction roots, cache reuse, and why native files must be written.
+
+|xref:#bundling-output-safety[Output safety]
+|Overwrite refusal rules and generated-directory detection.
+
+|xref:#bundling-debugging[Debugging order]
+|The shortest path from a failed generated executable to useful data.
+|===
+
 toc::[]
 
+[#bundling-what]
 == What a Bundle Is
 
 A `luainstaller` bundle is a native launcher plus a packaged Lua
@@ -37,6 +67,7 @@ checks.
 |Distribution after the matching onedir bundle has already been tested.
 |===
 
+[#bundling-onedir-layout]
 == Onedir Layout
 
 A typical POSIX directory bundle looks like this:
@@ -60,6 +91,7 @@ current onedir output does not copy those Lua sources as separate files.
 Native modules and runtime libraries do have to be real files because
 platform loaders cannot import them from Lua strings.
 
+[#bundling-build-sequence]
 == Onedir Build Sequence
 
 [arabic]
@@ -76,6 +108,7 @@ The final manifest is written late because it includes information only
 known after compilation, such as the launcher profile and copied runtime
 record.
 
+[#bundling-launcher-startup]
 == Launcher Startup
 
 [source,text]
@@ -93,6 +126,7 @@ The launcher constructs `arg` from the executable's command-line
 arguments before running the entry chunk. From the entry program's point
 of view, normal Lua argument handling still applies.
 
+[#bundling-lua-loading]
 == Lua Source Loading
 
 The bootstrap installs a bundled Lua source searcher at position 2:
@@ -110,6 +144,7 @@ bundled modules are preferred before falling back to the host's normal
 Lua source search path. This keeps the packaged application from
 accidentally loading a same-named `.lua` file from the target machine.
 
+[#bundling-native-loading]
 == Native Module Loading
 
 Native path patterns are prepended relative to the launcher:
@@ -138,6 +173,7 @@ That redundancy is intentional. The flat copy helps simple loader
 patterns; the nested copy matches Lua's `?` replacement for dotted
 module names.
 
+[#bundling-onefile-build]
 == Onefile Build Flow
 
 Onefile output is an extractor wrapped around a staged onedir bundle:
@@ -156,6 +192,7 @@ The inner executable and `.luai/` tree are the same kind of files you
 would inspect in onedir mode. If the onedir bundle does not run, the
 onefile wrapper will not make it more portable.
 
+[#bundling-onefile-runtime]
 == Onefile Runtime
 
 [cols="1,2",options="header"]
@@ -188,6 +225,7 @@ because `.so`, `.dylib`, `.dll`, and Lua runtime files must exist on the
 filesystem before platform loaders can use them.
 ====
 
+[#bundling-output-safety]
 == Output Safety
 
 Onedir output is refused when the path is unsafe or likely to contain
@@ -211,6 +249,7 @@ top-level entries are limited to expected generated names. This is
 conservative by design; packaging tools should not guess about user
 data.
 
+[#bundling-rebuild]
 == Rebuild Behavior
 
 Rebuilding an onedir bundle into a generated output directory is allowed
@@ -223,6 +262,7 @@ and hash match. That is normal and avoids rewriting identical payloads.
 Delete the content-addressed cache only when debugging extraction
 behavior.
 
+[#bundling-debugging]
 == Debugging Order
 
 Use this order when a generated executable fails:
@@ -246,4 +286,4 @@ Use this order when a generated executable fails:
 * xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
 * xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]

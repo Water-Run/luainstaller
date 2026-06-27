@@ -5,15 +5,48 @@
 :sectlinks:
 :icons: font
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]
 
 This guide describes how to verify `luainstaller` locally and across the
 lab matrix. It separates fast syntax checks, full smoke tests, install
 checks, remote platform checks, expected failures, and documentation
 checks.
 
+[#testing-page-index]
+== Page Index
+
+[cols="1,3",options="header"]
+|===
+|Section |Use it for
+
+|xref:#testing-tiers[Test tiers]
+|Which commands to run locally and what each tier proves.
+
+|xref:#testing-smoke[Full smoke coverage]
+|What `test/smoke_all.lua` is expected to catch.
+
+|xref:#testing-samples[Sample applications]
+|Which fixture exercises which dependency shape.
+
+|xref:#testing-source-install[Source install checks]
+|Verifying wrapper scripts without LuaRocks.
+
+|xref:#testing-remote[Remote matrix]
+|Linux, macOS, and Windows lab coverage.
+
+|xref:#testing-failures[Expected failures]
+|Failures that are accepted because they prove boundaries cleanly.
+
+|xref:#testing-docs[Documentation checks]
+|Doc count, index links, xrefs, and stale path checks.
+
+|xref:#testing-release[Release checklist]
+|The final local checklist before pushing.
+|===
+
 toc::[]
 
+[#testing-tiers]
 == Test Tiers
 
 [cols="1,2,3",options="header"]
@@ -56,6 +89,7 @@ optional tools such as `cc`, `pkg-config`, `readelf`, `curl`, LuaRocks,
 or native sample dependencies are unavailable. A skip is acceptable only
 when the test says why it skipped.
 
+[#testing-smoke]
 == What the Full Smoke Covers
 
 The full smoke test is intentionally broad. It checks:
@@ -76,6 +110,7 @@ The full smoke test is intentionally broad. It checks:
 * LuaRocks-installed wrappers can run when LuaRocks is available;
 * documentation references used by tests point at current files.
 
+[#testing-samples]
 == Sample Applications
 
 [cols="1,2,3",options="header"]
@@ -114,6 +149,7 @@ The samples are not demos only. They are regression fixtures for
 dependency discovery, native module layout, clean runtime behavior, and
 platform-specific failure reporting.
 
+[#testing-source-install]
 == Source Install Checks
 
 The source installer should work with only a `lua` command available:
@@ -131,6 +167,7 @@ On a Linux host with headers, `pkg-config`, and a C compiler, the full
 smoke also verifies that a source-installed `luai` can build and run a
 bundle from a clean runtime environment.
 
+[#testing-luarocks]
 == LuaRocks Check
 
 When LuaRocks is available:
@@ -144,6 +181,7 @@ luarocks make --tree /tmp/luainstaller-rocktree luainstaller-1.0.0-1.rockspec
 The smoke suite uses this to catch packaging metadata regressions in the
 rockspec and installed wrapper behavior.
 
+[#testing-remote]
 == Remote Matrix
 
 Remote scripts copy the current checkout to lab machines and verify
@@ -182,6 +220,7 @@ WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 Set `SSH_OPTS` to override the default SSH options used by the remote
 scripts.
 
+[#testing-failures]
 == Expected Failures
 
 [cols="1,2,2",options="header"]
@@ -209,6 +248,7 @@ Unexpected failures are failures that lack a clear skip reason, produce
 an unstructured Lua traceback for a normal user error, or contradict the
 same-environment contract documented in the platform guide.
 
+[#testing-docs]
 == Documentation Checks
 
 The documentation is part of the tested surface. Run:
@@ -216,7 +256,7 @@ The documentation is part of the tested surface. Run:
 [source,sh]
 ----
 find docs -maxdepth 1 -type f -name '*.adoc' -printf '%f\n' | sort
-rg -n 'Back to README index' docs/*.adoc
+rg -n 'Back to documentation index' docs/*.adoc
 rg -n 'xref:|link:' README.adoc docs/*.adoc test/README.adoc
 ----
 
@@ -228,6 +268,7 @@ The repository policy for the main documentation set is:
 * stale split-out documentation paths such as `docs/README.adoc` and
   `docs/CLI.adoc` should not be referenced by the current docs.
 
+[#testing-release]
 == Release Checklist
 
 Before pushing documentation or packaging changes:
@@ -250,4 +291,4 @@ Before pushing documentation or packaging changes:
 * xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
 * xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
 
-xref:../README.adoc[Back to README index]
+xref:../README.adoc#documentation-index[Back to documentation index]
