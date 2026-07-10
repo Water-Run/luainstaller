@@ -11,34 +11,6 @@ This guide describes what `luainstaller` writes to disk, how generated
 executables start, how bundled Lua and native modules are found, how
 onefile extraction works, and why output safety checks are strict.
 
-[#bundling-page-index]
-== Page Index
-
-[cols="1,3",options="header"]
-|===
-|Section |Use it for
-
-|xref:#bundling-what[What a bundle is]
-|The runtime model and what a bundle is not.
-
-|xref:#bundling-onedir-layout[Onedir layout]
-|The generated directory tree and which files are physical.
-
-|xref:#bundling-launcher-startup[Launcher startup]
-|The process startup chain from OS loader to entry chunk.
-
-|xref:#bundling-native-loading[Native module loading]
-|Native search paths and dotted module destinations.
-
-|xref:#bundling-onefile-runtime[Onefile runtime]
-|Extraction roots, cache reuse, and why native files must be written.
-
-|xref:#bundling-output-safety[Output safety]
-|Overwrite refusal rules and generated-directory detection.
-
-|xref:#bundling-debugging[Debugging order]
-|The shortest path from a failed generated executable to useful data.
-|===
 
 toc::[]
 
@@ -125,6 +97,11 @@ OS process loader
 The launcher constructs `arg` from the executable's command-line
 arguments before running the entry chunk. From the entry program's point
 of view, normal Lua argument handling still applies.
+
+Process exit status: a Lua error in the bootstrap or entry chunk exits
+non-zero. A successful run exits `0` even if the entry chunk returns a
+numeric value. Call `os.exit(code)` when the application must set the
+process status explicitly.
 
 [#bundling-lua-loading]
 == Lua Source Loading
@@ -281,12 +258,5 @@ Use this order when a generated executable fails:
 . Build `--file` only after the directory bundle works.
 . If onefile fails, inspect the extraction cache and run the inner
    launcher from that cache.
-
-== Related Documents
-
-* xref:USAGE.adoc[Usage Guide]
-* xref:IMPLEMENTATION.adoc[Implementation Guide]
-* xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
-* xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
 
 xref:../README.adoc#documentation-index[Back to documentation index]

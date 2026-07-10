@@ -10,7 +10,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-06-27
+    2026-07-10
 ]]
 
 local process = require("luainstaller.process")
@@ -59,6 +59,37 @@ function M.isAbsolute(value)
     return path:sub(1, 1) == "/" or path:match("^%a:[/\\]") ~= nil
 end
 
+--@description: True when path is root or a descendant of root after normalization.
+function M.isWithin(path, root)
+    path = M.normalize(path)
+    root = M.normalize(root)
+    if path == root then
+        return true
+    end
+    local prefix = root == "/" and "/" or (root .. "/")
+    return path:sub(1, #prefix) == prefix
+end
+
+--@description: True when path is a relative path with no empty, ".", or ".." segments.
+function M.isSafeRelative(value)
+    local path = tostring(value or ""):gsub("\\", "/")
+    if path == "" or path:sub(1, 1) == "/" or path:match("^%a:/") then
+        return false
+    end
+    if path:match("^//") then
+        return false
+    end
+    for segment in path:gmatch("[^/]+") do
+        if segment == "" or segment == "." or segment == ".." then
+            return false
+        end
+    end
+    if path:find("//", 1, true) then
+        return false
+    end
+    return true
+end
+
 function M.currentDirectory()
     local line = process.firstLine(IS_WINDOWS and "cd" or "pwd")
     if line then
@@ -93,6 +124,35 @@ end
 function M.extension(value)
     local name = M.basename(value)
     return name:match("(%.[^%.]+)$")
+end
+
+--@description: Dotted module name from a Lua file path relative to entry's directory.
+function M.moduleNameFromLuaPath(lua_path, entry)
+    local source = M.normalize(M.absolute(lua_path))
+    local entry_dir = M.dirname(M.absolute(entry or source))
+    local prefix = entry_dir == "/" and "/" or (entry_dir .. "/")
+    local relative
+    if source:sub(1, #prefix) == prefix then
+        relative = source:sub(#prefix + 1)
+    else
+        relative = M.basename(source)
+    end
+    relative = M.normalize(relative)
+    if relative:match("/init%.lua$") then
+        relative = relative:gsub("/init%.lua$", "")
+    else
+        relative = relative:gsub("%.lua$", "")
+    end
+    local fallback = M.basename(source):gsub("%.lua$", "")
+    if relative == "" or relative == "." or M.isAbsolute(relative) then
+        return fallback
+    end
+    for segment in relative:gmatch("[^/]+") do
+        if segment == "." or segment == ".." then
+            return fallback
+        end
+    end
+    return (relative:gsub("/", "."))
 end
 
 return M

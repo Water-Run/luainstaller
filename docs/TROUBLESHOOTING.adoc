@@ -12,37 +12,6 @@ not behave as expected. Work from the first diagnostic pass before
 changing options; most failures become clearer once you know whether the
 problem is dependency discovery, bundle assembly, or runtime loading.
 
-[#troubleshooting-page-index]
-== Page Index
-
-[cols="1,3",options="header"]
-|===
-|Section |Use it for
-
-|xref:#troubleshooting-first-pass[First diagnostic pass]
-|The first commands to run before changing options.
-
-|xref:#troubleshooting-cli[CLI syntax problems]
-|Distinguishing compact and full-word command forms.
-
-|xref:#troubleshooting-common-errors[Common errors]
-|Mapping error names to likely causes and next actions.
-
-|xref:#troubleshooting-discovery[Dependency discovery problems]
-|Dynamic require, runtime discovery, and manual includes.
-
-|xref:#troubleshooting-toolchain[Toolchain problems]
-|Linux, macOS, and Windows compiler/runtime checks.
-
-|xref:#troubleshooting-native[Native module loader problems]
-|Missing `.so`, `.dylib`, `.dll`, ABI, and external library issues.
-
-|xref:#troubleshooting-onefile[Onefile cache problems]
-|Extraction roots and cache reuse.
-
-|xref:#troubleshooting-issue-data[Issue data]
-|What to include when reporting a failure.
-|===
 
 toc::[]
 
@@ -153,10 +122,21 @@ paths.
 |Run `lua -e 'require("name")'` from the same shell; fix `LUA_PATH`,
 `LUA_CPATH`, installed modules, or working directory.
 
+|`CircularDependencyError`
+|Static discovery found a require cycle.
+|Break the cycle or load one side behind a function/runtime discovery
+path.
+
 |`DependencyLimitExceededError`
 |Discovery exceeded `--max-deps`.
 |Increase the limit only after trace output shows the dependency graph is
 expected.
+
+|`DuplicateModuleError`
+|Two sources map to the same manifest or `.luai/native/` destination
+(including basename collisions such as two different `core.so` files).
+|Rename modules, exclude one path, or adjust layout so destinations are
+unique.
 
 |`ToolchainError: pkg-config cannot find lua`
 |Linux bundle build cannot locate Lua compiler/linker flags.
@@ -168,6 +148,15 @@ expected.
 `LUAI_LUA_PREFIX`.
 |Point to a target Lua prefix containing headers and the required Lua
 runtime files.
+
+|`UnsupportedPlatformError`
+|Target profile is not supported from this host.
+|Build Windows targets from Linux with MinGW; match host OS for Linux and
+macOS profiles.
+
+|`FilesystemError`
+|A mkdir/copy/write/temp operation failed.
+|Check permissions, disk space, and that temp directories are writable.
 
 |`CompilationFailedError`
 |The compiler exists but failed to compile the launcher or extractor.
@@ -380,13 +369,5 @@ Include the following when reporting a failure:
 * `find <bundle>/.luai/native -maxdepth 3 -type f | sort`;
 * platform loader output for native failures;
 * whether the source program runs directly with `lua`.
-
-== Related Documents
-
-* xref:USAGE.adoc[Usage Guide]
-* xref:IMPLEMENTATION.adoc[Implementation Guide]
-* xref:BUNDLING.adoc[Bundling Guide]
-* xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
-* xref:TESTING.adoc[Testing Guide]
 
 xref:../README.adoc#documentation-index[Back to documentation index]

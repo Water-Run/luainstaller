@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-06-21
+    2026-07-10
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -25,6 +25,7 @@ local currentDirectory = path.currentDirectory
 local dirname = path.dirname
 local basename = path.basename
 local stem = path.stem
+local isSafeRelative = path.isSafeRelative
 local commandOutput = process.output
 local shellQuote = process.shellQuote
 local makeError = result.error
@@ -178,7 +179,19 @@ local function collectFiles(root)
     local payload_hash_parts = {}
     for line in output:gmatch("[^\n]+") do
         local rel = line:gsub("^%./", "")
+        if not isSafeRelative(rel) then
+            return nil, makeError("FilesystemError", "Staged file path is not a safe relative path", {
+                path = rel,
+                root = root,
+            })
+        end
         local abs = normalizePath(root .. "/" .. rel)
+        if not path.isWithin(abs, root) then
+            return nil, makeError("FilesystemError", "Staged file escapes staging directory", {
+                path = rel,
+                root = root,
+            })
+        end
         local content, err = readFile(abs)
         if not content then
             return nil, err
@@ -335,6 +348,26 @@ static int luai_join(char *out, size_t out_size, const char *left, const char *r
     return n >= 0 && (size_t)n < out_size ? 0 : -1;
 }
 
+/* Reject absolute paths and any empty/./.. segment (zip-slip prevention). */
+static int luai_path_is_safe_relative(const char *path) {
+    const char *p;
+    if (!path || !*path) return 0;
+    if (path[0] == '/' || path[0] == '\\') return 0;
+    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':') return 0;
+    p = path;
+    while (*p) {
+        const char *start = p;
+        size_t len;
+        while (*p && *p != '/' && *p != '\\') p++;
+        len = (size_t)(p - start);
+        if (len == 0) return 0;
+        if (len == 1 && start[0] == '.') return 0;
+        if (len == 2 && start[0] == '.' && start[1] == '.') return 0;
+        if (*p) p++;
+    }
+    return 1;
+}
+
 static int luai_write_file(const char *path, const unsigned char *data, size_t size, int executable, const char *hash) {
     char parent[4096];
     FILE *file;
@@ -366,13 +399,24 @@ static const char *luai_temp_root(void) {
 static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size) {
     char base[4096];
     size_t i;
+    size_t bundle_len;
     if (luai_join(base, sizeof(base), luai_temp_root(), "luainstaller-onefile") != 0) return -1;
     if (luai_mkdir_p(base) != 0) return -1;
     if (luai_join(bundle_dir, bundle_dir_size, base, LUAI_PAYLOAD_ID) != 0) return -1;
     if (luai_mkdir_p(bundle_dir) != 0) return -1;
+    bundle_len = strlen(bundle_dir);
     for (i = 0; i < LUAI_FILE_COUNT; ++i) {
         char target[4096];
+        if (!luai_path_is_safe_relative(luai_files[i].path)) {
+            fprintf(stderr, "luainstaller-onefile: unsafe path %s\n", luai_files[i].path);
+            return -1;
+        }
         if (luai_join(target, sizeof(target), bundle_dir, luai_files[i].path) != 0) return -1;
+        if (strncmp(target, bundle_dir, bundle_len) != 0 ||
+            (target[bundle_len] != '\0' && target[bundle_len] != '/' && target[bundle_len] != '\\')) {
+            fprintf(stderr, "luainstaller-onefile: path escapes extract root: %s\n", luai_files[i].path);
+            return -1;
+        }
         if (luai_write_file(target, luai_files[i].data, luai_files[i].size, luai_files[i].executable, luai_files[i].hash) != 0) {
             fprintf(stderr, "luainstaller-onefile: cannot extract %s\n", luai_files[i].path);
             return -1;
@@ -382,17 +426,20 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size) {
 }
 
 #ifdef _WIN32
-static void luai_append_quoted(char *cmd, size_t cmd_size, const char *value) {
+static int luai_append_quoted(char *cmd, size_t cmd_size, const char *value) {
     size_t len = strlen(cmd);
     size_t i;
-    if (len + 3 >= cmd_size) return;
+    if (len + 3 >= cmd_size) return -1;
     cmd[len++] = '"';
-    for (i = 0; value[i] && len + 3 < cmd_size; ++i) {
+    for (i = 0; value[i]; ++i) {
+        if (len + 4 >= cmd_size) return -1;
         if (value[i] == '"' || value[i] == '\\') cmd[len++] = '\\';
         cmd[len++] = value[i];
     }
+    if (len + 2 >= cmd_size) return -1;
     cmd[len++] = '"';
     cmd[len] = '\0';
+    return 0;
 }
 
 static int luai_run_inner(const char *exe_path, int argc, char **argv) {
@@ -401,10 +448,22 @@ static int luai_run_inner(const char *exe_path, int argc, char **argv) {
     PROCESS_INFORMATION pi;
     DWORD exit_code = 1;
     int i;
-    luai_append_quoted(cmd, sizeof(cmd), exe_path);
+    if (luai_append_quoted(cmd, sizeof(cmd), exe_path) != 0) {
+        fprintf(stderr, "luainstaller-onefile: command line too long\n");
+        return 1;
+    }
     for (i = 1; i < argc; ++i) {
-        strncat(cmd, " ", sizeof(cmd) - strlen(cmd) - 1);
-        luai_append_quoted(cmd, sizeof(cmd), argv[i]);
+        size_t len = strlen(cmd);
+        if (len + 2 >= sizeof(cmd)) {
+            fprintf(stderr, "luainstaller-onefile: command line too long\n");
+            return 1;
+        }
+        cmd[len] = ' ';
+        cmd[len + 1] = '\0';
+        if (luai_append_quoted(cmd, sizeof(cmd), argv[i]) != 0) {
+            fprintf(stderr, "luainstaller-onefile: command line too long\n");
+            return 1;
+        }
     }
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));

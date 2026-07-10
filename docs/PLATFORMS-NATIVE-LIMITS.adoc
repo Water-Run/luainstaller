@@ -12,37 +12,6 @@ target profile means, how native Lua C modules are copied, which
 external dependencies remain outside the bundle, and which portability
 claims the project intentionally does not make.
 
-[#platforms-page-index]
-== Page Index
-
-[cols="1,3",options="header"]
-|===
-|Section |Use it for
-
-|xref:#platforms-compatibility[Compatibility model]
-|The exact same-environment runtime promise.
-
-|xref:#platforms-targets[Target profiles]
-|Linux, macOS, and Windows prerequisites and runtime strategy.
-
-|xref:#platforms-linux[Linux profile]
-|Shared-Lua launcher behavior and `pkg-config` requirements.
-
-|xref:#platforms-macos[macOS profile]
-|Static Lua prefix requirements and macOS-specific boundaries.
-
-|xref:#platforms-windows[Windows profile]
-|Linux-to-Windows MinGW build requirements.
-
-|xref:#platforms-native[Native Lua C modules]
-|How Lua C modules are copied and why ABI matching matters.
-
-|xref:#platforms-external[External library boundary]
-|Dependencies that remain outside Lua module copying.
-
-|xref:#platforms-limits[Boundaries and non-goals]
-|What the project intentionally does not promise.
-|===
 
 toc::[]
 
@@ -285,12 +254,5 @@ Not promised:
 * onefile extraction writes files to a temp/cache directory;
 * output safety guards protect build outputs from accidental overwrite,
   not runtime application behavior.
-
-== Related Documents
-
-* xref:USAGE.adoc[Usage Guide]
-* xref:BUNDLING.adoc[Bundling Guide]
-* xref:IMPLEMENTATION.adoc[Implementation Guide]
-* xref:TESTING.adoc[Testing Guide]
 
 xref:../README.adoc#documentation-index[Back to documentation index]

@@ -846,18 +846,25 @@ function ModuleResolver:buildCandidates(module_name, from_script)
     end
 
     local module_path = module_name:gsub("%.", "/")
+    local function expandTemplate(tpl)
+        -- Literal replacement: module_path may contain '%' which must not be
+        -- treated as gsub capture references.
+        return (tpl:gsub("%?", function()
+            return module_path
+        end))
+    end
     for _, tpl in ipairs(self.lua_templates) do
         candidates[#candidates + 1] = {
             type     = "lua",
             template = tpl,
-            path     = tpl:gsub("%?", module_path),
+            path     = expandTemplate(tpl),
         }
     end
     for _, tpl in ipairs(self.native_templates) do
         candidates[#candidates + 1] = {
             type     = "native",
             template = tpl,
-            path     = tpl:gsub("%?", module_path),
+            path     = expandTemplate(tpl),
         }
     end
     return candidates

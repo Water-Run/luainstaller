@@ -12,37 +12,6 @@ how `luainstaller` turns an entry script into an executable bundle. It
 describes the data flow, module boundaries, internal contracts, and the
 failure style used by the public API.
 
-[#implementation-page-index]
-== Page Index
-
-[cols="1,3",options="header"]
-|===
-|Section |Use it for
-
-|xref:#implementation-flow[End-to-end flow]
-|The full path from CLI/API input to onedir or onefile output.
-
-|xref:#implementation-entry-points[Public entry points]
-|Public API responsibilities and result shape.
-
-|xref:#implementation-boundaries[Module boundaries]
-|Which source file owns which part of the pipeline.
-
-|xref:#implementation-discovery[Dependency discovery]
-|Static analyzer scope and trace-record shape.
-
-|xref:#implementation-manifest[Manifest contract]
-|Schema, invariants, and generated-output marker.
-
-|xref:#implementation-runtime[Runtime generation]
-|Lua bootstrap generation and C launcher startup behavior.
-
-|xref:#implementation-errors[Error and logging strategy]
-|Public error names and persistent log behavior.
-
-|xref:#implementation-maintainer[Maintainer checklist]
-|Files to update when changing user-facing contracts.
-|===
 
 toc::[]
 
@@ -255,15 +224,16 @@ native search paths, and recursively scan Lua source files.
 apply excludes. Manual includes are treated as Lua source files.
 
 |`runtime`
-|Write a temporary tracer, wrap `require`, run the entry script once,
-record module names that were actually loaded, and resolve those
-records.
+|Write a private temp tracer (mode `0700`), wrap `require`, run the
+entry script once, record module names that were actually loaded, and
+resolve those records. Trace files are parsed without `load()`.
 |===
 
-Runtime discovery is intentionally limited. It only sees the code path
-executed during the build-time run. If an application loads modules
-behind different subcommands, the caller must pass representative
-arguments after `--` or add manual includes.
+Runtime discovery executes the entry program at build time. It only sees
+the code path exercised by that run. If an application loads modules
+behind different subcommands, pass representative arguments after `--`
+or add manual includes. Treat untrusted entry trees as untrusted code
+during runtime discovery.
 
 [#implementation-manifest]
 == Manifest Contract
@@ -387,21 +357,36 @@ statically.
 |`ModuleNotFoundError`
 |A requested module cannot be resolved through the active Lua paths.
 
+|`CircularDependencyError`
+|Static discovery found a require cycle among Lua scripts.
+
 |`DependencyLimitExceededError`
 |Recursive discovery exceeded `--max-deps`.
 
 |`DuplicateModuleError`
-|Two files would occupy the same manifest destination.
+|Two files would occupy the same manifest destination or the same native
+copy path under `.luai/native/`.
 
 |`InvalidOutputError`
 |The selected output path is unsafe to overwrite.
 
 |`ToolchainError`
 |Compiler, Lua prefix, Lua headers, Lua runtime, or profile requirements
-are missing.
+are missing, or toolchain metadata is unsafe to pass to the shell.
 
 |`CompilationFailedError`
 |The compiler was found but returned a non-zero status.
+
+|`LuaRuntimeNotFoundError`
+|Linux shared-Lua profile could not locate the linked `liblua` after
+linking.
+
+|`UnsupportedPlatformError`
+|The selected target cannot be built from this host (for example Windows
+onedir without a Linux/MinGW host).
+
+|`FilesystemError`
+|A required mkdir, copy, write, or temp-directory operation failed.
 
 |`DiscoveryError`
 |Runtime discovery could not execute or parse its temporary trace.
@@ -439,12 +424,5 @@ contract:
   and release safety assertions.
 * Error names: update `docs/TROUBLESHOOTING.adoc` and any CLI/API tests
   that assert exact error text.
-
-== Related Documents
-
-* xref:USAGE.adoc[Usage Guide]
-* xref:BUNDLING.adoc[Bundling Guide]
-* xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
-* xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
 
 xref:../README.adoc#documentation-index[Back to documentation index]

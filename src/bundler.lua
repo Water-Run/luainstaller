@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-06-21
+    2026-07-10
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -28,11 +28,36 @@ local currentDirectory = path.currentDirectory
 local dirname = path.dirname
 local basename = path.basename
 local stem = path.stem
+local isWithin = path.isWithin
+local isSafeRelative = path.isSafeRelative
 local commandOutput = process.output
 local shellQuote = process.shellQuote
 local makeError = result.error
 local GENERATED_MARKER = "luainstaller-generated-output-v1"
 local writeFile
+
+-- Split pkg-config output into shell-safe tokens. Reject metacharacters.
+local function sanitizePkgConfigFlags(raw)
+    local tokens = {}
+    for token in tostring(raw or ""):gmatch("%S+") do
+        if token:find("[\n\r;&|`$()<>]") then
+            return nil, makeError("ToolchainError", "pkg-config output contains unsafe characters", {
+                token = token,
+            })
+        end
+        if token:sub(1, 1) == "-" then
+            if not token:match("^%-[%w%+%,%./=:_@%%-]+$") then
+                return nil, makeError("ToolchainError", "pkg-config produced an unsafe compiler flag", {
+                    token = token,
+                })
+            end
+            tokens[#tokens + 1] = token
+        else
+            tokens[#tokens + 1] = shellQuote(token)
+        end
+    end
+    return tokens
+end
 
 local function fromThrownError(err)
     return result.fromThrown(err, "LauncherGenerationError")
@@ -501,18 +526,43 @@ end
 local function nativeDestinations(native_path, module_name, native_dir)
     local destinations = {}
     local seen = {}
-    local function add(path)
-        path = normalizePath(path)
-        if not seen[path] then
-            seen[path] = true
-            destinations[#destinations + 1] = path
+    local function add(candidate)
+        candidate = normalizePath(candidate)
+        if not isWithin(candidate, native_dir) then
+            return makeError("InvalidOptionsError", "Native module destination escapes .luai/native", {
+                destination = candidate,
+                native_dir = native_dir,
+                module_name = module_name,
+            })
         end
+        if not seen[candidate] then
+            seen[candidate] = true
+            destinations[#destinations + 1] = candidate
+        end
+        return nil
     end
 
-    add(native_dir .. "/" .. basename(native_path))
+    local err = add(native_dir .. "/" .. basename(native_path))
+    if err then
+        return nil, err
+    end
     if module_name and module_name ~= "" then
+        if module_name:find("[/\\]", 1) then
+            return nil, makeError("InvalidOptionsError", "Native module name must not contain path separators", {
+                module_name = module_name,
+            })
+        end
+        local nested = module_name:gsub("%.", "/")
+        if not isSafeRelative(nested) then
+            return nil, makeError("InvalidOptionsError", "Native module name is not a safe relative path", {
+                module_name = module_name,
+            })
+        end
         local ext = basename(native_path):match("(%.[^%.]+)$") or ".so"
-        add(native_dir .. "/" .. module_name:gsub("%.", "/") .. ext)
+        err = add(native_dir .. "/" .. nested .. ext)
+        if err then
+            return nil, err
+        end
     end
     return destinations
 end
@@ -537,7 +587,7 @@ function M.bundleOnedir(opts)
         if prefix_err then
             return prefix_err
         end
-        local cc_ok, cc_output = commandOutput(windowsCompiler() .. " --version")
+        local cc_ok, cc_output = commandOutput(shellQuote(windowsCompiler()) .. " --version")
         if not cc_ok then
             return makeError("ToolchainError", "Windows onedir bundling requires x86_64-w64-mingw32-gcc", {
                 output = cc_output,
@@ -609,9 +659,23 @@ function M.bundleOnedir(opts)
         return err
     end
 
+    local native_owners = {}
     for _, path in ipairs(dependencies.libraries or {}) do
         local normalized = normalizePath(path)
-        for _, destination in ipairs(nativeDestinations(normalized, native_names[normalized], native_dir)) do
+        local destinations, dest_err = nativeDestinations(normalized, native_names[normalized], native_dir)
+        if not destinations then
+            return dest_err
+        end
+        for _, destination in ipairs(destinations) do
+            local owner = native_owners[destination]
+            if owner and owner ~= normalized then
+                return makeError("DuplicateModuleError", "Duplicate native destination: " .. destination, {
+                    destination_path = destination,
+                    first_source = owner,
+                    second_source = normalized,
+                })
+            end
+            native_owners[destination] = normalized
             err = copyFile(normalized, destination)
             if err then
                 return err
@@ -650,14 +714,17 @@ function M.bundleOnedir(opts)
             })
         end
 
-        local cleaned_pkg_flags = (pkg_flags:gsub("%s+$", ""))
+        local tokens, token_err = sanitizePkgConfigFlags(pkg_flags:gsub("%s+$", ""))
+        if not tokens then
+            return token_err
+        end
         compile_cmd = table.concat({
             "cc",
             shellQuote(c_path),
             "-o",
             shellQuote(exe_path),
             "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
-            cleaned_pkg_flags,
+            table.concat(tokens, " "),
         }, " ")
     end
     local compile_ok, compile_output = commandOutput(compile_cmd)

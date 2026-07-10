@@ -11,38 +11,6 @@ This is the practical guide for using `luainstaller`. It starts with the
 workflow you should use for a new Lua project, then covers the CLI,
 dependency discovery modes, output inspection, logs, and the Lua API.
 
-[#usage-page-index]
-== Page Index
-
-[cols="1,3",options="header"]
-|===
-|Section |Use it for
-
-|xref:#usage-session[Normal packaging session]
-|The recommended order for analysis, tracing, onedir, inspection, and
-onefile.
-
-|xref:#usage-cli-surfaces[Compact and full-word CLIs]
-|The split `luai` / `luainstaller` command grammar.
-
-|xref:#usage-first-bundle[First bundle]
-|A small pure-Lua bundle with expected output.
-
-|xref:#usage-native-bundle[Native module bundle]
-|A bundle that includes Lua C modules and `.luai/native/` inspection.
-
-|xref:#usage-options[Option reference]
-|Supported flags and what each one changes.
-
-|xref:#usage-discovery[Choosing a discovery mode]
-|When to use static, runtime, or manual discovery.
-
-|xref:#usage-inspection[Inspecting a bundle]
-|Manifest and trace-record inspection commands.
-
-|xref:#usage-api[Lua API]
-|Public functions and structured error handling.
-|===
 
 toc::[]
 
@@ -219,8 +187,11 @@ includes are still subject to duplicate-destination checks.
 
 |`--exclude PATH`
 |Analyze, trace, build
-|Exclude a resolved dependency by exact path, basename, or suffix.
-Excludes win over automatic discovery and manual includes.
+|Exclude a resolved dependency by exact path, exact basename, or a
+path suffix that matches only at a `/` boundary (for example
+`plugin/extra.lua` matches `.../plugin/extra.lua`, but `util.lua` does
+not match `myutil.lua`). Excludes win over automatic discovery and
+manual includes.
 
 |`--target-os OS`
 |Trace, build
@@ -400,16 +371,12 @@ error.
 
 Common error types include `InvalidOptionsError`,
 `ScriptNotFoundError`, `DynamicRequireError`, `ModuleNotFoundError`,
-`DependencyLimitExceededError`, `DuplicateModuleError`,
-`InvalidOutputError`, `ToolchainError`, `CompilationFailedError`,
-`LuaRuntimeNotFoundError`, `DiscoveryError`, and
-`LauncherGenerationError`.
-
-== Related Documents
-
-* xref:IMPLEMENTATION.adoc[Implementation Guide]
-* xref:BUNDLING.adoc[Bundling Guide]
-* xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
-* xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
+`CircularDependencyError`, `DependencyLimitExceededError`,
+`DuplicateModuleError`, `InvalidOutputError`, `ToolchainError`,
+`CompilationFailedError`, `LuaRuntimeNotFoundError`,
+`UnsupportedPlatformError`, `FilesystemError`, `DiscoveryError`, and
+`LauncherGenerationError`. See
+xref:TROUBLESHOOTING.adoc#troubleshooting-common-errors[Troubleshooting]
+for causes and next actions.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

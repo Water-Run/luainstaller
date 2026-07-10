@@ -12,37 +12,6 @@ lab matrix. It separates fast syntax checks, full smoke tests, install
 checks, remote platform checks, expected failures, and documentation
 checks.
 
-[#testing-page-index]
-== Page Index
-
-[cols="1,3",options="header"]
-|===
-|Section |Use it for
-
-|xref:#testing-tiers[Test tiers]
-|Which commands to run locally and what each tier proves.
-
-|xref:#testing-smoke[Full smoke coverage]
-|What `test/smoke_all.lua` is expected to catch.
-
-|xref:#testing-samples[Sample applications]
-|Which fixture exercises which dependency shape.
-
-|xref:#testing-source-install[Source install checks]
-|Verifying wrapper scripts without LuaRocks.
-
-|xref:#testing-remote[Remote matrix]
-|Linux, macOS, and Windows lab coverage.
-
-|xref:#testing-failures[Expected failures]
-|Failures that are accepted because they prove boundaries cleanly.
-
-|xref:#testing-docs[Documentation checks]
-|Doc count, index links, xrefs, and stale path checks.
-
-|xref:#testing-release[Release checklist]
-|The final local checklist before pushing.
-|===
 
 toc::[]
 
@@ -276,6 +245,8 @@ The repository policy for the main documentation set is:
 * `README.adoc` is the index and outline;
 * `docs/` contains exactly six top-level `.adoc` guides;
 * every guide links back to `README.adoc` near the top and at the end;
+* guides use the built-in TOC rather than a second hand-written page
+  index table;
 * stale split-out documentation paths such as `docs/README.adoc` and
   `docs/CLI.adoc` should not be referenced by the current docs.
 
@@ -296,13 +267,5 @@ Before pushing documentation or packaging changes:
    `luainstaller -b`.
 . If platform behavior changed, run the matching remote script or state
    why it was not run.
-
-== Related Documents
-
-* xref:USAGE.adoc[Usage Guide]
-* xref:IMPLEMENTATION.adoc[Implementation Guide]
-* xref:BUNDLING.adoc[Bundling Guide]
-* xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms, Native Modules, and Limits]
-* xref:TROUBLESHOOTING.adoc[Troubleshooting Guide]
 
 xref:../README.adoc#documentation-index[Back to documentation index]

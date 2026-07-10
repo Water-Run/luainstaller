@@ -188,7 +188,7 @@ require("plugin.extra")
     })
     assert(automatic.ok == true, automatic.error and automatic.error.message)
     assert(#automatic.dependencies.scripts == 0,
-        "exclude must win over automatic discovery by exact path, basename, and suffix")
+        "exclude must win over automatic discovery by exact path, basename, and path-suffix")
 
     local manual = luainstaller.analyze({
         entry = root .. "/app/main.lua",
@@ -199,7 +199,7 @@ require("plugin.extra")
     })
     assert(manual.ok == true, manual.error and manual.error.message)
     assert(#manual.dependencies.scripts == 0,
-        "exclude must win over manual includes by exact path, basename, and suffix")
+        "exclude must win over manual includes by exact path, basename, and path-suffix")
 
     local no_depscan = luainstaller.analyze({
         entry = root .. "/app/main.lua",
@@ -213,6 +213,19 @@ require("plugin.extra")
     assert(no_depscan.dependencies.scripts[1]:match("plugin/extra%.lua$"))
     assert(not find_trace(no_depscan.trace, "auto.alpha"))
     assert(find_trace(no_depscan.trace, "plugin.extra"))
+
+    -- Basename exclude must not match a longer suffix (util.lua vs myutil.lua).
+    write_file(root .. "/app/main2.lua", "require('myutil')\n")
+    write_file(root .. "/app/myutil.lua", "return { name = 'myutil' }\n")
+    local suffix_trap = luainstaller.analyze({
+        entry = root .. "/app/main2.lua",
+        exclude = { "util.lua" },
+        max_deps = 20,
+    })
+    assert(suffix_trap.ok == true, suffix_trap.error and suffix_trap.error.message)
+    assert(#suffix_trap.dependencies.scripts == 1,
+        "excluding util.lua must not drop myutil.lua")
+    assert(suffix_trap.dependencies.scripts[1]:match("myutil%.lua$"))
 
     remove_tree(root)
     print("manual and exclude contracts ok")

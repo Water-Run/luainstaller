@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-06-21
+    2026-07-10
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -57,6 +57,10 @@ local function removeFile(path)
     os.remove(path)
 end
 
+local function removeTree(path)
+    commandOutput("rm -rf " .. shellQuote(path))
+end
+
 local function luaInterpreter(opts)
     opts = opts or {}
     if type(opts.lua) == "string" and opts.lua ~= "" then
@@ -81,34 +85,124 @@ local function listContains(list, value)
     return false
 end
 
-local function isExcluded(path, excludes)
-    local name = basename(path)
+-- Match exact path, basename-only exclude, or path suffix with a "/" boundary.
+-- Excluding "util.lua" must not match "myutil.lua".
+local function isExcluded(file_path, excludes)
+    local normalized = normalizePath(file_path)
+    local name = basename(normalized)
     for i = 1, #excludes do
-        local exclude = tostring(excludes[i])
-        if path == exclude or name == exclude or path:sub(-#exclude) == exclude then
-            return true
+        local exclude = normalizePath(tostring(excludes[i]))
+        if exclude ~= "" then
+            if normalized == exclude then
+                return true
+            end
+            if not exclude:find("/", 1, true) then
+                if name == exclude then
+                    return true
+                end
+            elseif normalized:sub(-(#exclude + 1)) == "/" .. exclude then
+                return true
+            end
         end
     end
     return false
 end
 
 local function moduleNameFromLuaPath(lua_path, entry)
-    local source = normalizePath(absolutePath(lua_path))
-    local entry_dir = dirname(absolutePath(entry))
-    local prefix = entry_dir == "/" and "/" or (entry_dir .. "/")
-    local relative = nil
-    if source:sub(1, #prefix) == prefix then
-        relative = source:sub(#prefix + 1)
-    else
-        relative = basename(source)
+    return path.moduleNameFromLuaPath(lua_path, entry)
+end
+
+-- Decode a string.format("%q", ...) token without using load().
+local function unquoteLuaString(quoted)
+    if type(quoted) ~= "string" or #quoted < 2 or quoted:sub(1, 1) ~= '"' then
+        return nil
     end
-    relative = normalizePath(relative)
-    if relative:match("/init%.lua$") then
-        relative = relative:gsub("/init%.lua$", "")
-    else
-        relative = relative:gsub("%.lua$", "")
+    local i = 2
+    local out = {}
+    while i <= #quoted do
+        local c = quoted:sub(i, i)
+        if c == '"' then
+            if i == #quoted then
+                return table.concat(out)
+            end
+            return nil
+        end
+        if c == "\\" then
+            local n = quoted:sub(i + 1, i + 1)
+            if n == "" then
+                return nil
+            end
+            local simple = {
+                a = "\a",
+                b = "\b",
+                f = "\f",
+                n = "\n",
+                r = "\r",
+                t = "\t",
+                v = "\v",
+                ["\\"] = "\\",
+                ['"'] = '"',
+                ["'"] = "'",
+                ["\n"] = "\n",
+            }
+            if simple[n] then
+                out[#out + 1] = simple[n]
+                i = i + 2
+            elseif n:match("%d") then
+                local digits = quoted:sub(i + 1):match("^(%d%d?%d?)")
+                local value = tonumber(digits)
+                if not value or value > 255 then
+                    return nil
+                end
+                out[#out + 1] = string.char(value)
+                i = i + 1 + #digits
+            elseif n == "x" then
+                local hex = quoted:sub(i + 2, i + 3)
+                if not hex:match("^%x%x$") then
+                    return nil
+                end
+                out[#out + 1] = string.char(tonumber(hex, 16))
+                i = i + 4
+            elseif n == "u" then
+                local hex = quoted:sub(i + 2):match("^{(%x+)}")
+                if not hex then
+                    return nil
+                end
+                local code = tonumber(hex, 16)
+                if not code or not utf8 or not utf8.char then
+                    if code and code <= 0x7f then
+                        out[#out + 1] = string.char(code)
+                    else
+                        return nil
+                    end
+                else
+                    out[#out + 1] = utf8.char(code)
+                end
+                i = i + 3 + #hex + 1
+            else
+                return nil
+            end
+        else
+            out[#out + 1] = c
+            i = i + 1
+        end
     end
-    return (relative:gsub("/", "."))
+    return nil
+end
+
+local function makePrivateWorkDir(prefix)
+    local stamp = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
+    local entropy = tostring({}):match("0x(%x+)") or tostring(math.random(1000000, 9999999))
+    local root = os.getenv("TMPDIR") or "/tmp"
+    local dir = normalizePath(root .. "/luainstaller-" .. prefix .. "-" .. stamp .. "-" .. entropy)
+    local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(dir))
+    if not ok then
+        return nil, makeError("FilesystemError", "Cannot create private temp directory", {
+            path = dir,
+            output = output,
+        })
+    end
+    return dir
 end
 
 local function applyManualInputs(result, opts)
@@ -241,12 +335,12 @@ local function parseTraceOutput(path)
     for line in file:lines() do
         local name_q, source_q = line:match("^(.-)\t(.-)$")
         if name_q and source_q then
-            local name_loader = load("return " .. name_q, "@require-trace-name", "t")
-            local source_loader = load("return " .. source_q, "@require-trace-source", "t")
-            if name_loader and source_loader then
+            local name = unquoteLuaString(name_q)
+            local source = unquoteLuaString(source_q)
+            if name and source then
                 records[#records + 1] = {
-                    name = name_loader(),
-                    source = source_loader(),
+                    name = name,
+                    source = source,
                 }
             end
         end
@@ -256,11 +350,15 @@ local function parseTraceOutput(path)
 end
 
 local function runtimePlan(opts)
-    local stamp = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
-    local script_path = normalizePath((os.getenv("TMPDIR") or "/tmp") .. "/luainstaller-require-trace-" .. stamp .. ".lua")
-    local output_path = normalizePath((os.getenv("TMPDIR") or "/tmp") .. "/luainstaller-require-trace-" .. stamp .. ".txt")
+    local work_dir, work_err = makePrivateWorkDir("require-trace")
+    if not work_dir then
+        return nil, work_err
+    end
+    local script_path = normalizePath(work_dir .. "/trace.lua")
+    local output_path = normalizePath(work_dir .. "/trace.txt")
     local err = writeFile(script_path, traceScript(opts.entry, output_path))
     if err then
+        removeTree(work_dir)
         return nil, err
     end
 
@@ -275,9 +373,8 @@ local function runtimePlan(opts)
     }, " ")
 
     local ok, output = commandOutput(command)
-    removeFile(script_path)
     if not ok then
-        removeFile(output_path)
+        removeTree(work_dir)
         return nil, makeError("DiscoveryError", "Runtime require tracing failed", {
             command = command,
             output = output,
@@ -285,7 +382,7 @@ local function runtimePlan(opts)
     end
 
     local records, parse_err = parseTraceOutput(output_path)
-    removeFile(output_path)
+    removeTree(work_dir)
     if not records then
         return nil, parse_err
     end

@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-06-16
+    2026-07-10
 ]]
 
 local path = require("luainstaller.path")
@@ -45,12 +45,15 @@ local function sortedKeys(tbl)
     return keys
 end
 
-function M.moduleNameFromPath(path)
-    path = normalizePath(path)
-    if path:match("/init%.lua$") then
-        return path:match("([^/]+)/init%.lua$") or "init"
+function M.moduleNameFromPath(file_path, entry)
+    if entry and entry ~= "" then
+        return path.moduleNameFromLuaPath(file_path, entry)
     end
-    local name = basename(path)
+    file_path = normalizePath(file_path)
+    if file_path:match("/init%.lua$") then
+        return file_path:match("([^/]+)/init%.lua$") or "init"
+    end
+    local name = basename(file_path)
     return (name:gsub("%.lua$", ""))
 end
 
@@ -73,10 +76,10 @@ function M.buildPayload(opts)
         modules = {},
     }
 
-    for _, path in ipairs(dependencies.scripts or {}) do
-        local normalized = normalizePath(path)
-        local module_name = opts.module_names and (opts.module_names[path] or opts.module_names[normalized])
-            or M.moduleNameFromPath(path)
+    for _, script_path in ipairs(dependencies.scripts or {}) do
+        local normalized = normalizePath(script_path)
+        local module_name = opts.module_names and (opts.module_names[script_path] or opts.module_names[normalized])
+            or M.moduleNameFromPath(script_path, opts.entry)
         if payload.modules[module_name] then
             error({
                 type = "DuplicateModuleError",
@@ -85,8 +88,8 @@ function M.buildPayload(opts)
             })
         end
         payload.modules[module_name] = {
-            path = path,
-            source = readFile(path),
+            path = script_path,
+            source = readFile(script_path),
         }
     end
 

@@ -65,10 +65,16 @@ local function safeExternalPath(path)
     path = path:gsub("^/", "")
     path = path:gsub(":", "")
     path = path:gsub("[^%w%._%-%/]", "_")
-    if path == "" then
-        return basename(path)
+    local parts = {}
+    for segment in path:gmatch("[^/]+") do
+        if segment ~= "" and segment ~= "." and segment ~= ".." then
+            parts[#parts + 1] = segment
+        end
     end
-    return normalizePath("external/" .. path)
+    if #parts == 0 then
+        return normalizePath("external/" .. basename(path))
+    end
+    return normalizePath("external/" .. table.concat(parts, "/"))
 end
 
 local function luaInfo()
