@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
 
-WINDOWS_HOST=${WINDOWS_HOST:-"WaterRun@192.168.69.130"}
-WINDOWS_TARGETS=${WINDOWS_TARGETS:-"Win10=$WINDOWS_HOST Win7=WaterRun@192.168.69.134"}
+# Lab defaults match /home/waterrun/VM/SSH_Win10_README.md / SSH_Win7_README.md (Win10 OpenSSH, Win7 KTS).
+WINDOWS_HOST=${WINDOWS_HOST:-"waterrun@192.168.69.130"}
+WINDOWS_TARGETS=${WINDOWS_TARGETS:-"Win10=$WINDOWS_HOST"}
 SSH_OPTS=${SSH_OPTS:-"-o StrictHostKeyChecking=no"}
-REMOTE_TEMP=${REMOTE_TEMP:-"C:/Users/WaterRun/AppData/Local/Temp"}
+REMOTE_TEMP=${REMOTE_TEMP:-"C:/Users/waterrun/AppData/Local/Temp"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
 WIN_PREFIX=${WIN_PREFIX:-"/tmp/luainstaller-win-lua"}
 WIN_TREE=${WIN_TREE:-"/tmp/luainstaller-win-rocks"}
@@ -305,13 +306,15 @@ try {
 
 Write-Output 'windows remote bundles ok'
 PS1
+    # Convert C:/Users/... style paths to Windows backslash form for powershell -File.
+    remote_ps1=$(printf '%s' "$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" | sed 's|/|\\|g')
     for target in $WINDOWS_TARGETS; do
         label=${target%%=*}
         host=${target#*=}
-        echo "windows remote target $label"
+        echo "windows remote target $label ($host)"
         SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
         SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
-        SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh $SSH_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\WaterRun\\AppData\\Local\\Temp\\luainstaller-run-windows-bundles.ps1"
+        SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh $SSH_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote_ps1"
     done
 }
 
