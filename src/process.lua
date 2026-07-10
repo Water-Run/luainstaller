@@ -24,8 +24,9 @@ function M.output(command)
         return false, tostring(pipe)
     end
     local output = pipe:read("*a") or ""
+    -- pipe:close() succeeds with first result true (Lua 5.1 / 5.2+ / LuaJIT).
     local close_ok = pipe:close()
-    if close_ok == true or close_ok == 0 then
+    if close_ok == true then
         return true, output
     end
     return false, output

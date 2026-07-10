@@ -79,9 +79,12 @@ local function ensureDirectory(path)
             return false
         end
         return commandSucceeded(os.execute(string.format('if not exist "%s" mkdir "%s"', path, path)))
-    else
-        return commandSucceeded(os.execute("mkdir -p " .. process.shellQuote(path) .. " 2>/dev/null"))
     end
+    local ok = commandSucceeded(os.execute("mkdir -p " .. process.shellQuote(path) .. " 2>/dev/null"))
+    if ok then
+        os.execute("chmod 700 " .. process.shellQuote(path) .. " 2>/dev/null")
+    end
+    return ok
 end
 
 
@@ -191,6 +194,10 @@ local function saveToFile(logs)
     handle:write(serializeValue(logs))
     handle:write("\n")
     handle:close()
+    -- Restrict log file access: loadfile executes this file as Lua source.
+    if not IS_WINDOWS then
+        os.execute("chmod 600 " .. process.shellQuote(path) .. " 2>/dev/null")
+    end
     return true
 end
 

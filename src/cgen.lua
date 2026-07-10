@@ -117,6 +117,9 @@ local function emitPayload(payload)
     return table.concat(lines, "\n")
 end
 
+-- RUNTIME_SOURCE is embedded into the C launcher bootstrap.
+-- Functionally similar to src/runtime.lua (Lua API / tests) but maintained
+-- independently. When changing bootstrap behavior, check both files.
 local RUNTIME_SOURCE = [=[
 local function pathDirname(path)
   path = tostring(path or ""):gsub("\\", "/")

@@ -12,6 +12,7 @@ Updated:
 ]]
 
 local launcher = require("luainstaller.launcher")
+local manifest_mod = require("luainstaller.manifest")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
@@ -37,6 +38,8 @@ local GENERATED_MARKER = "luainstaller-generated-output-v1"
 local writeFile
 
 -- Split pkg-config output into shell-safe tokens. Reject metacharacters.
+-- NOTE: assumes pkg-config tokens do not contain spaces; space-bearing paths
+-- are rare and would be split by %S+ before quoting.
 local function sanitizePkgConfigFlags(raw)
     local tokens = {}
     for token in tostring(raw or ""):gmatch("%S+") do
@@ -104,14 +107,7 @@ local function readFile(path)
     return content
 end
 
-local function fnv1a32(content)
-    local hash = 2166136261
-    for i = 1, #content do
-        hash = hash ~ content:byte(i)
-        hash = (hash * 16777619) % 4294967296
-    end
-    return string.format("%08x", hash)
-end
+local fnv1a32 = manifest_mod.fnv1a32
 
 local function fileHash(path)
     local content = readFile(path)
@@ -583,9 +579,11 @@ function M.bundleOnedir(opts)
             return makeError("UnsupportedPlatformError", "windows onedir bundling requires a Linux host with MinGW")
         end
         local prefix_err
-        prefix_err, windows_lua = validateWindowsLuaPrefix(profile.lua_prefix)
-        if prefix_err then
-            return prefix_err
+        -- Convention: success is (nil, data); failure is a single error table.
+        local windows_prefix_error
+        windows_prefix_error, windows_lua = validateWindowsLuaPrefix(profile.lua_prefix)
+        if windows_prefix_error then
+            return windows_prefix_error
         end
         local cc_ok, cc_output = commandOutput(shellQuote(windowsCompiler()) .. " --version")
         if not cc_ok then
@@ -636,7 +634,16 @@ function M.bundleOnedir(opts)
     local build_dir = normalizePath(luai_dir .. "/build")
     local c_path = normalizePath(build_dir .. "/launcher.c")
 
-    local err = removeTree(out_dir) or ensureDirectory(native_dir) or ensureDirectory(build_dir)
+    -- Probe writability before deleting any previous onedir output.
+    local err = ensureDirectory(out_dir)
+    if err then
+        return err
+    end
+    err = removeTree(out_dir)
+    if err then
+        return err
+    end
+    err = ensureDirectory(native_dir) or ensureDirectory(build_dir)
     if err then
         return err
     end

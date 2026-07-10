@@ -988,6 +988,8 @@ end
 function DependencyAnalyzer:analyze()
     self:analyzeRecursive(self.entry_script)
 
+    -- Defensive final check; analyzeRecursive already enforces max_dependencies
+    -- incrementally. Kept as an assertion for incomplete internal states.
     local total = 0
     for _ in pairs(self.visited) do
         total = total + 1
@@ -1096,7 +1098,7 @@ function DependencyAnalyzer:analyzeRecursive(script_path)
     end
 
     self.dep_graph[script_path] = children
-    self.stack[#self.stack] = nil
+    table.remove(self.stack)
     self.visited[script_path] = true
 end
 

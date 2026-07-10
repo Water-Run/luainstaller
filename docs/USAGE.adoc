@@ -265,6 +265,10 @@ program loads different modules for different subcommands, run a
 representative command or use manual includes for the missing files.
 Use `--lua PATH` or `LUAI_LUA` when runtime discovery must use a specific
 Lua interpreter.
+
+Runtime tracing patches the global `require` (and flushes records before
+`os.exit`). Modules that captured `require` into a local before the patch
+ran are not visible to the tracer; add those files with `--include`.
 ====
 
 [#usage-inspection]

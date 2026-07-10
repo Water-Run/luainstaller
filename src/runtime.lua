@@ -1,6 +1,10 @@
 --[[
 Pure Lua bundle runtime for luainstaller.
 
+Used by Lua API tests and in-process runs. Generated bundles embed the
+bootstrap from src/cgen.lua RUNTIME_SOURCE instead. Keep the two in sync
+when changing searcher install or source loading behavior.
+
 Author:
     WaterRun
 File:
@@ -8,7 +12,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-06-16
+    2026-07-10
 ]]
 
 local M = {}

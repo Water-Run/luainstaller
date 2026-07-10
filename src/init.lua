@@ -125,23 +125,19 @@ local function normalizeSequenceOption(opts, key)
         return nil, invalidOption(key, key .. " must be a list of strings")
     end
     local copy = {}
-    local count = 0
-    for item_key, item_value in pairs(value) do
-        if type(item_key) ~= "number" or item_key < 1 or item_key ~= math.floor(item_key) then
-            return nil, invalidOption(key, key .. " must be a sequence")
-        end
+    for i, item_value in ipairs(value) do
         if type(item_value) ~= "string" then
             return nil, invalidOption(key, key .. " entries must be strings")
         end
-        if item_key > count then
-            count = item_key
-        end
+        copy[i] = item_value
     end
-    for i = 1, count do
-        if type(value[i]) ~= "string" then
-            return nil, invalidOption(key, key .. " must be a dense sequence")
+    for item_key in pairs(value) do
+        if type(item_key) ~= "number"
+            or item_key < 1
+            or item_key ~= math.floor(item_key)
+            or item_key > #copy then
+            return nil, invalidOption(key, key .. " must be a sequence")
         end
-        copy[i] = value[i]
     end
     return copy
 end
@@ -386,6 +382,9 @@ function M.trace(opts)
     }
 end
 
+--@description: Report host/target compatibility diagnostics without building a bundle
+--@param opts: table - Options table with entry and optional target_os, lua_prefix
+--@return: table - Structured result with host, target, Lua ABI, notes, and warnings
 function M.compatibility(opts)
     local context, err = analyzeContext(opts)
     if not context then

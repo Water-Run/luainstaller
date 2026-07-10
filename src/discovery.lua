@@ -191,18 +191,30 @@ local function unquoteLuaString(quoted)
 end
 
 local function makePrivateWorkDir(prefix)
-    local stamp = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
-    local entropy = tostring({}):match("0x(%x+)") or tostring(math.random(1000000, 9999999))
     local root = os.getenv("TMPDIR") or "/tmp"
-    local dir = normalizePath(root .. "/luainstaller-" .. prefix .. "-" .. stamp .. "-" .. entropy)
-    local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(dir))
-    if not ok then
-        return nil, makeError("FilesystemError", "Cannot create private temp directory", {
-            path = dir,
-            output = output,
-        })
+    local max_attempts = 10
+    for _ = 1, max_attempts do
+        local stamp = tostring(os.time())
+            .. tostring(os.clock()):gsub("%.", "")
+            .. "-"
+            .. tostring(math.random(100000, 999999))
+        local dir = normalizePath(root .. "/luainstaller-" .. prefix .. "-" .. stamp)
+        local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(dir))
+        if ok then
+            return dir
+        end
+        -- Retry only when the path already exists (collision); other failures are fatal.
+        local exists_ok = commandOutput("test -d " .. shellQuote(dir))
+        if not exists_ok then
+            return nil, makeError("FilesystemError", "Cannot create private temp directory", {
+                path = dir,
+                output = output,
+            })
+        end
     end
-    return dir
+    return nil, makeError("FilesystemError", "Cannot create unique private temp directory after retries", {
+        prefix = prefix,
+    })
 end
 
 local function applyManualInputs(result, opts)
@@ -269,6 +281,9 @@ local function staticPlan(opts)
     return result
 end
 
+-- Generated tracer for --discovery-mode runtime.
+-- Limits: modules that capture require before this patch runs are not traced;
+-- use --include for those. os.exit is wrapped so records are flushed first.
 local function traceScript(entry, output_path)
     local entry_dir = dirname(absolutePath(entry))
     return string.format([[
@@ -276,10 +291,21 @@ local output_path = %q
 local entry = %q
 local entry_dir = %q
 local original_require = require
+local original_exit = os.exit
 local seen = {}
 local records = {}
 local function q(value)
     return string.format("%%q", tostring(value or ""))
+end
+local function flush_records()
+    local out = io.open(output_path, "wb")
+    if not out then
+        return
+    end
+    for _, record in ipairs(records) do
+        out:write(q(record.name), "\t", q(record.source), "\n")
+    end
+    out:close()
 end
 package.path = entry_dir .. "/?.lua;" .. entry_dir .. "/?/init.lua;" .. package.path
 package.cpath = table.concat({
@@ -305,6 +331,10 @@ require = function(name)
     end
     return original_require(name)
 end
+os.exit = function(code, close)
+    flush_records()
+    return original_exit(code, close)
+end
 arg = { [0] = entry }
 for i = 1, select("#", ...) do
     arg[i] = select(i, ...)
@@ -313,11 +343,7 @@ local ok, err = pcall(function()
     local chunk = assert(loadfile(entry))
     return chunk()
 end)
-local out = assert(io.open(output_path, "wb"))
-for _, record in ipairs(records) do
-    out:write(q(record.name), "\t", q(record.source), "\n")
-end
-out:close()
+flush_records()
 if not ok then
     error(err)
 end

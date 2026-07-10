@@ -24,13 +24,48 @@ end
 
 local function installSourcePreloads()
     local script_path = arg and arg[0] or ""
-    local source_dir = script_path:match("^(.*[/\\])[^/\\]+$") or "src/"
+    local source_dir = script_path:match("^(.*[/\\])[^/\\]+$")
+    if not source_dir and script_path ~= "" and not script_path:find("[/\\]", 1) then
+        -- Bare command name: resolve via PATH when possible (POSIX).
+        local pipe = io.popen("command -v " .. script_path:gsub("'", "'\\''") .. " 2>/dev/null", "r")
+        if pipe then
+            local resolved = pipe:read("*l") or ""
+            pipe:close()
+            source_dir = resolved:match("^(.*[/\\])[^/\\]+$")
+        end
+    end
+    -- Do not guess CWD/src/. Missing source_dir means use installed package path.
     local function sourcePath(name)
+        if not source_dir then
+            return nil
+        end
         return source_dir .. name
     end
 
-    if package.preload["luainstaller"] or not localFileExists(sourcePath("init.lua")) then
+    if package.preload["luainstaller"] or not source_dir or not localFileExists(sourcePath("init.lua")) then
         return
+    end
+
+    -- Clear cached installed modules so checkout source wins over LuaRocks.
+    local module_names = {
+        "luainstaller",
+        "luainstaller.process",
+        "luainstaller.path",
+        "luainstaller.result",
+        "luainstaller.analyzer",
+        "luainstaller.logger",
+        "luainstaller.manifest",
+        "luainstaller.compat",
+        "luainstaller.platform",
+        "luainstaller.cgen",
+        "luainstaller.launcher",
+        "luainstaller.bundler",
+        "luainstaller.discovery",
+        "luainstaller.onefile",
+        "luainstaller.runtime",
+    }
+    for _, name in ipairs(module_names) do
+        package.loaded[name] = nil
     end
 
     package.preload["luainstaller.process"] = package.preload["luainstaller.process"] or function()

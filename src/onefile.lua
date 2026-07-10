@@ -12,6 +12,7 @@ Updated:
 ]]
 
 local bundler = require("luainstaller.bundler")
+local manifest_mod = require("luainstaller.manifest")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
@@ -85,14 +86,7 @@ local function readFile(path)
     return content
 end
 
-local function fnv1a32(content)
-    local hash = 2166136261
-    for i = 1, #content do
-        hash = hash ~ content:byte(i)
-        hash = (hash * 16777619) % 4294967296
-    end
-    return string.format("%08x", hash)
-end
+local fnv1a32 = manifest_mod.fnv1a32
 
 local function bytesFromString(content)
     local bytes = {}
@@ -164,7 +158,11 @@ end
 
 local function tempPath(name)
     local root = os.getenv("TMPDIR") or "/tmp"
-    return normalizePath(root .. "/luainstaller-" .. name .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999)))
+    return normalizePath(root .. "/luainstaller-" .. name .. "-"
+        .. tostring(os.time())
+        .. tostring(os.clock()):gsub("%.", "")
+        .. "-"
+        .. tostring(math.random(100000, 999999)))
 end
 
 local function collectFiles(root)
@@ -599,7 +597,17 @@ function M.bundleOnefile(opts)
     local build_dir = tempPath("onefile-build")
     local c_path = normalizePath(build_dir .. "/extractor.c")
 
-    local err = removeTree(stage_dir) or removeTree(build_dir) or ensureDirectory(build_dir)
+    -- Confirm build dir is creatable before wiping stage/build temps.
+    local err = ensureDirectory(build_dir)
+    if err then
+        return err
+    end
+    err = removeTree(stage_dir)
+    if err then
+        removeTree(build_dir)
+        return err
+    end
+    err = removeTree(build_dir) or ensureDirectory(build_dir)
     if err then
         return err
     end

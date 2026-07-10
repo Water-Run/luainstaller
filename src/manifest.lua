@@ -42,6 +42,9 @@ local function fnv1a32(content)
     return string.format("%08x", hash)
 end
 
+-- Shared by bundler/onefile so hash algorithm stays single-source.
+M.fnv1a32 = fnv1a32
+
 local function fileHash(path)
     local content = readFile(path)
     if not content then
@@ -196,6 +199,8 @@ function M.build(opts)
             depscan = opts.depscan ~= false,
         },
         trace = opts.trace or {},
+        -- Declared packaging requirement (not a host/target snapshot).
+        -- Structured diagnostics live on trace/compatibility API results.
         compatibility = {
             "same OS",
             "same architecture",
