@@ -11,7 +11,7 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-06-14
+    2026-07-11
 ]]
 local ROOT = "test/ltokei"
 package.path = ROOT .. "/src/?.lua;" .. package.path
@@ -35,10 +35,10 @@ assert(report.total.files == 3, "expected three supported fixture files")
 assert(report.languages.Lua.files == 1, "expected one Lua file")
 assert(report.languages.Markdown.files == 1, "expected one Markdown file")
 assert(report.languages.C.files == 1, "expected one C file")
-assert(report.total.lines == 31, "expected fixture line total")
+assert(report.total.lines == 32, "expected fixture line total")
 assert(report.total.comments == 17, "expected fixture comment total")
 assert(report.total.blanks == 5, "expected fixture blank total")
-assert(report.total.code == 9, "expected fixture code total")
+assert(report.total.code == 10, "expected fixture code total")
 
 local table_text = formatter.render(report)
 assert_contains(table_text, "Language")

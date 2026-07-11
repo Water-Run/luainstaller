@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-10
+    2026-07-11
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -50,11 +50,6 @@ local function removeTree(path)
             output = output,
         })
     end
-    return nil
-end
-
-local function removeFile(path)
-    os.remove(path)
     return nil
 end
 
@@ -156,13 +151,55 @@ local function validateOutputPath(path)
     return nil
 end
 
-local function tempPath(name)
+local function uniqueTempName(name)
     local root = os.getenv("TMPDIR") or "/tmp"
     return normalizePath(root .. "/luainstaller-" .. name .. "-"
         .. tostring(os.time())
         .. tostring(os.clock()):gsub("%.", "")
         .. "-"
         .. tostring(math.random(100000, 999999)))
+end
+
+local function createPrivateDirectory(name, parent)
+    if parent then
+        local parent_err = ensureDirectory(parent)
+        if parent_err then
+            return nil, parent_err
+        end
+    end
+    for _ = 1, 20 do
+        local candidate
+        if parent then
+            candidate = normalizePath(parent .. "/." .. name .. "-"
+                .. tostring(os.time())
+                .. tostring(os.clock()):gsub("%.", "")
+                .. "-" .. tostring(math.random(100000, 999999)))
+        else
+            candidate = uniqueTempName(name)
+        end
+        local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(candidate))
+        if ok then
+            return candidate
+        end
+        if not pathExists(candidate) then
+            return nil, makeError("FilesystemError", "Cannot create private build directory", {
+                path = candidate,
+                output = output,
+            })
+        end
+    end
+    return nil, makeError("FilesystemError", "Cannot allocate a unique private build directory", {
+        path = parent or (os.getenv("TMPDIR") or "/tmp"),
+    })
+end
+
+local function cleanupDirectory(path_value, failure)
+    local cleanup_err = path_value and removeTree(path_value) or nil
+    if cleanup_err and failure and failure.error then
+        failure.error.cleanup_error = cleanup_err.error and cleanup_err.error.message or tostring(cleanup_err)
+        failure.error.cleanup_path = path_value
+    end
+    return failure or cleanup_err
 end
 
 local function collectFiles(root)
@@ -237,10 +274,16 @@ local EXTRACTOR_TEMPLATE = [=[
 
 #ifdef _WIN32
 #include <direct.h>
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
+#include <sys/stat.h>
 #include <windows.h>
+#include <aclapi.h>
+#include <sddl.h>
 #define L_SEP "\\"
 #else
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -250,9 +293,19 @@ local EXTRACTOR_TEMPLATE = [=[
 
 static int luai_mkdir_one(const char *path) {
 #ifdef _WIN32
-    if (_mkdir(path) == 0 || errno == EEXIST) return 0;
+    if (_mkdir(path) == 0) return 0;
+    if (errno == EEXIST) {
+        DWORD attrs = GetFileAttributesA(path);
+        if (attrs != INVALID_FILE_ATTRIBUTES &&
+            (attrs & FILE_ATTRIBUTE_DIRECTORY) &&
+            !(attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
+    }
 #else
-    if (mkdir(path, 0700) == 0 || errno == EEXIST) return 0;
+    if (mkdir(path, 0700) == 0) return 0;
+    if (errno == EEXIST) {
+        struct stat st;
+        if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) return 0;
+    }
 #endif
     return -1;
 }
@@ -272,6 +325,85 @@ static int luai_mkdir_p(const char *path) {
         }
     }
     return luai_mkdir_one(tmp);
+}
+
+#ifdef _WIN32
+static int luai_harden_private_path(const char *path) {
+    HANDLE token = NULL;
+    TOKEN_USER *token_user = NULL;
+    DWORD token_size = 0;
+    PSID owner = NULL;
+    PSECURITY_DESCRIPTOR current_sd = NULL;
+    PSECURITY_DESCRIPTOR private_sd = NULL;
+    PACL private_dacl = NULL;
+    BOOL dacl_present = FALSE;
+    BOOL dacl_defaulted = FALSE;
+    LPSTR sid_text = NULL;
+    BYTE administrators_sid[SECURITY_MAX_SID_SIZE];
+    DWORD administrators_sid_size = sizeof(administrators_sid);
+    BOOL is_administrator = FALSE;
+    char sddl[1024];
+    DWORD status;
+    int result = -1;
+
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) goto cleanup;
+    GetTokenInformation(token, TokenUser, NULL, 0, &token_size);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) goto cleanup;
+    token_user = (TOKEN_USER *)LocalAlloc(LPTR, token_size);
+    if (!token_user) goto cleanup;
+    if (!GetTokenInformation(token, TokenUser, token_user, token_size, &token_size)) goto cleanup;
+    status = GetNamedSecurityInfoA((LPSTR)path, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION,
+                                   &owner, NULL, NULL, NULL, &current_sd);
+    if (status != ERROR_SUCCESS || !owner) goto cleanup;
+    if (!EqualSid(owner, token_user->User.Sid)) {
+        if (!CreateWellKnownSid(WinBuiltinAdministratorsSid, NULL,
+                                administrators_sid, &administrators_sid_size)) goto cleanup;
+        if (!CheckTokenMembership(NULL, administrators_sid, &is_administrator)
+            || !is_administrator || !EqualSid(owner, administrators_sid)) goto cleanup;
+    }
+    if (!ConvertSidToStringSidA(token_user->User.Sid, &sid_text)) goto cleanup;
+    if (snprintf(sddl, sizeof(sddl), "O:%sD:P(A;OICI;FA;;;%s)(A;OICI;FA;;;SY)",
+                 sid_text, sid_text) < 0) goto cleanup;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorA(
+            sddl, SDDL_REVISION_1, &private_sd, NULL)) goto cleanup;
+    if (!GetSecurityDescriptorDacl(private_sd, &dacl_present, &private_dacl, &dacl_defaulted)
+        || !dacl_present || !private_dacl) goto cleanup;
+    status = SetNamedSecurityInfoA((LPSTR)path, SE_FILE_OBJECT,
+                                   OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION
+                                       | PROTECTED_DACL_SECURITY_INFORMATION,
+                                   token_user->User.Sid, NULL, private_dacl, NULL);
+    if (status != ERROR_SUCCESS) goto cleanup;
+    result = 0;
+
+cleanup:
+    if (sid_text) LocalFree(sid_text);
+    if (private_sd) LocalFree(private_sd);
+    if (current_sd) LocalFree(current_sd);
+    if (token_user) LocalFree(token_user);
+    if (token) CloseHandle(token);
+    return result;
+}
+#endif
+
+static int luai_ensure_private_dir(const char *path) {
+    if (luai_mkdir_p(path) != 0) return -1;
+#ifdef _WIN32
+    {
+        DWORD attrs = GetFileAttributesA(path);
+        if (attrs == INVALID_FILE_ATTRIBUTES ||
+            !(attrs & FILE_ATTRIBUTE_DIRECTORY) ||
+            (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return -1;
+        if (luai_harden_private_path(path) != 0) return -1;
+    }
+#else
+    {
+        struct stat st;
+        if (lstat(path, &st) != 0 || !S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode)) return -1;
+        if (st.st_uid != geteuid()) return -1;
+        if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0) return -1;
+    }
+#endif
+    return 0;
 }
 
 static int luai_parent_dir(char *out, size_t out_size, const char *path) {
@@ -368,40 +500,131 @@ static int luai_path_is_safe_relative(const char *path) {
 
 static int luai_write_file(const char *path, const unsigned char *data, size_t size, int executable, const char *hash) {
     char parent[4096];
+    char temporary[4096];
     FILE *file;
+    int fd = -1;
+    unsigned int attempt;
+    int name_length;
     if (luai_remove_unsafe_existing(path) != 0) return -1;
-    if (luai_file_matches_hash(path, size, hash)) return luai_apply_mode(path, executable);
+    if (luai_file_matches_hash(path, size, hash)) {
+#ifdef _WIN32
+        if (luai_harden_private_path(path) != 0) return -1;
+#endif
+        return luai_apply_mode(path, executable);
+    }
     if (luai_parent_dir(parent, sizeof(parent), path) != 0) return -1;
     if (luai_mkdir_p(parent) != 0) return -1;
-    file = fopen(path, "wb");
-    if (!file) return -1;
-    if (size > 0 && fwrite(data, 1, size, file) != size) {
-        fclose(file);
+    for (attempt = 0; attempt < 100; ++attempt) {
+#ifdef _WIN32
+        name_length = snprintf(temporary, sizeof(temporary), "%s.luai-%lu-%u.tmp", path,
+                               (unsigned long)_getpid(), attempt);
+        if (name_length < 0 || (size_t)name_length >= sizeof(temporary)) return -1;
+        fd = _open(temporary, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+                   _S_IREAD | _S_IWRITE);
+#else
+        name_length = snprintf(temporary, sizeof(temporary), "%s.luai-%lu-%u.tmp", path,
+                               (unsigned long)getpid(), attempt);
+        if (name_length < 0 || (size_t)name_length >= sizeof(temporary)) return -1;
+        fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0600);
+#endif
+        if (fd >= 0) break;
+        if (errno != EEXIST) return -1;
+    }
+    if (fd < 0) return -1;
+#ifdef _WIN32
+    file = _fdopen(fd, "wb");
+#else
+    file = fdopen(fd, "wb");
+#endif
+    if (!file) {
+#ifdef _WIN32
+        _close(fd);
+#else
+        close(fd);
+#endif
+        remove(temporary);
         return -1;
     }
-    if (fclose(file) != 0) return -1;
-    return luai_apply_mode(path, executable);
+    if (size > 0 && fwrite(data, 1, size, file) != size) {
+        fclose(file);
+        remove(temporary);
+        return -1;
+    }
+    if (fclose(file) != 0) {
+        remove(temporary);
+        return -1;
+    }
+    if (luai_apply_mode(temporary, executable) != 0) {
+        remove(temporary);
+        return -1;
+    }
+#ifdef _WIN32
+    if (luai_harden_private_path(temporary) != 0) {
+        remove(temporary);
+        return -1;
+    }
+#endif
+#ifdef _WIN32
+    if (!MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+#else
+    if (rename(temporary, path) != 0) {
+#endif
+        if (luai_file_matches_hash(path, size, hash)) {
+            remove(temporary);
+#ifdef _WIN32
+            if (luai_harden_private_path(path) != 0) return -1;
+#endif
+            return luai_apply_mode(path, executable);
+        }
+        remove(temporary);
+        return -1;
+    }
+    return 0;
 }
 
-static const char *luai_temp_root(void) {
+static int luai_temp_root(char *out, size_t out_size) {
 #ifdef _WIN32
     const char *value = getenv("TEMP");
+    int length;
     if (!value || !*value) value = getenv("TMP");
-    return value && *value ? value : ".";
+    if (!value || !*value) value = ".";
+    length = snprintf(out, out_size, "%s", value);
+    return length >= 0 && (size_t)length < out_size ? 0 : -1;
 #else
     const char *value = getenv("TMPDIR");
-    return value && *value ? value : "/tmp";
+    char *resolved;
+    size_t length;
+    if (!value || !*value) value = "/tmp";
+    resolved = realpath(value, NULL);
+    if (!resolved) return -1;
+    length = strlen(resolved);
+    if (length >= out_size) {
+        free(resolved);
+        return -1;
+    }
+    memcpy(out, resolved, length + 1);
+    free(resolved);
+    return 0;
 #endif
 }
 
 static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size) {
     char base[4096];
+    char cache_name[128];
+    char temp_root[4096];
     size_t i;
     size_t bundle_len;
-    if (luai_join(base, sizeof(base), luai_temp_root(), "luainstaller-onefile") != 0) return -1;
-    if (luai_mkdir_p(base) != 0) return -1;
+#ifdef _WIN32
+    if (snprintf(cache_name, sizeof(cache_name), "luainstaller-onefile") < 0) return -1;
+#else
+    if (snprintf(cache_name, sizeof(cache_name), "luainstaller-onefile-%lu",
+                 (unsigned long)geteuid()) < 0) return -1;
+#endif
+    if (luai_temp_root(temp_root, sizeof(temp_root)) != 0) return -1;
+    if (luai_join(base, sizeof(base), temp_root, cache_name) != 0) return -1;
+    if (luai_ensure_private_dir(base) != 0) return -1;
     if (luai_join(bundle_dir, bundle_dir_size, base, LUAI_PAYLOAD_ID) != 0) return -1;
-    if (luai_mkdir_p(bundle_dir) != 0) return -1;
+    if (luai_ensure_private_dir(bundle_dir) != 0) return -1;
     bundle_len = strlen(bundle_dir);
     for (i = 0; i < LUAI_FILE_COUNT; ++i) {
         char target[4096];
@@ -429,12 +652,32 @@ static int luai_append_quoted(char *cmd, size_t cmd_size, const char *value) {
     size_t i;
     if (len + 3 >= cmd_size) return -1;
     cmd[len++] = '"';
-    for (i = 0; value[i]; ++i) {
-        if (len + 4 >= cmd_size) return -1;
-        if (value[i] == '"' || value[i] == '\\') cmd[len++] = '\\';
-        cmd[len++] = value[i];
+    i = 0;
+    for (;;) {
+        size_t backslashes = 0;
+        size_t count;
+        while (value[i] == '\\') {
+            backslashes++;
+            i++;
+        }
+        if (value[i] == '"') {
+            count = backslashes * 2 + 1;
+            if (len + count + 2 >= cmd_size) return -1;
+            while (count-- > 0) cmd[len++] = '\\';
+            cmd[len++] = '"';
+            i++;
+        } else if (value[i] == '\0') {
+            count = backslashes * 2;
+            if (len + count + 2 >= cmd_size) return -1;
+            while (count-- > 0) cmd[len++] = '\\';
+            break;
+        } else {
+            count = backslashes;
+            if (len + count + 2 >= cmd_size) return -1;
+            while (count-- > 0) cmd[len++] = '\\';
+            cmd[len++] = value[i++];
+        }
     }
-    if (len + 2 >= cmd_size) return -1;
     cmd[len++] = '"';
     cmd[len] = '\0';
     return 0;
@@ -519,6 +762,10 @@ int main(int argc, char **argv) {
 local function generateExtractor(files, payload_id, inner_exe)
     local lines = {}
     lines[#lines + 1] = "/* Generated by luainstaller. */"
+    lines[#lines + 1] = "#ifndef _WIN32"
+    lines[#lines + 1] = "#define _POSIX_C_SOURCE 200809L"
+    lines[#lines + 1] = "#define _XOPEN_SOURCE 700"
+    lines[#lines + 1] = "#endif"
     lines[#lines + 1] = "#include <stddef.h>"
     lines[#lines + 1] = "struct luai_embedded_file {"
     lines[#lines + 1] = "    const char *path;"
@@ -560,6 +807,7 @@ local function compileExtractor(c_path, exe_path, profile)
             "-o",
             shellQuote(exe_path),
             "-static-libgcc",
+            "-ladvapi32",
         }, " ")
     else
         command = table.concat({
@@ -593,23 +841,16 @@ function M.bundleOnefile(opts)
     if output_err then
         return output_err
     end
-    local stage_dir = tempPath("onefile-stage") .. "/inner"
-    local build_dir = tempPath("onefile-build")
+    local work_dir, work_err = createPrivateDirectory("onefile-work")
+    if not work_dir then
+        return work_err
+    end
+    local stage_dir = normalizePath(work_dir .. "/inner")
+    local build_dir = normalizePath(work_dir .. "/build")
     local c_path = normalizePath(build_dir .. "/extractor.c")
-
-    -- Confirm build dir is creatable before wiping stage/build temps.
     local err = ensureDirectory(build_dir)
     if err then
-        return err
-    end
-    err = removeTree(stage_dir)
-    if err then
-        removeTree(build_dir)
-        return err
-    end
-    err = removeTree(build_dir) or ensureDirectory(build_dir)
-    if err then
-        return err
+        return cleanupDirectory(work_dir, err)
     end
 
     local staged = bundler.bundleOnedir({
@@ -622,31 +863,52 @@ function M.bundleOnefile(opts)
         manifest = opts.manifest,
     })
     if not staged.ok then
-        removeTree(build_dir)
-        return staged
+        return cleanupDirectory(work_dir, staged)
     end
 
     local files, payload_id = collectFiles(stage_dir)
     if not files then
-        removeTree(build_dir)
-        removeTree(dirname(stage_dir))
-        return payload_id
+        return cleanupDirectory(work_dir, payload_id)
     end
 
     local inner_exe = normalizePath(staged.executable):sub(#normalizePath(stage_dir) + 2)
     local c_source = generateExtractor(files, payload_id, inner_exe)
     err = writeFile(c_path, c_source)
     if err then
-        removeTree(build_dir)
-        removeTree(dirname(stage_dir))
-        return err
+        return cleanupDirectory(work_dir, err)
     end
 
-    err = ensureDirectory(dirname(out_path))
-        or removeFile(out_path)
-        or compileExtractor(c_path, out_path, profile)
-    removeTree(build_dir)
-    removeTree(dirname(stage_dir))
+    local output_parent = dirname(out_path)
+    err = ensureDirectory(output_parent)
+    local output_stage
+    if not err then
+        output_stage, err = createPrivateDirectory(basename(out_path) .. ".luai-output", output_parent)
+    end
+    local staged_exe = output_stage and normalizePath(output_stage .. "/artifact" .. (profile.executable_suffix or "")) or nil
+    if not err then
+        err = compileExtractor(c_path, staged_exe, profile)
+    end
+    if not err then
+        local linked, link_output = commandOutput("ln " .. shellQuote(staged_exe) .. " " .. shellQuote(out_path))
+        if not linked then
+            if pathExists(out_path) or isSymlink(out_path) then
+                err = makeError("InvalidOutputError", "Onefile output appeared while the bundle was being built", {
+                    path = out_path,
+                    output = link_output,
+                })
+            else
+                err = makeError("FilesystemError", "Cannot publish onefile output atomically; the output filesystem may not support hard links", {
+                    path = out_path,
+                    staging_path = staged_exe,
+                    output = link_output,
+                })
+            end
+        end
+    end
+    if output_stage then
+        err = cleanupDirectory(output_stage, err)
+    end
+    err = cleanupDirectory(work_dir, err)
     if err then
         return err
     end

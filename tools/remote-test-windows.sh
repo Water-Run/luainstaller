@@ -190,33 +190,90 @@ build_bundles() {
     bundle_demo test/savinglua/main.lua "$WIN_OUT/savinglua"
     bundle_demo test/ltokei/main.lua "$WIN_OUT/ltokei"
     bundle_demo test/firebird_web_sql/server.lua "$WIN_OUT/firebird"
+    cat >/tmp/luainstaller-win-argv-driver.c <<'C'
+#include <stdio.h>
+#include <string.h>
+#include <windows.h>
+
+int main(int argc, char **argv) {
+    char command[32768];
+    STARTUPINFOA startup;
+    PROCESS_INFORMATION process;
+    DWORD exit_code = 1;
+    const char *argument;
+    if (argc != 3) return 2;
+    if (strcmp(argv[2], "quote") == 0) {
+        argument = "\"say \\\"hello\\\"\\tail\"";
+    } else if (strcmp(argv[2], "trailing") == 0) {
+        argument = "\"C:\\Alpha Beta\\trail\\\\\"";
+    } else if (strcmp(argv[2], "empty") == 0) {
+        argument = "\"\"";
+    } else {
+        return 2;
+    }
+    if (snprintf(command, sizeof(command), "\"%s\" %s", argv[1], argument) < 0) return 2;
+    ZeroMemory(&startup, sizeof(startup));
+    ZeroMemory(&process, sizeof(process));
+    startup.cb = sizeof(startup);
+    if (!CreateProcessA(NULL, command, NULL, NULL, TRUE, 0, NULL, NULL, &startup, &process)) return 3;
+    WaitForSingleObject(process.hProcess, INFINITE);
+    GetExitCodeProcess(process.hProcess, &exit_code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return (int)exit_code;
+}
+C
+    x86_64-w64-mingw32-gcc /tmp/luainstaller-win-argv-driver.c \
+        -o "$WIN_OUT/argv-driver.exe" -static-libgcc
 }
 
 verify_with_wine() {
     rm -f /tmp/luainstaller-win-students.json /tmp/luainstaller-win-students-onefile.json /tmp/luainstaller-win-savinglua.sqlite3
-    wine "$WIN_OUT/runtime/runtime.exe" wine-clean | grep "hello wine-clean"
-    wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json seed | grep "Seeded 8 students"
-    wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json list --sort average | grep "Ada Lovelace"
-    wine "$WIN_OUT/runtime-onefile.exe" wine-onefile-clean | grep "hello wine-onefile-clean"
-    wine "$WIN_OUT/student-onefile.exe" --data Z:/tmp/luainstaller-win-students-onefile.json seed | grep "Seeded 8 students"
-    wine "$WIN_OUT/student-onefile.exe" --data Z:/tmp/luainstaller-win-students-onefile.json list --sort average | grep "Ada Lovelace"
-    wine "$WIN_OUT/savinglua/savinglua.exe" --db Z:/tmp/luainstaller-win-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}' | grep "stored users:ada"
-    wine "$WIN_OUT/savinglua/savinglua.exe" --db Z:/tmp/luainstaller-win-savinglua.sqlite3 get users:ada | grep "Ada Lovelace"
-    wine "$WIN_OUT/ltokei/ltokei.exe" Z:"$WIN_OUT/ltokei/.luai" | grep "Total"
-    FIREBIRD_WEB_SQL_PORT=19124 FIREBIRD_WEB_SQL_TOKEN=testtoken wine "$WIN_OUT/firebird/firebird.exe" >/tmp/luainstaller-windows-firebird.log 2>&1 &
+    output=$(wine "$WIN_OUT/runtime/runtime.exe" wine-clean)
+    printf '%s\n' "$output" | grep "hello wine-clean"
+    output=$(wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json seed)
+    printf '%s\n' "$output" | grep "Seeded 8 students"
+    output=$(wine "$WIN_OUT/student/student.exe" --data Z:/tmp/luainstaller-win-students.json list --sort average)
+    printf '%s\n' "$output" | grep "Ada Lovelace"
+    output=$(wine "$WIN_OUT/runtime-onefile.exe" wine-onefile-clean)
+    printf '%s\n' "$output" | grep "hello wine-onefile-clean"
+    windows_path='C:\Alpha Beta\trail'
+    output=$(wine "$WIN_OUT/runtime-onefile.exe" "$windows_path")
+    printf '%s\n' "$output" | grep -F "hello $windows_path"
+    quoted_arg='say "hello"\tail'
+    output=$(wine "$WIN_OUT/runtime-onefile.exe" "$quoted_arg")
+    printf '%s\n' "$output" | grep -F "hello $quoted_arg"
+    trailing_arg='C:\Alpha Beta\trail\'
+    output=$(wine "$WIN_OUT/runtime-onefile.exe" "$trailing_arg")
+    printf '%s\n' "$output" | grep -F "hello $trailing_arg"
+    output=$(wine "$WIN_OUT/runtime-onefile.exe" "")
+    printf '%s\n' "$output" | tr -d '\r' | grep -x 'hello '
+    output=$(wine "$WIN_OUT/student-onefile.exe" --data Z:/tmp/luainstaller-win-students-onefile.json seed)
+    printf '%s\n' "$output" | grep "Seeded 8 students"
+    output=$(wine "$WIN_OUT/student-onefile.exe" --data Z:/tmp/luainstaller-win-students-onefile.json list --sort average)
+    printf '%s\n' "$output" | grep "Ada Lovelace"
+    output=$(wine "$WIN_OUT/savinglua/savinglua.exe" --db Z:/tmp/luainstaller-win-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}')
+    printf '%s\n' "$output" | grep "stored users:ada"
+    output=$(wine "$WIN_OUT/savinglua/savinglua.exe" --db Z:/tmp/luainstaller-win-savinglua.sqlite3 get users:ada)
+    printf '%s\n' "$output" | grep "Ada Lovelace"
+    output=$(wine "$WIN_OUT/ltokei/ltokei.exe" Z:"$WIN_OUT/ltokei/.luai")
+    printf '%s\n' "$output" | grep "Total"
+    port=$((20000 + $$ % 20000))
+    FIREBIRD_WEB_SQL_PORT=$port FIREBIRD_WEB_SQL_TOKEN=testtoken wine "$WIN_OUT/firebird/firebird.exe" >/tmp/luainstaller-windows-firebird.log 2>&1 &
     pid=$!
     for _ in $(seq 1 60); do
-        if curl -fsS http://127.0.0.1:19124/api/status -H "X-Auth-Token: testtoken" | grep '"ok":true' >/dev/null; then
+        if ! kill -0 "$pid" >/dev/null 2>&1; then
+            cat /tmp/luainstaller-windows-firebird.log
+            exit 1
+        fi
+        response=$(curl -fsS "http://127.0.0.1:$port/api/status" -H "X-Auth-Token: testtoken" 2>/dev/null || true)
+        if printf '%s\n' "$response" | grep '"ok":true' >/dev/null; then
             kill "$pid" >/dev/null 2>&1 || true
             wait "$pid" >/dev/null 2>&1 || true
             echo "windows wine firebird ok"
             return
         fi
         sleep 0.25
-        if ! kill -0 "$pid" >/dev/null 2>&1; then
-            cat /tmp/luainstaller-windows-firebird.log
-            exit 1
-        fi
     done
     cat /tmp/luainstaller-windows-firebird.log
     exit 1
@@ -242,40 +299,90 @@ function Require-Match($Text, $Pattern, $Name) {
     }
 }
 
-$runtime = & (Join-Path $root 'runtime\runtime.exe') 'windows-clean' | Out-String
+function Invoke-NativeChecked($Name, [scriptblock]$Command) {
+    $raw = & $Command 2>&1
+    $code = $LASTEXITCODE
+    $text = $raw | Out-String
+    if ($code -ne 0) {
+        throw "$Name exited with code $code. Output: $text"
+    }
+    return $text
+}
+
+$runtimeExe = Join-Path $root 'runtime\runtime.exe'
+$runtime = Invoke-NativeChecked 'runtime' { & $runtimeExe 'windows-clean' }
 Require-Match $runtime 'hello windows-clean' 'runtime'
 
-$runtimeOnefile = & (Join-Path $root 'runtime-onefile.exe') 'windows-onefile-clean' | Out-String
+$runtimeOnefileExe = Join-Path $root 'runtime-onefile.exe'
+$onefileCache = Join-Path $env:TEMP 'luainstaller-onefile'
+if (Test-Path $onefileCache) { Remove-Item -Recurse -Force $onefileCache }
+$runtimeOnefile = Invoke-NativeChecked 'runtime onefile' { & $runtimeOnefileExe 'windows-onefile-clean' }
 Require-Match $runtimeOnefile 'hello windows-onefile-clean' 'runtime onefile'
+$cachedInner = Get-ChildItem $onefileCache -Recurse -File -Filter 'inner.exe' |
+    Select-Object -First 1
+if (-not $cachedInner) { throw 'runtime onefile cache inner.exe was not found' }
+$looseAcl = Get-Acl $cachedInner.FullName
+$everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
+$looseRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $everyone, 'FullControl', 'Allow')
+$looseAcl.SetAccessRule($looseRule)
+Set-Acl -Path $cachedInner.FullName -AclObject $looseAcl
+$runtimeOnefileAcl = Invoke-NativeChecked 'runtime onefile ACL repair' { & $runtimeOnefileExe 'windows-acl-repair' }
+Require-Match $runtimeOnefileAcl 'hello windows-acl-repair' 'runtime onefile ACL repair'
+$repairedAcl = Get-Acl $cachedInner.FullName
+$hasEveryone = $false
+foreach ($rule in $repairedAcl.Access) {
+    $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+    if ($sid -eq 'S-1-1-0') { $hasEveryone = $true }
+}
+if (-not $repairedAcl.AreAccessRulesProtected -or $hasEveryone) {
+    throw "runtime onefile did not repair a legacy loose file ACL: $($repairedAcl.AccessToString)"
+}
+$pathArg = 'C:\Alpha Beta\trail'
+$runtimeOnefilePath = Invoke-NativeChecked 'runtime onefile path' { & $runtimeOnefileExe $pathArg }
+if (-not $runtimeOnefilePath.Contains("hello $pathArg")) {
+    throw "runtime onefile changed a Windows path argument. Output: $runtimeOnefilePath"
+}
+$argvDriver = Join-Path $root 'argv-driver.exe'
+$runtimeOnefileQuote = Invoke-NativeChecked 'runtime onefile quote' { & $argvDriver $runtimeOnefileExe quote }
+Require-Match $runtimeOnefileQuote 'hello say "hello"\\tail' 'runtime onefile quote'
+$runtimeOnefileTrailing = Invoke-NativeChecked 'runtime onefile trailing slash' { & $argvDriver $runtimeOnefileExe trailing }
+Require-Match $runtimeOnefileTrailing 'hello C:\\Alpha Beta\\trail\\' 'runtime onefile trailing slash'
+$runtimeOnefileEmpty = Invoke-NativeChecked 'runtime onefile empty argument' { & $argvDriver $runtimeOnefileExe empty }
+Require-Match $runtimeOnefileEmpty '(?m)^hello\s*$' 'runtime onefile empty argument'
 
 $students = Join-Path $env:TEMP 'luainstaller-win-students.json'
 if (Test-Path $students) { Remove-Item -Force $students }
-$studentSeed = & (Join-Path $root 'student\student.exe') --data $students seed | Out-String
+$studentExe = Join-Path $root 'student\student.exe'
+$studentSeed = Invoke-NativeChecked 'student seed' { & $studentExe --data $students seed }
 Require-Match $studentSeed 'Seeded 8 students' 'student seed'
-$studentList = & (Join-Path $root 'student\student.exe') --data $students list --sort average | Out-String
+$studentList = Invoke-NativeChecked 'student list' { & $studentExe --data $students list --sort average }
 Require-Match $studentList 'Ada Lovelace' 'student list'
 
 $studentsOnefile = Join-Path $env:TEMP 'luainstaller-win-students-onefile.json'
 if (Test-Path $studentsOnefile) { Remove-Item -Force $studentsOnefile }
 $studentOnefile = Join-Path $root 'student-onefile.exe'
-$studentOnefileSeed = & $studentOnefile --data $studentsOnefile seed | Out-String
+$studentOnefileSeed = Invoke-NativeChecked 'student onefile seed' { & $studentOnefile --data $studentsOnefile seed }
 Require-Match $studentOnefileSeed 'Seeded 8 students' 'student onefile seed'
-$studentOnefileList = & $studentOnefile --data $studentsOnefile list --sort average | Out-String
+$studentOnefileList = Invoke-NativeChecked 'student onefile list' { & $studentOnefile --data $studentsOnefile list --sort average }
 Require-Match $studentOnefileList 'Ada Lovelace' 'student onefile list'
 
 $db = Join-Path $env:TEMP 'luainstaller-win-savinglua.sqlite3'
 if (Test-Path $db) { Remove-Item -Force $db }
 $savinglua = Join-Path $root 'savinglua\savinglua.exe'
 $savePutCommand = '"' + $savinglua + '" --db "' + $db + '" put users:ada "{\"name\":\"Ada Lovelace\",\"score\":98}"'
-$savePut = cmd /c $savePutCommand | Out-String
+$savePut = Invoke-NativeChecked 'savinglua put' { cmd /c $savePutCommand }
 Require-Match $savePut 'stored users:ada' 'savinglua put'
-$saveGet = & $savinglua --db $db get users:ada | Out-String
+$saveGet = Invoke-NativeChecked 'savinglua get' { & $savinglua --db $db get users:ada }
 Require-Match $saveGet 'Ada Lovelace' 'savinglua get'
 
-$ltokei = & (Join-Path $root 'ltokei\ltokei.exe') (Join-Path $root 'ltokei\.luai') | Out-String
+$ltokeiExe = Join-Path $root 'ltokei\ltokei.exe'
+$ltokeiPath = Join-Path $root 'ltokei\.luai'
+$ltokei = Invoke-NativeChecked 'ltokei' { & $ltokeiExe $ltokeiPath }
 Require-Match $ltokei 'Total' 'ltokei'
 
-$env:FIREBIRD_WEB_SQL_PORT = '19125'
+$firebirdPort = Get-Random -Minimum 20000 -Maximum 45000
+$env:FIREBIRD_WEB_SQL_PORT = [string]$firebirdPort
 $env:FIREBIRD_WEB_SQL_TOKEN = 'testtoken'
 $firebird = Join-Path $root 'firebird\firebird.exe'
 $outLog = Join-Path $env:TEMP 'luainstaller-win-firebird.out.log'
@@ -284,17 +391,17 @@ $proc = Start-Process -FilePath $firebird -WorkingDirectory (Split-Path $firebir
 try {
     $ok = $false
     for ($i = 0; $i -lt 80; $i++) {
+        if ($proc.HasExited) {
+            throw "firebird exited early: $(Get-Content $outLog -Raw) $(Get-Content $errLog -Raw)"
+        }
         try {
-            $resp = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:19125/api/status' -Headers @{ 'X-Auth-Token' = 'testtoken' } -TimeoutSec 2
+            $resp = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$firebirdPort/api/status" -Headers @{ 'X-Auth-Token' = 'testtoken' } -TimeoutSec 2
             if ($resp.Content -match '"ok":true') {
                 $ok = $true
                 break
             }
         } catch {
             Start-Sleep -Milliseconds 250
-        }
-        if ($proc.HasExited) {
-            throw "firebird exited early: $(Get-Content $outLog -Raw) $(Get-Content $errLog -Raw)"
         }
     }
     if (-not $ok) {

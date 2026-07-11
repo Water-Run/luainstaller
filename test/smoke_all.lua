@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-06-14
+    2026-07-11
 ]]
 
 local function shell_quote(value)
@@ -404,6 +404,11 @@ print(mod.message())
     write_file(root .. "/dynamic.lua", [[
 return { message = function() return "runtime dynamic module" end }
 ]])
+    write_file(root .. "/optional.lua", [[
+local ok = pcall(require, "luainstaller_optional_module_that_does_not_exist")
+assert(not ok)
+print("optional module absent")
+]])
 
     local script = SOURCE_LOADER .. string.format([[
 local luainstaller = require("luainstaller")
@@ -428,8 +433,16 @@ assert(runtime.dependencies.scripts[1]:match("dynamic%%.lua$"))
 assert(#runtime.trace >= 1)
 assert(runtime.trace[1].requested == "dynamic")
 
+local optional = luainstaller.analyze({
+    entry = %q,
+    discovery_mode = "runtime",
+})
+assert(optional.ok == true, optional.error and optional.error.message)
+assert(#optional.dependencies.scripts == 0)
+assert(#optional.dependencies.libraries == 0)
+
 print("discovery modes ok")
-]], root .. "/main.lua")
+]], root .. "/main.lua", root .. "/optional.lua")
 
     assert_contains(run("lua -e " .. shell_quote(script)), "discovery modes ok")
     remove_tree(root)
@@ -439,7 +452,9 @@ local function check_dependency_edge_cases()
     local root = make_temp_dir("dependency-edges")
     run("mkdir -p " .. shell_quote(root .. "/manual/foo") .. " " .. shell_quote(root .. "/fakebin")
         .. " " .. shell_quote(root .. "/native") .. " " .. shell_quote(root .. "/builtin")
-        .. " " .. shell_quote(root .. "/dynamic") .. " " .. shell_quote(root .. "/lexer"))
+        .. " " .. shell_quote(root .. "/dynamic") .. " " .. shell_quote(root .. "/lexer")
+        .. " " .. shell_quote(root .. "/escaped/escaped")
+        .. " " .. shell_quote(root .. "/local-require"))
 
     write_file(root .. "/manual/main.lua", [[
 local mod = require("foo.bar")
@@ -471,6 +486,24 @@ pcall(require, "dynamic_" .. suffix)
     write_file(root .. "/lexer/main.lua", [[
 local value = require.foo
 print(type(value))
+]])
+
+    write_file(root .. "/escaped/main.lua", [[
+local value = require("escaped\046name")
+print(value.message)
+]])
+    write_file(root .. "/escaped/escaped/name.lua", [[
+return { message = "escaped module name ok" }
+]])
+
+    write_file(root .. "/local-require/main.lua", [[
+local require =
+    require
+local value = require("dependency")
+print(value.message)
+]])
+    write_file(root .. "/local-require/dependency.lua", [[
+return { message = "local require ok" }
 ]])
 
     write_file(root .. "/fakebin/lua", [[
@@ -538,6 +571,22 @@ local lexer = luainstaller.analyze({
 })
 assert(lexer.ok == true, lexer.error and lexer.error.message)
 
+local escaped = luainstaller.analyze({
+    entry = %q,
+    max_deps = 20,
+})
+assert(escaped.ok == true, escaped.error and escaped.error.message)
+assert(#escaped.dependencies.scripts == 1)
+assert(escaped.dependencies.scripts[1]:match("escaped/name%%.lua$"))
+
+local local_require = luainstaller.analyze({
+    entry = %q,
+    max_deps = 20,
+})
+assert(local_require.ok == true, local_require.error and local_require.error.message)
+assert(#local_require.dependencies.scripts == 1)
+assert(local_require.dependencies.scripts[1]:match("local%%-require/dependency%%.lua$"))
+
 local runtime = luainstaller.analyze({
     entry = %q,
     discovery_mode = "runtime",
@@ -551,7 +600,9 @@ assert(runtime.dependencies.scripts[1]:match("runtime_dep%%.lua$"))
 print("dependency edge cases ok")
 ]], root .. "/manual/main.lua", root .. "/manual/foo/bar.lua", root .. "/manual/out",
         shell_quote(root .. "/manual/out/out"), root .. "/native/main.lua", root .. "/builtin/main.lua",
-        root .. "/dynamic/main.lua", root .. "/lexer/main.lua", root .. "/runtime_main.lua")
+        root .. "/dynamic/main.lua", root .. "/lexer/main.lua", root .. "/escaped/main.lua",
+        root .. "/local-require/main.lua",
+        root .. "/runtime_main.lua")
 
     assert_contains(run("PATH=" .. shell_quote(root .. "/fakebin:" .. os.getenv("PATH"))
         .. " LUAI_LUA=" .. shell_quote(lua_bin)
@@ -652,6 +703,31 @@ print("bundler no popen ok")
 ]], out_dir)
     assert_contains(run("lua -e " .. shell_quote(script)), "bundler no popen ok")
     remove_tree(out_dir)
+end
+
+local function check_logger_write_failure()
+    local script = SOURCE_LOADER .. [[
+local logger = require("luainstaller.logger")
+assert(logger.clearLogs() == false, "clearLogs must report a persistence failure")
+print("logger write failure ok")
+]]
+    assert_contains(run("HOME=/proc/luainstaller-unwritable lua -e " .. shell_quote(script)),
+        "logger write failure ok")
+
+    local short_write_script = SOURCE_LOADER .. [[
+local logger = require("luainstaller.logger")
+local saved_open = io.open
+io.open = function()
+    return {
+        write = function() return nil, "simulated disk full" end,
+        close = function() return true end,
+    }
+end
+assert(logger.clearLogs() == false, "clearLogs must report a short write")
+io.open = saved_open
+print("logger short write failure ok")
+]]
+    assert_contains(run("lua -e " .. shell_quote(short_write_script)), "logger short write failure ok")
 end
 
 local function check_platform_profiles()
@@ -877,6 +953,86 @@ print("generated marker rebuild ok")
 ]], rebuild_out)
     assert_contains(run("lua -e " .. shell_quote(rebuild_script)), "generated marker rebuild ok")
 
+    local failing_bin = root .. "/failing-toolchain"
+    run("mkdir -p " .. shell_quote(failing_bin))
+    write_file(failing_bin .. "/pkg-config", [[
+#!/bin/sh
+echo "forced pkg-config failure" >&2
+exit 1
+]])
+    run("chmod +x " .. shell_quote(failing_bin .. "/pkg-config"))
+    local failed_rebuild_script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+local result = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    out = %q,
+    max_deps = 120,
+})
+assert(result.ok == false, "forced toolchain failure must fail the rebuild")
+assert(result.error.type == "ToolchainError")
+print("failed rebuild reported")
+]], rebuild_out)
+    assert_contains(run("PATH=" .. shell_quote(failing_bin .. ":/usr/bin:/bin")
+        .. " lua -e " .. shell_quote(failed_rebuild_script)), "failed rebuild reported")
+    assert_file_exists(rebuild_out .. "/rebuild-generated")
+    assert_contains(run(shell_quote(rebuild_out .. "/rebuild-generated") .. " preserved"), "hello preserved")
+
+    local race_out = root .. "/appeared-during-build"
+    local racing_bin = root .. "/racing-toolchain"
+    run("mkdir -p " .. shell_quote(racing_bin))
+    write_file(racing_bin .. "/pkg-config", [[
+#!/bin/sh
+mkdir -p "$LUAI_RACE_OUT"
+printf '%s\n' 'user data created during build' > "$LUAI_RACE_OUT/sentinel.txt"
+exec "$LUAI_REAL_PKG_CONFIG" "$@"
+]])
+    run("chmod +x " .. shell_quote(racing_bin .. "/pkg-config"))
+    local race_script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+local result = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    out = %q,
+    max_deps = 120,
+})
+assert(result.ok == false, "an output created during build must not be replaced")
+assert(result.error.type == "InvalidOutputError")
+print("onedir output race rejected")
+]], race_out)
+    local real_pkg_config = command_output_trimmed("command -v pkg-config")
+    assert_contains(run("LUAI_RACE_OUT=" .. shell_quote(race_out)
+        .. " LUAI_REAL_PKG_CONFIG=" .. shell_quote(real_pkg_config)
+        .. " PATH=" .. shell_quote(racing_bin .. ":/usr/bin:/bin")
+        .. " lua -e " .. shell_quote(race_script)), "onedir output race rejected")
+    assert(read_file(race_out .. "/sentinel.txt") == "user data created during build\n")
+
+    local onefile_race_out = root .. "/onefile-appeared-during-build"
+    local racing_cc_bin = root .. "/racing-cc"
+    run("mkdir -p " .. shell_quote(racing_cc_bin))
+    write_file(racing_cc_bin .. "/cc", [[
+#!/bin/sh
+printf '%s\n' 'user file created during build' > "$LUAI_RACE_ONEFILE_OUT"
+exec "$LUAI_REAL_CC" "$@"
+]])
+    run("chmod +x " .. shell_quote(racing_cc_bin .. "/cc"))
+    local onefile_race_script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+local result = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    mode = "onefile",
+    out = %q,
+    max_deps = 120,
+})
+assert(result.ok == false, "a onefile output created during build must not be replaced")
+assert(result.error.type == "InvalidOutputError")
+print("onefile output race rejected")
+]], onefile_race_out)
+    local real_cc = command_output_trimmed("command -v cc")
+    assert_contains(run("LUAI_RACE_ONEFILE_OUT=" .. shell_quote(onefile_race_out)
+        .. " LUAI_REAL_CC=" .. shell_quote(real_cc)
+        .. " PATH=" .. shell_quote(racing_cc_bin .. ":/usr/bin:/bin")
+        .. " lua -e " .. shell_quote(onefile_race_script)), "onefile output race rejected")
+    assert(read_file(onefile_race_out) == "user file created during build\n")
+
     local pkg_root = root .. "/init-packages"
     run("mkdir -p " .. shell_quote(pkg_root .. "/a") .. " " .. shell_quote(pkg_root .. "/b"))
     write_file(pkg_root .. "/main.lua", [[
@@ -1061,6 +1217,17 @@ local function check_cli_contract()
     run("rm -rf -- -dash-out")
 
     print("cli contract ok")
+end
+
+local function check_cli_source_lookup_safety()
+    local root = make_temp_dir("cli-source-lookup")
+    local script_name = "luai;touch${IFS}injected;#"
+    run("cp src/cli.lua " .. shell_quote(root .. "/" .. script_name))
+    os.execute("cd " .. shell_quote(root) .. " && lua " .. shell_quote(script_name)
+        .. " >/dev/null 2>&1")
+    assert(not file_exists(root .. "/injected"), "CLI source lookup must quote a bare script name")
+    remove_tree(root)
+    print("cli source lookup safety ok")
 end
 
 local function check_runtime_cgen()
@@ -1291,6 +1458,16 @@ assert_bundle({
     assert_contains(run(shell_quote(student_out .. "/student") .. " --data " .. shell_quote(student_data) .. " seed"), "Seeded 8 students")
     assert_contains(run(shell_quote(student_out .. "/student") .. " --data " .. shell_quote(student_data) .. " list --sort average"), "Ada Lovelace")
 
+    local path_bin = root .. "/path-bin"
+    local path_cwd = root .. "/path-cwd"
+    local path_data = root .. "/students-via-path.json"
+    run("mkdir -p " .. shell_quote(path_bin) .. " " .. shell_quote(path_cwd))
+    run("ln -s " .. shell_quote(student_out .. "/student") .. " " .. shell_quote(path_bin .. "/student-via-path"))
+    assert_contains(run("cd " .. shell_quote(path_cwd)
+        .. " && env -i PATH=" .. shell_quote(path_bin .. ":/usr/bin:/bin")
+        .. " LUA_PATH='' LUA_CPATH=''"
+        .. " student-via-path --data " .. shell_quote(path_data) .. " seed"), "Seeded 8 students")
+
     local savinglua_db = root .. "/savinglua.sqlite3"
     assert_contains(run(shell_quote(savinglua_out .. "/savinglua") .. " --db " .. shell_quote(savinglua_db) .. " put users:ada '{\"name\":\"Ada Lovelace\",\"score\":98}'"), "stored users:ada")
     assert_contains(run(shell_quote(savinglua_out .. "/savinglua") .. " --db " .. shell_quote(savinglua_db) .. " get users:ada"), "Ada Lovelace")
@@ -1356,7 +1533,14 @@ assert_bundle({
     assert_contains(built, runtime_out)
     assert_contains(built, student_out)
     local cache_root = root .. "/onefile-cache"
+    run("mkdir -p " .. shell_quote(cache_root))
     assert_contains(run("TMPDIR=" .. shell_quote(cache_root) .. " " .. shell_quote(runtime_out) .. " onefile"), "hello onefile")
+    local real_temp_root = root .. "/onefile-real-temp"
+    local linked_temp_root = root .. "/onefile-linked-temp"
+    run("mkdir -p " .. shell_quote(real_temp_root)
+        .. " && ln -s " .. shell_quote(real_temp_root) .. " " .. shell_quote(linked_temp_root))
+    assert_contains(run("TMPDIR=" .. shell_quote(linked_temp_root) .. " "
+        .. shell_quote(runtime_out) .. " onefile-linked-temp"), "hello onefile-linked-temp")
     local manifest_path = command_output_trimmed("find " .. shell_quote(cache_root) .. " -path '*/.luai/manifest.lua' | sort | head -n 1")
     if manifest_path == "" then
         error("onefile cache manifest was not extracted", 2)
@@ -1382,11 +1566,63 @@ assert_bundle({
     assert(read_file(symlink_target) == "do not overwrite", "onefile extraction must not write through symlinks")
     local link_state = command_output_trimmed("test ! -L " .. shell_quote(manifest_path) .. " && echo regular")
     assert(link_state == "regular")
+
+    local payload_dir = manifest_path:match("^(.*)/%.luai/manifest%.lua$")
+    assert(payload_dir, "onefile payload directory was not recognized")
+    local cache_base = payload_dir:match("^(.*)/[^/]+$")
+    assert(cache_base, "onefile cache root was not recognized")
+    run("chmod 0777 " .. shell_quote(cache_base))
+    local unsafe_cache = run("TMPDIR=" .. shell_quote(cache_root) .. " "
+        .. shell_quote(runtime_out) .. " onefile-unsafe-cache", { expect_failure = true })
+    assert_contains(unsafe_cache, "extraction failed")
+    run("chmod 0700 " .. shell_quote(cache_base))
+
+    local parent_symlink_target = root .. "/onefile-parent-symlink-target"
+    run("rm -rf " .. shell_quote(payload_dir .. "/.luai")
+        .. " && mkdir -p " .. shell_quote(parent_symlink_target)
+        .. " && ln -s " .. shell_quote(parent_symlink_target) .. " " .. shell_quote(payload_dir .. "/.luai"))
+    local unsafe_parent = run("TMPDIR=" .. shell_quote(cache_root) .. " "
+        .. shell_quote(runtime_out) .. " onefile-parent-symlink", { expect_failure = true })
+    assert_contains(unsafe_parent, "extraction failed")
+    local victim_files = command_output_trimmed("find " .. shell_quote(parent_symlink_target) .. " -type f -print")
+    assert(victim_files == "", "onefile extraction must not write through parent-directory symlinks")
+
     local student_data = root .. "/students-onefile.json"
     assert_contains(run(shell_quote(student_out) .. " --data " .. shell_quote(student_data) .. " seed"), "Seeded 8 students")
     assert_contains(run(shell_quote(student_out) .. " --data " .. shell_quote(student_data) .. " list --sort average"), "Ada Lovelace")
     remove_tree(root)
     print("onefile bundles ok")
+end
+
+local function check_onefile_build_temp_safety()
+    local root = make_temp_dir("onefile-build-temp-safety")
+    local temp_root = root .. "/tmp"
+    local victim = root .. "/victim"
+    local stage_parent = temp_root .. "/luainstaller-onefile-work-123025-111111"
+    local out_path = root .. "/onefile"
+    run("mkdir -p " .. shell_quote(temp_root) .. " " .. shell_quote(victim))
+    run("ln -s " .. shell_quote(victim) .. " " .. shell_quote(stage_parent))
+
+    local script = SOURCE_LOADER .. string.format([[
+local luainstaller = require("luainstaller")
+os.time = function() return 123 end
+os.clock = function() return 0.25 end
+math.random = function() return 111111 end
+local result = luainstaller.bundle({
+    entry = "test/runtime_bundle/main.lua",
+    mode = "onefile",
+    out = %q,
+    max_deps = 120,
+})
+assert(result.ok == false, "precreated onefile staging symlink must be rejected")
+assert(result.error.type == "FilesystemError")
+print("onefile build temp safety ok")
+]], out_path)
+    assert_contains(run("TMPDIR=" .. shell_quote(temp_root) .. " lua -e " .. shell_quote(script)),
+        "onefile build temp safety ok")
+    local victim_files = command_output_trimmed("find " .. shell_quote(victim) .. " -type f -print")
+    assert(victim_files == "", "onefile build must not write through a staging parent symlink")
+    remove_tree(root)
 end
 
 local function check_cli_discovery_runtime()
@@ -1473,16 +1709,19 @@ check_dependency_edge_cases()
 check_compatibility_diagnostics()
 check_manifest_without_popen()
 check_bundler_without_popen()
+check_logger_write_failure()
 check_platform_profiles()
 check_macos_profile_reaches_toolchain()
 check_windows_profile_reaches_toolchain()
 check_remote_onefile_script_coverage()
 check_release_safety_contract()
 check_cli_contract()
+check_cli_source_lookup_safety()
 check_runtime_cgen()
 check_c_launcher()
 check_onedir_bundles()
 check_onefile_bundles()
+check_onefile_build_temp_safety()
 check_cli_discovery_runtime()
 check_installed_cli_bundle()
 check_source_install_bundle()

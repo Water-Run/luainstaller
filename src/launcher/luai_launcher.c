@@ -2,9 +2,23 @@
  * Shared-Lua launcher template for luainstaller.
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <unistd.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <lua.h>
 #include <lauxlib.h>
@@ -25,11 +39,48 @@ static int luai_traceback(lua_State *L)
     return 1;
 }
 
+static int luai_executable_path(char *out, size_t out_size)
+{
+#ifdef _WIN32
+    DWORD length = GetModuleFileNameA(NULL, out, (DWORD)out_size);
+    if (length == 0 || (size_t)length >= out_size) return -1;
+    return 0;
+#elif defined(__APPLE__)
+    char raw[4096];
+    char *resolved;
+    size_t length;
+    uint32_t size = (uint32_t)sizeof(raw);
+    if (_NSGetExecutablePath(raw, &size) != 0) return -1;
+    resolved = realpath(raw, NULL);
+    if (!resolved) return -1;
+    length = strlen(resolved);
+    if (length >= out_size)
+    {
+        free(resolved);
+        return -1;
+    }
+    memcpy(out, resolved, length + 1);
+    free(resolved);
+    return 0;
+#else
+    ssize_t length = readlink("/proc/self/exe", out, out_size - 1);
+    if (length < 0 || (size_t)length >= out_size - 1) return -1;
+    out[length] = '\0';
+    return 0;
+#endif
+}
+
 static void luai_push_arg(lua_State *L, int argc, char **argv)
 {
+    char executable[4096];
+    const char *arg0 = argv[0];
     int i;
+    if (luai_executable_path(executable, sizeof(executable)) == 0)
+    {
+        arg0 = executable;
+    }
     lua_createtable(L, argc > 1 ? argc - 1 : 0, 1);
-    lua_pushstring(L, argv[0]);
+    lua_pushstring(L, arg0);
     lua_rawseti(L, -2, 0);
     for (i = 1; i < argc; ++i)
     {

@@ -11,7 +11,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-02-22
+    2026-07-11
 ]]
 
 local process = require("luainstaller.process")
@@ -190,10 +190,13 @@ local function saveToFile(logs)
     if not handle then
         return false
     end
-    handle:write("return ")
-    handle:write(serializeValue(logs))
-    handle:write("\n")
-    handle:close()
+    local wrote_prefix = handle:write("return ")
+    local wrote_body = wrote_prefix and handle:write(serializeValue(logs))
+    local wrote_newline = wrote_body and handle:write("\n")
+    local closed = handle:close()
+    if not wrote_prefix or not wrote_body or not wrote_newline or not closed then
+        return false
+    end
     -- Restrict log file access: loadfile executes this file as Lua source.
     if not IS_WINDOWS then
         os.execute("chmod 600 " .. process.shellQuote(path) .. " 2>/dev/null")
@@ -359,8 +362,8 @@ end
 --@description: Remove all stored log entries
 --@return: boolean - True when the clear operation succeeds
 function M.clearLogs()
-    local ok = pcall(saveToFile, {})
-    return ok == true
+    local ok, saved = pcall(saveToFile, {})
+    return ok == true and saved == true
 end
 
 return M

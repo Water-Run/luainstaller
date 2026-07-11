@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-06-24
+    2026-07-11
 ]]
 
 local function localFileExists(path)
@@ -27,7 +27,8 @@ local function installSourcePreloads()
     local source_dir = script_path:match("^(.*[/\\])[^/\\]+$")
     if not source_dir and script_path ~= "" and not script_path:find("[/\\]", 1) then
         -- Bare command name: resolve via PATH when possible (POSIX).
-        local pipe = io.popen("command -v " .. script_path:gsub("'", "'\\''") .. " 2>/dev/null", "r")
+        local quoted_script = "'" .. script_path:gsub("'", "'\\''") .. "'"
+        local pipe = io.popen("command -v " .. quoted_script .. " 2>/dev/null", "r")
         if pipe then
             local resolved = pipe:read("*l") or ""
             pipe:close()

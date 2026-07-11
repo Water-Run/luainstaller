@@ -157,48 +157,59 @@ sh tools/install-source.sh --lua "\$LUA_PREFIX/bin/lua" --prefix "\$PREFIX"
 
 rm -rf /tmp/luainstaller-mac-runtime
 bundle test/runtime_bundle/main.lua /tmp/luainstaller-mac-runtime
-env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-runtime)" macos-clean | grep "hello macos-clean"
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-runtime)" macos-clean)
+printf '%s\n' "\$output" | grep "hello macos-clean"
 
 rm -rf /tmp/luainstaller-mac-student /tmp/macos-students.json
 bundle test/student_management_system/main.lua /tmp/luainstaller-mac-student
-env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json seed | grep "Seeded 8 students"
-env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json list --sort average | grep "Ada Lovelace"
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json seed)
+printf '%s\n' "\$output" | grep "Seeded 8 students"
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json list --sort average)
+printf '%s\n' "\$output" | grep "Ada Lovelace"
 
 rm -rf /tmp/luainstaller-mac-onefile-runtime
 bundle_onefile test/runtime_bundle/main.lua /tmp/luainstaller-mac-onefile-runtime
-env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-runtime mac-onefile-runtime | grep "hello mac-onefile-runtime"
+output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-runtime mac-onefile-runtime)
+printf '%s\n' "\$output" | grep "hello mac-onefile-runtime"
 
 rm -rf /tmp/luainstaller-mac-onefile-student /tmp/macos-onefile-students.json
 bundle_onefile test/student_management_system/main.lua /tmp/luainstaller-mac-onefile-student
-env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json seed | grep "Seeded 8 students"
-env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json list --sort average | grep "Ada Lovelace"
+output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json seed)
+printf '%s\n' "\$output" | grep "Seeded 8 students"
+output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json list --sort average)
+printf '%s\n' "\$output" | grep "Ada Lovelace"
 
 rm -rf /tmp/luainstaller-mac-savinglua /tmp/macos-savinglua.sqlite3
 bundle test/savinglua/main.lua /tmp/luainstaller-mac-savinglua
-env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}' | grep "stored users:ada"
-env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 get users:ada | grep "Ada Lovelace"
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}')
+printf '%s\n' "\$output" | grep "stored users:ada"
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 get users:ada)
+printf '%s\n' "\$output" | grep "Ada Lovelace"
 
 rm -rf /tmp/luainstaller-mac-ltokei
 bundle test/ltokei/main.lua /tmp/luainstaller-mac-ltokei
-env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-ltokei)" /tmp/luainstaller-mac-ltokei/.luai | grep "Total"
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-ltokei)" /tmp/luainstaller-mac-ltokei/.luai)
+printf '%s\n' "\$output" | grep "Total"
 
 rm -rf /tmp/luainstaller-mac-firebird
 bundle test/firebird_web_sql/server.lua /tmp/luainstaller-mac-firebird
-FIREBIRD_WEB_SQL_PORT=19123 FIREBIRD_WEB_SQL_TOKEN=testtoken env -i PATH=/usr/bin:/bin FIREBIRD_WEB_SQL_PORT=19123 FIREBIRD_WEB_SQL_TOKEN=testtoken "\$(exe_path /tmp/luainstaller-mac-firebird)" >/tmp/macos-firebird.log 2>&1 &
+PORT=\$((20000 + \$\$ % 20000))
+env -i PATH=/usr/bin:/bin FIREBIRD_WEB_SQL_PORT="\$PORT" FIREBIRD_WEB_SQL_TOKEN=testtoken "\$(exe_path /tmp/luainstaller-mac-firebird)" >/tmp/macos-firebird.log 2>&1 &
 PID=\$!
 trap 'kill "\$PID" >/dev/null 2>&1 || true' EXIT
 for i in \$(seq 1 40); do
-    if curl -fsS http://127.0.0.1:19123/api/status -H "X-Auth-Token: testtoken" | grep '"ok":true' >/dev/null; then
+    if ! kill -0 "\$PID" >/dev/null 2>&1; then
+        cat /tmp/macos-firebird.log
+        exit 1
+    fi
+    response=\$(curl -fsS "http://127.0.0.1:\$PORT/api/status" -H "X-Auth-Token: testtoken" 2>/dev/null || true)
+    if printf '%s\n' "\$response" | grep '"ok":true' >/dev/null; then
         kill "\$PID" >/dev/null 2>&1 || true
         wait "\$PID" >/dev/null 2>&1 || true
         echo "mac firebird ok"
         exit 0
     fi
     sleep 0.25
-    if ! kill -0 "\$PID" >/dev/null 2>&1; then
-        cat /tmp/macos-firebird.log
-        exit 1
-    fi
 done
 cat /tmp/macos-firebird.log
 exit 1

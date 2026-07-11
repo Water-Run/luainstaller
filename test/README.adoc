@@ -1,101 +1,98 @@
-= luainstaller Test Programs
+= Test programs and fixtures
 
-This directory contains sample Lua programs used to exercise
-`luainstaller` packaging behavior. These applications are packaging
-targets for binary tools, similar to PyInstaller-built applications.
-They are intentionally application-like rather than unit-test-only
-fixtures: they should help verify dependency analysis, LuaRocks module
-discovery, native module handling, data files, embedded Web UI, and
-onefile runtime extraction.
+The `test/` tree contains both contract tests and small applications used as
+packaging targets. The applications are intentionally more realistic than unit
+fixtures: they exercise multi-file discovery, native modules, persistent data,
+HTTP startup, clean environments, and onefile extraction.
 
-The test programs are grouped by packaging difficulty.
+== Test entry points
 
-=== Layout
+`cli_split_smoke.lua`::
+Checks the two CLI grammars and their error output.
 
-* `contract_docs.lua` Documentation-derived contract tests. These build
-temporary fixtures and assert behavior promised in README and
-`docs/*.adoc`, rather than mirroring implementation internals.
-* `support/` Shared test harness helpers for loading source-tree modules,
-creating temporary fixtures, invoking CLI entry points, and making common
-assertions.
-* `cli_split_smoke.lua` Focused command-surface checks for the compact
-`luai` CLI and full-word `luainstaller` CLI.
-* `smoke_all.lua` Full local smoke suite covering analysis, manifests,
-launcher generation, bundle execution, install paths, and safety
-regressions.
-* `single_file/` Simple one-file programs. These are basic
-beginner-level programming tasks and are useful first smoke tests for
-`luai -b`.
-* `student_management_system/` A classic larger beginner
-project: a student management system with persistent file storage
-through `cjson`.
-* `firebird_web_sql/` An interactive web-based remote SQL shell
-target using Pegasus, `cjson`, socket modules, and optional
-Firebird/LuaSQL support.
-* `savinglua/` A high-speed Lua table-structure storage database target
-backed by SQLite. This exercises `cjson`, `lsqlite3`, and persistent
-data files.
-* `ltokei/` A Lua implementation of a Tokei-like code statistics tool.
-It may introduce normal Lua library dependencies such as `lfs`.
+`contract_docs.lua`::
+Turns documented behavior into executable contracts. It covers discovery,
+manual include/exclude precedence, option validation, output ownership,
+manifests, bundled searcher order, logs, and documentation navigation.
 
-=== How To Use
+`smoke_all.lua`::
+Runs the comprehensive local audit: syntax, samples, API, generated C,
+installation layouts, onedir, onefile, native dependencies, safety regressions,
+and clean-environment execution.
 
-Run samples directly with Lua while developing them:
+`support/`::
+Shared fixture, process, loader, and assertion helpers for the contract suites.
+
+Run all three from the repository root:
 
 [source,sh]
 ----
-lua test/single_file/01_hello_luainstaller.lua
-lua test/student_management_system/main.lua
+lua test/cli_split_smoke.lua
+lua test/contract_docs.lua
+lua test/smoke_all.lua
 ----
 
-Use the current CLI for packaging experiments:
+== Packaging targets
+
+`runtime_bundle/`::
+Minimal entry plus one Lua module. Use it first for launcher and onefile work.
+
+`single_file/`::
+Thirty standalone Lua examples used for broad entry-script smoke coverage.
+
+`student_management_system/`::
+Multi-file CLI with JSON storage and `cjson`.
+
+`savinglua/`::
+SQLite-backed key/value program using `cjson` and `lsqlite3`.
+
+`ltokei/`::
+Filesystem source counter using LuaFileSystem.
+
+`firebird_web_sql/`::
+Authenticated HTTP application using Pegasus, LuaSocket, JSON, and optional
+database support.
+
+Each target directory documents its own runtime dependencies. A test that needs
+a native module must state the Lua ABI, operating system, and architecture it
+expects.
+
+== Working with a target
+
+Run the source before packaging it:
 
 [source,sh]
 ----
-luai -a test/single_file/01_hello_luainstaller.lua
-luai -t test/student_management_system/main.lua
-luai -b test/student_management_system/main.lua -o build/student-manager
+lua test/runtime_bundle/main.lua direct
+lua test/student_management_system/main.lua --help
 ----
 
-When LuaRocks is unavailable, install the CLI from the source tree:
+Then analyze and build:
 
 [source,sh]
 ----
-sh tools/install-source.sh --prefix "$HOME/.local"
-export PATH="$HOME/.local/bin:$PATH"
-luai -a test/single_file/01_hello_luainstaller.lua
-luainstaller version
+luai -t test/runtime_bundle/main.lua --max-deps 120
+luai -b --dir test/runtime_bundle/main.lua \
+  -o build/runtime-test --max-deps 120
+env -i PATH=/usr/bin:/bin build/runtime-test/runtime-test clean
 ----
 
-Linux, macOS, and Windows `--onedir` and `--onefile` packaging are
-implemented for the selected sample matrix. The smoke suite packages and
-runs selected Linux examples, including native Lua C module targets, and
-verifies that the generated bundles can run without a separate `lua`
-command in a same-ABI environment. Remote scripts extend the same
-coverage to macOS and Windows:
+Remote coverage is driven by:
 
 [source,sh]
 ----
 sh tools/remote-test-linux.sh
-sh tools/remote-test-macos.sh
+MAC_HOST=yymacstudio sh tools/remote-test-macos.sh
 WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ----
 
-The Windows script requires `WINDOWS_PASSWORD` in the environment
-and accepts `SSH_OPTS` when the default lab SSH options need to be
-overridden. Set `WINDOWS_TARGETS='Win10=user@host Win7=user@host'` when
-the lab VM addresses differ from the defaults.
+== Adding coverage
 
-The source-install checks also verify deployment when LuaRocks is
-unavailable.
-
-=== Test Growth Rules
-
-* Add the smallest useful program under `single_file/` before adding
-a complex multi-file sample.
-* Keep sample dependencies explicit in each directory README.
-* Prefer realistic dependency patterns over artificial fixtures.
-* If a program needs native modules, document the expected Lua version,
-OS, architecture, and ABI.
-* Do not keep historical compatibility samples here. Each directory
-should map to a current packaging target.
+* Prefer the smallest fixture that reproduces the behavior.
+* Add a regression assertion before changing production code.
+* Put shared mechanics in `test/support/`.
+* Keep sample dependencies explicit and reproducible.
+* Test generated bundles with Lua environment variables cleared.
+* For native or generated-C changes, run every affected remote architecture.
+* Do not preserve obsolete compatibility samples without a supported release
+  contract.

@@ -1,130 +1,133 @@
-luainstaller Coding Style
+luainstaller coding style
 =========================
 
-This project is mostly Lua, with a small amount of C allowed when it makes
-packaging or runtime startup simpler. Keep the code direct, portable, and easy
-to audit.
+Scope
+-----
 
+These rules apply to project Lua, generated-C templates, shell tools, and tests.
+Match the surrounding file when a rule does not settle a formatting choice.
 
-General Rules
--------------
-
-- Prefer small modules with clear responsibility over broad helper files.
-- Keep behavior explicit. Avoid hidden global state except for intentional
-  runtime bootstrap state.
-- Public APIs must return structured results or structured errors where
-  possible.
-- Keep generated files out of the repository unless they are stable fixtures.
-- Code and documentation should match the LuaRocks installation path.
-  The library is `luainstaller`; the command-line tools are `luai` and
-  `luainstaller`.
-
-
-Lua Style
+Lua files
 ---------
 
-- Use simple, idiomatic Lua. Prefer clear tables and local functions.
-- Use four spaces for indentation.
-- Do not align unrelated assignments by adding large spacing blocks.
-- Prefer `local` for every binding that does not intentionally escape.
-- Keep module exports in a single table named `M` unless a file has a strong
-  reason to expose a class-like table.
-- Use explicit option tables for public APIs.
-- Keep CLI parsing small and predictable.
-- Avoid clever metatable use in normal control flow.
-- The roadmap baseline is Lua 5.5.0. During the transition, keep code runnable
-  under the repository's current verification interpreter unless a change
-  explicitly requires Lua 5.5 features.
+* Target Lua 5.4 or newer. Do not add compatibility branches for older Lua
+  releases unless the package dependency changes first.
+* Indent with four spaces. Do not use tabs or trailing whitespace.
+* Keep lines readable; split long command construction and error tables by
+  meaning rather than at an arbitrary column.
+* Use local variables and local helper functions by default. A module's public
+  surface belongs on its returned `M` table.
+* Name functions and variables in `lowerCamelCase` only where an existing module
+  already does so; otherwise prefer `snake_case` for new local data. Do not
+  rename stable public fields for style alone.
+* Keep one responsibility per helper. Large parsing or build transactions
+  should expose explicit boundaries and structured failure values.
 
-Lua files should start with a block header:
+Every tracked Lua file begins with the existing metadata block containing:
 
-```lua
---[[
-Short module description.
+    Author:
+    File:
+    Date:
+    Updated:
 
-Author:
-    WaterRun
-File:
-    example.lua
-Date:
-    YYYY-MM-DD
-Updated:
-    YYYY-MM-DD
-]]
-```
+Update the date when a meaningful file change is made. Preserve the shebang
+before the block in executable Lua scripts.
 
-Document public and non-obvious local functions with Lua comments:
+Errors and results
+------------------
 
-```lua
--- @description: Resolve a module name to a package path.
--- @param module_name: string - Module name passed to require.
--- @param from_script: string - Script path that issued the require.
--- @return: table|nil - Resolution result, or nil for builtins.
--- @raise: ModuleNotFoundError when no candidate exists.
-local function resolveModule(module_name, from_script)
-    ...
-end
-```
+Public operations return one of these shapes:
 
-Use enough documentation for future maintenance, but do not restate obvious
-assignments.
+    { ok = true, ... }
 
-
-C Style
--------
-
-- Use standard C. Prefer C99-compatible code unless a platform constraint
-  requires stricter C89-compatible code.
-- Opening braces must occupy their own line.
-- Use four spaces for indentation.
-- Keep functions short and named after concrete runtime actions.
-- Avoid compiler-specific extensions in checked-in source.
-- Put platform-specific code behind small, named helper functions.
-- Check allocation, file, and OS API failures. Return readable error messages.
-- Do not hide resource ownership. The function that allocates or opens a
-  resource must either release it or clearly transfer ownership.
-
-C example:
-
-```c
-static int
-run_bundle(lua_State *L, int argc, char **argv)
-{
-    int status;
-
-    status = lua_pcall(L, argc, LUA_MULTRET, 0);
-    if (status != LUA_OK)
     {
-        return status;
+        ok = false,
+        error = {
+            type = "SpecificErrorType",
+            message = "actionable description",
+            ...
+        }
     }
 
-    return LUA_OK;
-}
-```
+Use the most specific existing error type. Include paths, option names, command
+output, and restore state when they help the caller recover. Do not parse human
+messages in tests when a structured field exists.
 
+Internal code may throw an error table when unwinding several parser frames.
+Convert it at the module boundary with `result.fromThrown`. Avoid throwing plain
+strings from public orchestration code.
+
+Paths and processes
+-------------------
+
+* Normalize project paths through `luainstaller.path`.
+* Quote every path or argument passed to a shell through
+  `luainstaller.process.shellQuote`.
+* Never concatenate unquoted command-line, environment, manifest, or trace data
+  into a shell command.
+* Treat output deletion and temporary directories as security boundaries.
+* Build replaceable output in staging and commit it only after every fallible
+  generation step succeeds.
+* Reject symlinks where a path is expected to remain inside an owned output or
+  extraction root.
+* Check write, close, copy, compiler, and rename results when their failure can
+  change the public result.
 
 Generated C
 -----------
 
-- Generated C should be deterministic for the same input manifest.
-- Generated arrays should include explicit lengths; do not rely on NUL
-  termination for embedded Lua source or binary payloads.
-- Keep the generated launcher small:
-  - create Lua state
-  - open standard libraries
-  - install bundle searchers
-  - prepare `arg`
-  - run the entry chunk
-  - report errors
+* Keep the standalone launcher template and the embedded default synchronized.
+* Use bounded writes and check every buffer length.
+* Preserve platform branches for Linux, macOS, and Windows.
+* Follow the target runtime's argument quoting rules; POSIX and Windows command
+  lines are not interchangeable.
+* Any extractor path must remain below its private root after normalization.
+* Compile generated C on each affected target. Static inspection is not enough.
 
+Shell tools
+-----------
 
-Documentation Style
--------------------
+* Use POSIX `sh` unless a script explicitly requires Bash.
+* Start release/test tools with `set -eu`.
+* Quote variable expansions except in the few places where word splitting is the
+  documented data format.
+* Keep credentials in environment variables. Never print or commit them.
+* Use `/tmp` prefixes for remote test installations and clean only paths owned by
+  that script.
+* A remote test must fail when required coverage is skipped. Print an explicit
+  skip only for an optional local diagnostic.
 
-- User documentation should stay practical and avoid promising unsupported
-  platform combinations.
-- Say "same OS, same architecture, same ABI" when describing the first-stage
-  compatibility boundary.
-- Mention `luai` for compact CLI examples, `luainstaller` for full-word CLI
-  examples, and `require("luainstaller")` for library examples.
-- If behavior is planned but not implemented, label it as a plan.
+Tests
+-----
+
+* Reproduce a defect with a failing test before changing production code.
+* Assert behavior visible to callers, generated files, or target runtimes.
+* Keep fixtures minimal and give failures enough context to diagnose the layer.
+* Clear `LUA_PATH` and `LUA_CPATH` when testing bundle independence.
+* Do not accept a toolchain error as a successful architecture test.
+* Use `test/support/` for shared mechanics.
+* Preserve user files and unrelated worktree changes.
+
+Documentation
+-------------
+
+* Write for a concrete task. Put a fact in one primary guide and link to it from
+  other guides.
+* Prefer a short example plus an explanation over repeated option tables.
+* State compatibility limits plainly. Do not imply universal portability.
+* Every documented command must be executable from the directory it names.
+* Update `test/contract_docs.lua` when a public promise changes.
+
+Required checks
+---------------
+
+    find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
+    find tools -type f -name '*.sh' -print0 | xargs -0 -n1 sh -n
+    git diff --check
+    lua test/cli_split_smoke.lua
+    lua test/contract_docs.lua
+    lua test/smoke_all.lua
+
+Generated-C, native-module, or platform changes also require the applicable
+Linux x86_64, Linux ARM64, macOS ARM64, Wine, and Windows VM checks described in
+docs/TESTING.adoc.

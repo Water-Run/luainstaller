@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-10
+    2026-07-11
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -36,6 +36,7 @@ local shellQuote = process.shellQuote
 local makeError = result.error
 local GENERATED_MARKER = "luainstaller-generated-output-v1"
 local writeFile
+local validateOutputDirectory
 
 -- Split pkg-config output into shell-safe tokens. Reject metacharacters.
 -- NOTE: assumes pkg-config tokens do not contain spaces; space-bearing paths
@@ -228,10 +229,10 @@ local function generatedDirectoryHasOnlyAllowedEntries(path, allowed)
     return true
 end
 
-local function writeGeneratedMarker(path, file_entries)
+local function writeGeneratedMarker(path, file_entries, declared_output_dir)
     local lines = {
         GENERATED_MARKER,
-        "output_dir=" .. normalizePath(path),
+        "output_dir=" .. normalizePath(declared_output_dir or path),
     }
     for _, item in ipairs(file_entries or {}) do
         local rel = normalizePath(item.path)
@@ -449,6 +450,160 @@ local function defaultOut(entry)
     return normalizePath("build/" .. stem(entry))
 end
 
+local function uniqueSiblingPath(final_path, label)
+    local parent = dirname(final_path)
+    local name = basename(final_path)
+    for _ = 1, 20 do
+        local suffix = tostring(os.time())
+            .. tostring(os.clock()):gsub("%.", "")
+            .. "-"
+            .. tostring(math.random(100000, 999999))
+        local candidate = normalizePath(parent .. "/." .. name .. ".luai-" .. label .. "-" .. suffix)
+        if not pathExists(candidate) then
+            return candidate
+        end
+    end
+    return nil
+end
+
+local function createStagingDirectory(final_path)
+    local parent_err = ensureDirectory(dirname(final_path))
+    if parent_err then
+        return nil, parent_err
+    end
+    for _ = 1, 20 do
+        local candidate = uniqueSiblingPath(final_path, "staging")
+        if not candidate then
+            break
+        end
+        local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(candidate))
+        if ok then
+            return candidate
+        end
+        if not pathExists(candidate) then
+            return nil, makeError("FilesystemError", "Cannot create staging directory", {
+                path = candidate,
+                output = output,
+            })
+        end
+    end
+    return nil, makeError("FilesystemError", "Cannot create unique staging directory", {
+        path = final_path,
+    })
+end
+
+local function acquireOutputLock(final_path)
+    local parent_err = ensureDirectory(dirname(final_path))
+    if parent_err then
+        return nil, parent_err
+    end
+    local lock_path = normalizePath(dirname(final_path) .. "/." .. basename(final_path) .. ".luai-lock")
+    local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(lock_path))
+    if not ok then
+        return nil, makeError("FilesystemError", "Another build is using this output path, or a stale build lock remains", {
+            path = final_path,
+            lock_path = lock_path,
+            output = output,
+        })
+    end
+    return lock_path
+end
+
+local function releaseOutputLock(lock_path, failure)
+    local cleanup_err = lock_path and removeTree(lock_path) or nil
+    if cleanup_err and failure and failure.error then
+        failure.error.cleanup_error = cleanup_err.error and cleanup_err.error.message or tostring(cleanup_err)
+        failure.error.cleanup_path = lock_path
+        return failure
+    end
+    return failure or cleanup_err
+end
+
+local function captureOutputSnapshot(path_value)
+    if not pathExists(path_value) then
+        return { kind = "absent" }
+    end
+    if directoryIsEmpty(path_value) then
+        return { kind = "empty" }
+    end
+    local marker = readFile(normalizePath(path_value .. "/.luai/generated-output.txt"))
+    return {
+        kind = "generated",
+        marker_hash = marker and fnv1a32(marker) or nil,
+    }
+end
+
+local function outputSnapshotMatches(path_value, allowed, snapshot)
+    local validation_err = validateOutputDirectory(path_value, allowed)
+    if validation_err then
+        return false, validation_err
+    end
+    local current = captureOutputSnapshot(path_value)
+    if current.kind ~= snapshot.kind
+        or current.marker_hash ~= snapshot.marker_hash then
+        return false, makeError("InvalidOutputError", "Output changed while the bundle was being built", {
+            path = path_value,
+            initial_state = snapshot.kind,
+            current_state = current.kind,
+        })
+    end
+    return true
+end
+
+local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
+    local unchanged, changed_err = outputSnapshotMatches(final_path, allowed, snapshot)
+    if not unchanged then
+        return changed_err
+    end
+    local backup_path
+    if pathExists(final_path) then
+        backup_path = uniqueSiblingPath(final_path, "backup")
+        if not backup_path then
+            return makeError("FilesystemError", "Cannot allocate output backup path", {
+                path = final_path,
+            })
+        end
+        local renamed, rename_err = os.rename(final_path, backup_path)
+        if not renamed then
+            return makeError("FilesystemError", "Cannot preserve previous output directory", {
+                path = final_path,
+                backup_path = backup_path,
+                output = tostring(rename_err),
+            })
+        end
+    end
+
+    local committed, commit_err = os.rename(stage_path, final_path)
+    if not committed then
+        local restore_err
+        if backup_path then
+            local restored
+            restored, restore_err = os.rename(backup_path, final_path)
+            if restored then
+                restore_err = nil
+            end
+        end
+        return makeError("FilesystemError", "Cannot install completed output directory", {
+            path = final_path,
+            staging_path = stage_path,
+            output = tostring(commit_err),
+            restore_error = restore_err and tostring(restore_err) or nil,
+        })
+    end
+
+    if backup_path then
+        local cleanup_err = removeTree(backup_path)
+        if cleanup_err then
+            return makeError("FilesystemError", "Output was installed but previous output backup could not be removed", {
+                path = final_path,
+                backup_path = backup_path,
+                committed = true,
+            })
+        end
+    end
+    return nil
+end
+
 local function linuxHost()
     local ok, output = commandOutput("uname -s")
     return ok and output:match("^Linux") ~= nil
@@ -460,7 +615,7 @@ local function unsafeOutputError(path)
     })
 end
 
-local function validateOutputDirectory(path, allowed_generated_entries)
+validateOutputDirectory = function(path, allowed_generated_entries)
     local normalized = normalizePath(path)
     if normalized == "/" or normalized == "." or normalized == "" then
         return unsafeOutputError(path)
@@ -614,8 +769,8 @@ function M.bundleOnedir(opts)
         return makeError("InvalidOptionsError", "entry is required")
     end
 
-    local out_dir = absolutePath(opts.out or defaultOut(entry))
-    local exe_name = executableName(out_dir, entry, profile)
+    local final_out_dir = absolutePath(opts.out or defaultOut(entry))
+    local exe_name = executableName(final_out_dir, entry, profile)
     local allowed_generated_entries = {
         [".luai"] = true,
         [exe_name] = true,
@@ -623,9 +778,27 @@ function M.bundleOnedir(opts)
     if windows_lua then
         allowed_generated_entries[windows_lua.dll_name] = true
     end
-    local output_err = validateOutputDirectory(out_dir, allowed_generated_entries)
+    local output_lock, lock_err = acquireOutputLock(final_out_dir)
+    if not output_lock then
+        return lock_err
+    end
+    local output_err = validateOutputDirectory(final_out_dir, allowed_generated_entries)
     if output_err then
-        return output_err
+        return releaseOutputLock(output_lock, output_err)
+    end
+    local output_snapshot = captureOutputSnapshot(final_out_dir)
+
+    local out_dir, stage_err = createStagingDirectory(final_out_dir)
+    if not out_dir then
+        return releaseOutputLock(output_lock, stage_err)
+    end
+    local function abandon(failure)
+        local cleanup_err = removeTree(out_dir)
+        if cleanup_err and failure and failure.error then
+            failure.error.cleanup_error = cleanup_err.error and cleanup_err.error.message or tostring(cleanup_err)
+            failure.error.cleanup_path = out_dir
+        end
+        return releaseOutputLock(output_lock, failure or cleanup_err)
     end
 
     local exe_path = normalizePath(out_dir .. "/" .. exe_name)
@@ -634,18 +807,9 @@ function M.bundleOnedir(opts)
     local build_dir = normalizePath(luai_dir .. "/build")
     local c_path = normalizePath(build_dir .. "/launcher.c")
 
-    -- Probe writability before deleting any previous onedir output.
-    local err = ensureDirectory(out_dir)
+    local err = ensureDirectory(native_dir) or ensureDirectory(build_dir)
     if err then
-        return err
-    end
-    err = removeTree(out_dir)
-    if err then
-        return err
-    end
-    err = ensureDirectory(native_dir) or ensureDirectory(build_dir)
-    if err then
-        return err
+        return abandon(err)
     end
 
     local lua_names, native_names = traceModuleMaps(opts.trace or manifest.trace or {})
@@ -657,13 +821,13 @@ function M.bundleOnedir(opts)
         native_dir = ".luai/native",
     })
     if not ok_generate then
-        return fromThrownError(generated)
+        return abandon(fromThrownError(generated))
     end
     c_source = generated
 
     err = writeFile(c_path, c_source)
     if err then
-        return err
+        return abandon(err)
     end
 
     local native_owners = {}
@@ -671,21 +835,21 @@ function M.bundleOnedir(opts)
         local normalized = normalizePath(path)
         local destinations, dest_err = nativeDestinations(normalized, native_names[normalized], native_dir)
         if not destinations then
-            return dest_err
+            return abandon(dest_err)
         end
         for _, destination in ipairs(destinations) do
             local owner = native_owners[destination]
             if owner and owner ~= normalized then
-                return makeError("DuplicateModuleError", "Duplicate native destination: " .. destination, {
+                return abandon(makeError("DuplicateModuleError", "Duplicate native destination: " .. destination, {
                     destination_path = destination,
                     first_source = owner,
                     second_source = normalized,
-                })
+                }))
             end
             native_owners[destination] = normalized
             err = copyFile(normalized, destination)
             if err then
-                return err
+                return abandon(err)
             end
         end
     end
@@ -716,14 +880,14 @@ function M.bundleOnedir(opts)
     else
         local pkg_ok, pkg_flags = commandOutput("pkg-config --cflags --libs lua")
         if not pkg_ok then
-            return makeError("ToolchainError", "pkg-config cannot find lua", {
+            return abandon(makeError("ToolchainError", "pkg-config cannot find lua", {
                 output = pkg_flags,
-            })
+            }))
         end
 
         local tokens, token_err = sanitizePkgConfigFlags(pkg_flags:gsub("%s+$", ""))
         if not tokens then
-            return token_err
+            return abandon(token_err)
         end
         compile_cmd = table.concat({
             "cc",
@@ -736,10 +900,10 @@ function M.bundleOnedir(opts)
     end
     local compile_ok, compile_output = commandOutput(compile_cmd)
     if not compile_ok then
-        return makeError("CompilationFailedError", "C launcher compilation failed", {
+        return abandon(makeError("CompilationFailedError", "C launcher compilation failed", {
             command = compile_cmd,
             output = compile_output,
-        })
+        }))
     end
 
     if profile.target_os ~= "windows" then
@@ -750,12 +914,12 @@ function M.bundleOnedir(opts)
         local exe_dll = normalizePath(out_dir .. "/" .. windows_lua.dll_name)
         err = copyFile(windows_lua.dll_path, exe_dll)
         if err then
-            return err
+            return abandon(err)
         end
         local native_dll = normalizePath(native_dir .. "/" .. windows_lua.dll_name)
         err = copyFile(windows_lua.dll_path, native_dll)
         if err then
-            return err
+            return abandon(err)
         end
         manifest.launcher.lua_runtime = {
             source_path = normalizePath(windows_lua.dll_path),
@@ -773,14 +937,14 @@ function M.bundleOnedir(opts)
         local runtime_record
         err, runtime_record = copyLuaRuntime(exe_path, native_dir)
         if err then
-            return err
+            return abandon(err)
         end
         manifest.launcher.lua_runtime = runtime_record
     end
 
     err = writeFile(normalizePath(luai_dir .. "/manifest.lua"), serializeManifest(manifest))
     if err then
-        return err
+        return abandon(err)
     end
     local generated_files = {
         { path = exe_name },
@@ -788,20 +952,34 @@ function M.bundleOnedir(opts)
     if windows_lua then
         generated_files[#generated_files + 1] = { path = windows_lua.dll_name }
     end
-    err = writeGeneratedMarker(out_dir, generated_files)
+    err = writeGeneratedMarker(out_dir, generated_files, final_out_dir)
     if err then
-        return err
+        return abandon(err)
     end
 
-    return {
+    err = commitStagingDirectory(out_dir, final_out_dir, allowed_generated_entries, output_snapshot)
+    if err then
+        if not err.error or err.error.committed ~= true then
+            return abandon(err)
+        end
+        return releaseOutputLock(output_lock, err)
+    end
+
+    local success = {
         ok = true,
         action = "bundle",
         mode = "onedir",
         entry = entry,
-        out = out_dir,
-        executable = exe_path,
+        out = final_out_dir,
+        executable = normalizePath(final_out_dir .. "/" .. exe_name),
         manifest = manifest,
     }
+    local release_err = releaseOutputLock(output_lock)
+    if release_err then
+        release_err.error.committed = true
+        return release_err
+    end
+    return success
 end
 
 return M

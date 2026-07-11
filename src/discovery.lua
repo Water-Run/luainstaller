@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-10
+    2026-07-11
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -325,11 +325,21 @@ require = function(name)
         source = entry
     end
     local key = tostring(name) .. "\n" .. source
+    local record_index
     if not seen[key] then
         seen[key] = true
         records[#records + 1] = { name = tostring(name), source = source }
+        record_index = #records
     end
-    return original_require(name)
+    local result = table.pack(pcall(original_require, name))
+    if not result[1] then
+        if record_index then
+            seen[key] = nil
+            table.remove(records, record_index)
+        end
+        error(result[2], 0)
+    end
+    return table.unpack(result, 2, result.n)
 end
 os.exit = function(code, close)
     flush_records()

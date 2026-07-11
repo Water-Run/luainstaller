@@ -13,7 +13,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-02-22
+    2026-07-11
 ]]
 
 local path = require("luainstaller.path")
@@ -441,7 +441,26 @@ function LuaLexer:extractStringLiteral(start_line)
         local ch = self:currentChar()
         if ch == quote and self:isNotEscaped() then
             self.pos = self.pos + 1
-            local result = table.concat(parts)
+            local raw = table.concat(parts)
+            local decoder, decode_err = load(
+                "return " .. quote .. raw .. quote,
+                "=(luainstaller-require-literal)",
+                "t",
+                {}
+            )
+            if not decoder then
+                error(errors.dynamicRequire(
+                    self.file_path, start_line,
+                    "Invalid string literal in require: " .. tostring(decode_err)
+                ))
+            end
+            local ok, result = pcall(decoder)
+            if not ok or type(result) ~= "string" then
+                error(errors.dynamicRequire(
+                    self.file_path, start_line,
+                    "Invalid string literal in require"
+                ))
+            end
             self:checkNoConcatenation(start_line, result)
             return result
         end
@@ -594,6 +613,7 @@ function LuaLexer:parseRequire()
     local saved_line = self.line
 
     self.pos         = self.pos + #"require"
+    local after_keyword = self.pos
     self:skipWhitespace()
 
     local ch = self:currentChar()
@@ -629,6 +649,18 @@ function LuaLexer:parseRequire()
             end
             return module_name
         end
+    end
+
+    local before_keyword = self.source:sub(1, saved_pos - 1)
+    local line_start = before_keyword:match(".*\n()") or 1
+    local statement_prefix = self.source:sub(line_start, saved_pos - 1)
+    if statement_prefix:match("^%s*local%s+$")
+        or (not has_paren
+            and before_keyword:match("local%s+require%s*=%s*$")
+            and (self.source:sub(after_keyword):match("^%s*$")
+                or self.source:sub(after_keyword):match("^%s*[\r\n;]")
+                or self.source:sub(after_keyword):match("^%s*%-%-"))) then
+        return nil
     end
 
     local end_pos = self.pos

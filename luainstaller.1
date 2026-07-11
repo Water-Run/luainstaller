@@ -1,198 +1,284 @@
-.TH LUAI 1 "June 2026" "luainstaller v1.0.0" "User Commands"
+.TH LUAINSTALLER 1 "July 2026" "luainstaller 1.0.0" "User Commands"
 .SH NAME
-luai, luainstaller \- package Lua projects into same-environment executables
-
+luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
 .B luai
-.BR \-h
+.B \-h
 .br
 .B luai
-.BR \-v
+.B \-v
 .br
 .B luai
-.BR \-a " " \fIentry.lua\fR
+.BR \-a | \-t | \-b
+.I entry.lua
 .RI [ options ]
-.br
-.B luai
-.BR \-t " " \fIentry.lua\fR
-.RI [ options ]
-.br
-.B luai
-.BR \-b " " \fIentry.lua\fR
-.RI [ options ]
+.RI [ \-\- " args..." ]
 .PP
 .B luainstaller
-.BR help
+.BR help | version
 .br
 .B luainstaller
-.BR version
-.br
-.B luainstaller
-.BR analyze " " \fIentry.lua\fR
+.BR analyze | trace | build
+.I entry.lua
 .RI [ options ]
+.RI [ \-\- " args..." ]
 .br
-.B luainstaller
-.BR trace " " \fIentry.lua\fR
+.B luainstaller logs
 .RI [ options ]
-.br
-.B luainstaller
-.BR build " " \fIentry.lua\fR
-.RI [ options ]
-
 .SH DESCRIPTION
 .B luainstaller
-analyzes Lua dependencies and packages Lua projects into same-environment
-executables. The installed package provides two command names with different
-command-line personalities.
+discovers Lua
+.B require
+dependencies and builds a native launcher containing the entry script and
+pure-Lua modules. Lua C modules and, where required, the Lua shared runtime are
+placed beside the launcher in an inspectable directory bundle.
+.PP
+The output is not a universal executable. The target must match the selected
+operating-system family, CPU architecture, system ABI, and Lua ABI. External
+shared libraries required by Lua C modules are not copied automatically.
 .PP
 .B luai
-is compact, traditional, plain, and script-friendly.
-.B luainstaller
-uses full subcommands and modern human-oriented output.
-.PP
-The compatibility promise for generated bundles is same OS, same architecture,
-same ABI, and same Lua ABI. General cross-platform output and automatic
-external shared-library closure are outside the current support boundary.
-
-.SH COMMAND SPLIT
-.TP
-.B luai
-Accepts compact commands only:
-.BR \-h ,
-.BR \-v ,
-.BR \-a ,
-.BR \-t ,
 and
-.BR \-b .
-.TP
 .B luainstaller
-Accepts full subcommands only:
-.BR help ,
-.BR version ,
-.BR analyze ,
-.BR trace ,
-.BR build ,
-and
-.BR logs .
-.PP
-For example,
+call the same Lua API but use separate command grammars. The short command uses
+flags; the descriptive command uses words. Their syntax is intentionally not
+interchangeable.
+.SH COMMANDS
+.TP
+.B luai \-a
+Analyze dependencies.
+.TP
+.B luai \-t
+Print dependency resolution decisions and compatibility notes.
+.TP
 .B luai \-b
-is valid and
+Build an onedir or onefile bundle.
+.TP
+.B luainstaller analyze
+Analyze dependencies.
+.TP
+.B luainstaller trace
+Print dependency resolution decisions and compatibility notes.
+.TP
 .B luainstaller build
-is valid.
-.B luai build
-and
-.B luainstaller \-b
-are intentionally invalid.
-
-.SH EXAMPLES
-.SS Compact CLI
-.nf
-luai -h
-luai -v
-luai -a test/runtime_bundle/main.lua --max-deps 120
-luai -t test/runtime_bundle/main.lua --max-deps 120
-luai -b --dir test/runtime_bundle/main.lua -o build/runtime
-luai -b --file test/runtime_bundle/main.lua -o build/runtime-onefile
-.fi
-
-.SS Modern CLI
-.nf
-luainstaller help
-luainstaller version
-luainstaller analyze test/runtime_bundle/main.lua --max-deps 120
-luainstaller trace test/runtime_bundle/main.lua --max-deps 120
-luainstaller build --dir test/runtime_bundle/main.lua -o build/runtime
-luainstaller build --file test/runtime_bundle/main.lua -o build/runtime-onefile
-.fi
-
+Build an onedir or onefile bundle.
+.TP
+.B luainstaller logs
+Read persistent diagnostic records.
+.TP
+.B luai \-h
+Print short-command help.
+.TP
+.B luainstaller help
+Print descriptive-command help.
+.TP
+.BR "luai \-v" ", " "luainstaller version"
+Print version information.
 .SH OPTIONS
-The following options apply to dependency actions and build actions where
-meaningful.
 .TP
-.BI \-o ", " \-\-out " " path
-Output path for build actions.
+.BR \-\-dir ", " \-\-onedir
+Build an inspectable directory. This is the default.
 .TP
-.B \-\-dir ", " \-\-onedir
-Build a directory bundle. This is the default build mode.
+.BR \-\-file ", " \-\-onefile
+Build a self-extracting executable from a staged onedir bundle.
 .TP
-.B \-\-file ", " \-\-onefile
-Build a self-extracting onefile bundle.
+.BR \-o " " path ", " \-\-out " " path
+Set the output directory or onefile executable path.
 .TP
-.BI \-\-include " " path
-Include an additional file. May be repeated.
+.BI \-\-include " path"
+Add a Lua source file not found by automatic discovery. Repeatable.
 .TP
-.BI \-\-exclude " " path
-Exclude a dependency by path or basename. May be repeated.
+.BI \-\-exclude " value"
+Exclude an exact path, basename, or path suffix. Repeatable. Exclusions take
+precedence over discovery and manual includes.
 .TP
-.BI \-\-target\-os " " os
-Select the target profile: linux, macos, or windows.
+.BR \-d " " mode ", " \-\-discovery-mode " " mode
+Use
+.BR static ,
+.BR runtime ,
+or
+.B manual
+dependency discovery.
 .TP
-.BI \-\-lua " " path
-Lua interpreter used by runtime dependency discovery. Defaults to
-LUAI_LUA, then the current interpreter, then lua from PATH.
+.B \-\-no-depscan
+Disable automatic discovery; equivalent to manual mode.
 .TP
-.BI \-\-lua\-prefix " " path
-Lua prefix used by targets that require explicit headers or runtime files.
+.BI \-\-max-deps " number"
+Set the maximum discovered Lua source dependency count. Default: 36.
 .TP
-.BI \-d ", " \-\-discovery\-mode " " mode
-Select dependency discovery mode: static, manual, or runtime.
+.BI \-\-lua " path"
+Select the Lua interpreter used by runtime discovery.
 .TP
-.B \-\-no\-depscan
-Disable automatic dependency scanning and use manual dependencies only.
+.BI \-\-target-os " os"
+Select
+.BR linux ,
+.BR macos ,
+or
+.B windows
+build profile.
 .TP
-.BI \-\-max\-deps " " n
-Maximum dependency count.
+.BI \-\-lua-prefix " path"
+Select the Lua headers/runtime prefix used by profiled targets.
 .TP
 .B \-\-verbose
-Show more detail.
-
-.SH OUTPUT
-.B luai
-uses plain, compact, line-oriented output and never emits color or animation.
+Print additional trace or bundle counts.
+.TP
+.B \-\-
+Pass the remaining arguments to the entry during runtime dependency discovery.
+They are not stored as executable defaults.
+.SS Log options
+.TP
+.BI \-\-limit " number"
+Limit returned log records to a positive integer.
+.TP
+.BI \-\-level " level"
+Filter by
+.BR debug ,
+.BR info ,
+.BR warning ,
+.BR error ,
+or
+.BR success .
+.TP
+.B \-\-asc
+Print oldest records first. The default is newest first.
+.SH DISCOVERY MODES
+.TP
+.B static
+Parse literal require calls without running the application. Literal Lua string
+escapes are decoded. Computed names return
+.BR DynamicRequireError .
+.TP
+.B runtime
+Execute the entry under a temporary require tracer. Only executed branches are
+observed. Successfully loaded modules are retained; missing modules caught by
+the application with
+.B pcall
+remain optional.
+.TP
+.B manual
+Start with no automatic dependencies and use repeated
+.B \-\-include
+options.
+.SH EXAMPLES
 .PP
-.B luainstaller
-uses sectioned, modern output. ANSI color and progress animation are
-presentation features and are disabled for non-interactive fallback,
-.B NO_COLOR ,
-and CI-style output.
-
+Analyze, trace, then build onedir:
+.PP
+.nf
+luai \-a app/main.lua \-\-max-deps 120
+luai \-t app/main.lua \-\-max-deps 120
+luai \-b \-\-dir app/main.lua \-o build/app \-\-max-deps 120
+env \-i PATH=/usr/bin:/bin build/app/app
+.fi
+.PP
+Build onefile after onedir succeeds:
+.PP
+.nf
+luainstaller build \-\-file app/main.lua \-o build/app-onefile
+.fi
+.PP
+Trace a computed dependency path with build-time arguments:
+.PP
+.nf
+luai \-t app/main.lua \-d runtime \-\- profile_a input.json
+.fi
+.PP
+Cross-build a Windows x86_64 profile from Linux:
+.PP
+.nf
+luainstaller build app/main.lua \-\-target-os windows \\
+  \-\-lua-prefix /opt/windows-lua54 \-o build/app
+.fi
+.SH OUTPUT
+An onedir bundle contains the native executable and a hidden
+.B .luai
+directory with generated C source, manifest, output marker, and native files.
+Rebuilds occur in a private sibling staging directory. An existing recognized
+bundle is preserved while compilation runs. Final installation uses sequential
+directory renames, with a brief visibility gap, and is not crash-atomic.
+.PP
+Onefile extracts a content-addressed onedir payload below the user temporary
+directory. POSIX caches are separated by effective user ID and require
+owner-only permissions. Unsafe paths, parent symlinks, and Windows reparse
+points are rejected.
+.SH ENVIRONMENT
+.TP
+.B LUAI_LUA
+Default interpreter for runtime discovery and source-installed wrappers.
+.TP
+.B LUAI_LUA_PREFIX
+Default Lua prefix for profiled builds.
+.TP
+.B LUAI_TARGET_OS
+Default target profile when the API option is absent.
+.TP
+.B LUAI_WINDOWS_CC
+Windows cross-compiler command. Default:
+.BR x86_64-w64-mingw32-gcc .
+.TP
+.B LUA_PATH, LUA_CPATH
+Search paths used during dependency discovery. Clear them when verifying that a
+finished bundle does not rely on host modules.
+.TP
+.B TMPDIR
+Temporary root for runtime discovery and POSIX onefile extraction.
+.TP
+.B HOME, USERPROFILE
+Home directory used for persistent logs.
+.TP
+.B NO_COLOR, CI
+Disable interactive color output.
+.SH FILES
+.TP
+.I ~/.luainstaller/logs.lua
+Persistent diagnostic records on POSIX when
+.B HOME
+is set.
+.TP
+.I output/.luai/manifest.lua
+Inspectable bundle manifest.
+.TP
+.I output/.luai/generated-output.txt
+Generated-output ownership and hash marker.
+.SH EXIT STATUS
+Zero indicates success. Command parsing, analysis, build, extraction, or child
+application failure returns nonzero.
 .SH INSTALLATION
 .nf
 luarocks install luainstaller
 .fi
 .PP
-Source checkout installation:
+From a source checkout:
+.PP
 .nf
-sh tools/install-source.sh --prefix "$HOME/.local"
-export PATH="$HOME/.local/bin:$PATH"
-luai -h
-luainstaller version
+sh tools/install-source.sh \-\-prefix "$HOME/.local"
 .fi
-
 .SH LUA API
-The CLI split does not change the Lua API.
-.nf
-local luainstaller = require("luainstaller")
-local result = luainstaller.analyze({
-  entry = "test/runtime_bundle/main.lua",
-})
-.fi
-
+The module
+.B luainstaller
+exports
+.BR analyze ,
+.BR trace ,
+.BR compatibility ,
+.BR bundle ,
+.BR getLogs ,
+and
+.BR clearLogs .
+Operations return a table with
+.B ok=true
+or a structured
+.B error
+table containing at least
+.B type
+and
+.BR message .
 .SH SEE ALSO
-GitHub repository: https://github.com/Water-Run/luainstaller
+.B lua(1), luarocks(1), cc(1), pkg-config(1), ldd(1), otool(1)
+.PP
+Project documentation:
 .br
-User documentation: docs/USAGE.adoc
-.br
-Implementation documentation: docs/IMPLEMENTATION.adoc
-.br
-Bundling documentation: docs/BUNDLING.adoc
-.br
-Platform and native module documentation: docs/PLATFORMS-NATIVE-LIMITS.adoc
-.br
-Testing documentation: docs/TESTING.adoc
-.br
-Troubleshooting documentation: docs/TROUBLESHOOTING.adoc
-
+https://github.com/Water-Run/luainstaller
+.SH AUTHORS
+WaterRun <linzhangrun49@gmail.com>
 .SH LICENSE
-LGPL-3.0-or-later
+LGPL-3.0-or-later.

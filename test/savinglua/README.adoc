@@ -1,83 +1,49 @@
-= savinglua
+= savinglua sample
 
-This sample is a small SQLite-backed Lua table record store. It is
-designed as a packaging target that exercises Lua modules, LuaRocks
-dependencies, native SQLite bindings, persistent data files, and
-command-line workflows.
+`savinglua` is a small SQLite-backed JSON record store. It exercises a nested
+Lua module, two native LuaRocks dependencies, persistent files, and command-line
+argument forwarding.
 
-=== Features
-
-* SQLite schema initialization
-* JSON table record storage through `cjson`
-* native SQLite access through `lsqlite3`
-* key/value put, get, scan, and delete commands
-* prefix scans with deterministic key ordering
-* smoke test with a temporary database
-
-=== Files
-
-* `main.lua` - command-line entry point
-* `src/savinglua/store.lua` - SQLite-backed table store
-* `smoke_test.lua` - non-interactive project check
-* `bench/` - benchmark script extension point
-* `csrc/` - local C glue extension point; current native access comes
-from the `lsqlite3` LuaRocks module
-
-=== Dependencies
-
-Install dependencies with LuaRocks if they are not already available:
+== Dependencies
 
 [source,sh]
 ----
 luarocks install lua-cjson
 luarocks install lsqlite3
+lua -e 'require("cjson"); require("lsqlite3"); print("dependencies ok")'
 ----
 
-Check dependency discovery:
+Both native modules must match Lua 5.4 and the target ABI.
+
+== Use
 
 [source,sh]
 ----
-lua -e 'require("cjson"); require("lsqlite3"); print("savinglua deps ok")'
+db=/tmp/savinglua.sqlite3
+lua test/savinglua/main.lua --db "$db" \
+  put users:ada '{"name":"Ada Lovelace","score":98}'
+lua test/savinglua/main.lua --db "$db" get users:ada
+lua test/savinglua/main.lua --db "$db" scan users:
+lua test/savinglua/main.lua --db "$db" delete users:ada
 ----
 
-=== Direct Use
+`main.lua` is the entry. `src/savinglua/store.lua` initializes SQLite and owns
+put/get/scan/delete operations. `bench/` and `csrc/` are reserved for future
+sample-specific experiments and are not current runtime dependencies.
 
-Store and read a record:
-
-[source,sh]
-----
-lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}'
-lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 get users:ada
-lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 scan users:
-lua test/savinglua/main.lua --db /tmp/savinglua.sqlite3 delete users:ada
-----
-
-=== Verification
-
-Run the project smoke test:
+== Package and verify
 
 [source,sh]
 ----
 lua test/savinglua/smoke_test.lua
+luai -t test/savinglua/main.lua --max-deps 250
+luai -b --dir test/savinglua/main.lua \
+  -o build/savinglua --max-deps 250
+
+env -i PATH=/usr/bin:/bin build/savinglua/savinglua \
+  --db /tmp/bundled-savinglua.sqlite3 \
+  put check '{"ok":true}'
 ----
 
-Run syntax checks:
-
-[source,sh]
-----
-find test/savinglua -name '*.lua' -print0 | xargs -0 -n1 luac -p
-----
-
-Future packaging targets:
-
-[source,sh]
-----
-luai -t test/savinglua/main.lua
-luai -b test/savinglua/main.lua -o build/savinglua
-----
-
-Expected dependency behavior:
-
-* Lua modules: `savinglua.store`
-* LuaRocks/native modules: `cjson`, `lsqlite3`
-* Data file: selected by `--db`, defaulting to `savinglua.sqlite3`
+Expected discovery is `savinglua.store`, `cjson`, and `lsqlite3`. The database
+path is runtime state and is not packaged.

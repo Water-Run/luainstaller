@@ -1,79 +1,33 @@
-= ltokei
+= ltokei sample
 
-This sample is a Tokei-like source code statistics tool written in Lua.
-It is designed as a medium-size pure Lua packaging target with recursive
-directory scanning, multiple modules, fixtures, and CLI table output.
+This source counter is the filesystem-oriented packaging fixture. It walks a
+tree with LuaFileSystem, classifies files, and prints code/comment/blank totals
+by language.
 
-=== Features
-
-* recursive source file scanning
-* language detection by file extension
-* line classification for code, blank lines, and comments
-* Lua, C, Markdown, Python, and JavaScript rules
-* deterministic language summary table
-* fixture-backed smoke test
-
-=== Files
-
-* `main.lua` - command-line entry point
-* `src/ltokei/languages.lua` - language detection and line
-classification
-* `src/ltokei/scanner.lua` - recursive file scanning and aggregation
-* `src/ltokei/formatter.lua` - plain text table rendering
-* `fixtures/` - small source tree used by the smoke test
-* `smoke_test.lua` - non-interactive project check
-
-=== Dependency
-
-The sample uses LuaFileSystem for cross-platform recursive file
-enumeration:
+== Dependency
 
 [source,sh]
 ----
 luarocks install luafilesystem
+lua -e 'require("lfs"); print("lfs ok")'
 ----
 
-=== Direct Use
+== Structure
 
-Scan the bundled fixture tree:
+`main.lua` parses the root path. `src/ltokei/languages.lua` selects language
+rules, `scanner.lua` walks and aggregates files, and `formatter.lua` prints the
+table. `fixtures/` is the deterministic smoke input.
+
+== Run and package
 
 [source,sh]
 ----
 lua test/ltokei/main.lua test/ltokei/fixtures
-----
-
-Scan the repository:
-
-[source,sh]
-----
-lua test/ltokei/main.lua .
-----
-
-=== Verification
-
-Run the project smoke test:
-
-[source,sh]
-----
 lua test/ltokei/smoke_test.lua
+
+luai -t test/ltokei/main.lua --max-deps 120
+luai -b --dir test/ltokei/main.lua -o build/ltokei --max-deps 120
+env -i PATH=/usr/bin:/bin build/ltokei/ltokei test/ltokei/fixtures
 ----
 
-Run syntax checks:
-
-[source,sh]
-----
-find test/ltokei -name '*.lua' -print0 | xargs -0 -n1 luac -p
-----
-
-Future packaging targets:
-
-[source,sh]
-----
-luai -t test/ltokei/main.lua
-luai -b test/ltokei/main.lua -o build/ltokei
-----
-
-Expected dependency behavior:
-
-* Lua modules: `ltokei.languages`, `ltokei.scanner`, `ltokei.formatter`
-* LuaRocks/native module: `lfs`
+Expected discovery is three `ltokei.*` Lua modules plus native `lfs`.

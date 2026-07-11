@@ -1,258 +1,228 @@
-= Platforms, Native Modules, and Limits
+= Platforms, native modules, and limits
 :toc: macro
-:toclevels: 4
+:toclevels: 3
 :sectanchors:
 :sectlinks:
-:icons: font
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This guide explains the platform model behind `luainstaller`: what a
-target profile means, how native Lua C modules are copied, which
-external dependencies remain outside the bundle, and which portability
-claims the project intentionally does not make.
-
+This is the compatibility contract for generated bundles. Read it before
+shipping native Lua modules or selecting a non-local target profile.
 
 toc::[]
 
-[#platforms-compatibility]
-== Compatibility Model
+[#platforms-contract]
+== What “portable” means here
 
-The core rule is simple but strict:
+`luainstaller` removes the target machine's dependency on a separate `lua`
+command. It does not make native code universal.
 
-[IMPORTANT]
-====
-A bundle is expected to run on a target with the same OS family, CPU
-architecture, system ABI, and Lua ABI as the selected build profile.
-====
+A target must match:
 
-This is narrower than "cross-platform executable". The generated
-launcher can be built for different profiles, but native Lua C modules,
-Lua runtime libraries, libc families, compiler runtimes, and third-party
-shared libraries still have platform rules that `luainstaller` does not
-rewrite.
+. operating-system family;
+. CPU architecture;
+. system ABI and loader conventions;
+. Lua major/minor ABI;
+. native module compiler/runtime assumptions.
 
-[#platforms-targets]
-== Target Profiles
+A Linux x86_64 bundle is not a Windows or Linux ARM64 bundle. A Lua 5.4 native
+module is not loadable by a Lua 5.3 runtime merely because its filename is the
+same.
 
-[cols="1,2,3,3",options="header"]
-|===
-|Target |Select with |Build prerequisites |Runtime strategy
-
-|Linux
-|Default on Linux or `--target-os linux`
-|Linux host, `cc`, `pkg-config --cflags --libs lua`, Lua headers, and
-native modules built for the same Lua ABI.
-|Shared-Lua launcher with `$ORIGIN/.luai/native`; the linked
-`liblua*.so` is copied into `.luai/native/`.
-
-|macOS
-|Default on macOS or `--target-os macos`
-|macOS host, `cc`, and a Lua prefix containing `include/lua.h` and
-`lib/liblua.a`.
-|Static Lua launcher using `liblua.a`; native module paths are relative
-to `@loader_path/.luai/native`.
-
-|Windows
-|`--target-os windows` from Linux
-|Linux host, MinGW compiler, a Windows Lua prefix containing
-`include/lua.h` and `lua54.dll` or `lua.dll`, plus Windows builds of
-required native modules.
-|MinGW-built `.exe`; the Lua DLL is copied beside the launcher and into
-`.luai/native/`.
-|===
-
-Environment variables:
+[#platforms-profiles]
+== Build profiles
 
 [cols="1,2,3",options="header"]
 |===
-|Variable |Used by |Effect
+|Target |Launcher/runtime |Build requirement
 
-|`LUAI_TARGET_OS`
-|API and CLI bundle path when `--target-os` is omitted.
-|Selects `linux`, `macos`, or `windows`.
+|Linux
+|Shared Lua launcher; linked Lua shared object copied into `.luai/native`
+|Linux host, C compiler, `pkg-config --cflags --libs lua`, shared Lua library
 
-|`LUAI_LUA_PREFIX`
-|macOS and Windows profiles.
-|Default Lua prefix when `--lua-prefix` is omitted.
+|macOS
+|Lua static library linked into launcher
+|macOS host and `--lua-prefix` containing `include/lua.h` and `lib/liblua.a`
 
-|`LUAI_WINDOWS_CC`
-|Windows profile.
-|Overrides `x86_64-w64-mingw32-gcc`.
-
-|`LUAI_LUA`
-|Source-installed wrapper scripts.
-|Overrides the Lua interpreter used by installed wrappers.
-
-|`PREFIX`, `LUA`
-|`tools/install-source.sh`.
-|Default source install prefix and Lua command.
+|Windows x86_64
+|MinGW launcher plus Lua DLL beside executable and under `.luai/native`
+|Linux host, x86_64 MinGW compiler, and Windows Lua prefix
 |===
 
+`--target-os` selects one of these profiles. It does not cross-compile Lua C
+modules found in the source environment; those modules must already match the
+target.
+
 [#platforms-linux]
-== Linux Profile
+== Linux
 
-Linux onedir output uses a shared-Lua launcher. The build relies on the
-host's compiler and Lua development metadata:
-
-[source,sh]
-----
-cc --version
-pkg-config --cflags --libs lua
-----
-
-The launcher compile command is shaped like this:
+The Linux compiler command is derived from `pkg-config` and adds:
 
 [source,text]
 ----
-cc .luai/build/launcher.c -o <exe> -Wl,-rpath,'$ORIGIN/.luai/native' $(pkg-config --cflags --libs lua)
+-Wl,-rpath,'$ORIGIN/.luai/native'
 ----
 
-After compilation, `ldd` is used to locate the linked Lua shared
-runtime. That runtime is copied into `.luai/native/` and recorded in the
-manifest. This helps a bundle run on a matching environment without
-requiring a separately installed `lua` command.
+After compilation, `ldd` is used to locate the linked `liblua`. A static-only
+Lua installation is insufficient for this profile because there is no shared
+runtime to copy.
 
-Linux portability remains ABI-bound. A bundle built against glibc is not
-made musl-compatible by packaging. A native module built for one
-architecture is not translated to another architecture.
+For a custom Lua build, expose a temporary or permanent `lua.pc`:
+
+[source,sh]
+----
+PKG_CONFIG_PATH=/opt/lua-5.4/lib/pkgconfig \
+  luainstaller build --dir app/main.lua -o build/app
+----
+
+Test on the oldest glibc and distribution baseline you intend to support.
+Building on a newer system can introduce symbol versions absent from older
+targets.
 
 [#platforms-macos]
-== macOS Profile
+== macOS
 
-The macOS profile expects a Lua prefix with a static Lua library:
+The macOS profile requires a static Lua prefix:
 
 [source,text]
 ----
-<prefix>/include/lua.h
-<prefix>/lib/liblua.a
+/opt/lua-5.4/
+├── include/lua.h
+└── lib/liblua.a
 ----
 
-The static Lua runtime simplifies distribution of the launcher itself,
-but native modules still have their own loader dependencies. Frameworks,
-`.dylib` dependencies, deployment targets, codesigning, notarization,
-and `.app` bundle layout are outside the current scope.
+[source,sh]
+----
+luainstaller build --dir app/main.lua \
+  --target-os macos \
+  --lua-prefix /opt/lua-5.4 \
+  -o build/app
+----
+
+Lua is static in the launcher, but Lua C modules remain Mach-O bundles with
+their own architecture and deployment-target requirements. Inspect them with
+`file` and `otool -L`.
+
+The project does not create universal (`arm64` + `x86_64`) binaries, sign code,
+or notarize output.
 
 [#platforms-windows]
-== Windows Profile
+== Windows
 
-The Windows profile is currently built from Linux with MinGW. The Lua
-prefix must be for Windows, not the Linux host:
+The Windows profile currently targets x86_64 from Linux using MinGW. The prefix
+must provide headers and one of these DLL names:
+
+* `bin/lua54.dll`;
+* `lua54.dll`;
+* `bin/lua.dll`;
+* `lua.dll`.
 
 [source,sh]
 ----
-x86_64-w64-mingw32-gcc --version
-test -f "$LUAI_LUA_PREFIX/include/lua.h"
-test -f "$LUAI_LUA_PREFIX/bin/lua54.dll" || test -f "$LUAI_LUA_PREFIX/lua54.dll"
+luainstaller build --dir app/main.lua \
+  --target-os windows \
+  --lua-prefix /opt/windows-lua54 \
+  -o build/app
 ----
 
-Native Lua C modules must also be Windows builds. Cross-compiling the
-launcher does not turn Linux `.so` files into Windows `.dll` files.
+Set `LUAI_WINDOWS_CC` to override `x86_64-w64-mingw32-gcc`. The Lua DLL import
+name, import library behavior, and native modules must be compatible with that
+compiler family.
+
+Wine is useful for fast feedback, but a Windows VM remains part of the release
+gate. Windows command-line quoting, DLL lookup, filesystem semantics, and
+endpoint security behavior can differ from Wine.
+
+Generated Windows launchers and the onefile extractor currently use the narrow
+Win32 process/path APIs. They preserve quoting for ACP-representable arguments,
+but executable paths, temporary paths, or arguments containing characters that
+cannot be represented by the active Windows ANSI code page are unsupported.
+Use ASCII-compatible paths and arguments until the generated runtime moves to
+the wide-character Win32 APIs.
 
 [#platforms-native]
-== Native Lua C Modules
+== Native Lua C modules
 
-Lua C modules are files loaded by Lua's native loader:
+Discovery copies the module file selected from `package.cpath`. It does not:
 
-[source,lua]
-----
-require("cjson")
-require("lsqlite3")
-require("socket.core")
-require("lfs")
-----
+* rebuild the module for another OS or architecture;
+* change the Lua ABI exported by the module;
+* rewrite its RPATH or install name;
+* copy dependent OpenSSL, database, C++ runtime, or vendor libraries;
+* verify the module's license or redistribution terms.
 
-The bundler copies detected native module files into `.luai/native/`.
-For dotted names it writes a nested path when the trace identifies the
-requested module:
-
-[source,text]
-----
-require("socket.core")
-  -> .luai/native/core.so
-  -> .luai/native/socket/core.so
-----
-
-The copied file must already be correct for the target OS, CPU
-architecture, Lua ABI, and compiler/runtime family. `luainstaller`
-preserves and lays out native modules; it does not rebuild them for a
-new platform.
-
-Static archives such as `.a` are not Lua `require()` native modules and
-are not discovered as dependencies. They are used only by target profiles
-that explicitly link a launcher against a static Lua runtime, such as the
-macOS `liblua.a` profile.
-
-[#platforms-external]
-== External Library Boundary
-
-A native Lua module can depend on libraries that are not Lua modules:
-
-* `libsqlite3.so.0`;
-* `libssl.so.3`;
-* C++ runtime libraries;
-* system frameworks;
-* third-party DLLs.
-
-Inspect native modules directly:
+Use the source program's actual module paths during analysis:
 
 [source,sh]
 ----
-ldd dist/app/.luai/native/lsqlite3.so
-otool -L dist/app/.luai/native/lsqlite3.so
+LUA_PATH='/srv/app/share/lua/5.4/?.lua;;' \
+LUA_CPATH='/srv/app/lib/lua/5.4/?.so;;' \
+luai -t app/main.lua --max-deps 250
 ----
 
-[WARNING]
-====
-`luainstaller` copies detected Lua C module files and selected Lua
-runtime files. It does not automatically compute and copy the full
-external shared-library dependency closure of every native module.
-====
+Then inspect every copied native file:
 
-[#platforms-verification]
-== Verified Matrix
+[source,sh]
+----
+find build/app/.luai/native -type f -print
+file build/app/.luai/native/*
+ldd build/app/.luai/native/*.so
+----
 
-The current local and lab verification loop covers:
+Do not assume that a successful launcher compile proves native closure. Native
+load errors occur when the application first requires the module.
 
-* Linux x86_64 full smoke, LuaRocks install, source install, and clean
-  runtime bundle execution;
-* Linux aarch64 source install and analysis, with a clean
-  `ToolchainError` when Lua headers and Lua `pkg-config` metadata are
-  unavailable;
-* macOS arm64 onedir bundles for selected pure Lua and native samples,
-  plus pure Lua and student onefile bundles;
-* Windows 10 x64 bundles built from Linux with MinGW and a Windows Lua
-  prefix, then run without installed Lua or LuaRocks on the target.
+[#platforms-matrix]
+== Release matrix used by this repository
 
-The matrix is evidence for the sample set, not a promise that arbitrary
-native packages or OS distributions will work without target-specific
-inspection.
+[cols="2,2,3",options="header"]
+|===
+|Environment |Architecture |Coverage
+
+|Linux lab host
+|x86_64
+|Full local suite, source install, clean-environment onedir run
+
+|NVIDIA DGX Spark
+|aarch64
+|Full sample suite with Lua 5.4.8, cjson, LuaFileSystem, LuaSocket/Pegasus and
+lsqlite3; onedir/onefile, clean/symlink launch, concurrent cache extraction,
+and executable-mode repair
+
+|Mac Studio
+|arm64
+|Lua 5.4.8, native LuaRocks modules, onedir/onefile application matrix, Web
+service probe
+
+|Wine
+|Windows x86_64
+|onedir/onefile, native modules, path argument forwarding, Web service probe
+
+|Windows 10 VM
+|x86_64
+|Clean DLL/Lua environment, onedir/onefile, native applications, argument
+forwarding, Web service probe
+|===
+
+The matrix is evidence for those exact environments, not a claim about every
+distribution or OS release.
 
 [#platforms-limits]
-== Boundaries and Non-Goals
+== Explicit limits
 
-Not promised:
+The current release does not provide:
 
-* universal cross-platform output;
-* cross-distribution Linux portability;
-* glibc/musl compatibility;
-* architecture translation;
-* native module ABI conversion;
-* full external shared-library dependency closure;
-* no-extract onefile native loading;
-* codesigning, notarization, app bundles, MSI/PKG/DEB/RPM installers;
-* sandboxing or permission isolation.
+* universal cross-platform executables;
+* automatic native dependency closure;
+* bytecode-only packaging;
+* encryption or source obfuscation;
+* loading native modules directly from onefile without extraction;
+* Windows ARM or 32-bit Windows profiles;
+* Linux-to-macOS compilation;
+* macOS code signing or notarization;
+* MSI, PKG, DEB, RPM, or other installer generation.
 
-[#platforms-security]
-== Security Notes
-
-`luainstaller` is a packaging tool, not a sandbox:
-
-* bundled Lua code runs with the process privileges of the executable;
-* manifest hashes identify packaged bytes but do not establish trust;
-* onefile payloads are embedded, not encrypted;
-* onefile extraction writes files to a temp/cache directory;
-* output safety guards protect build outputs from accidental overwrite,
-  not runtime application behavior.
+These are product boundaries. Treat them as unsupported rather than features
+that may happen to work.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

@@ -1,121 +1,65 @@
-= student_management_system
+= Student management sample
 
-This sample is a complete terminal student management system. It is
-larger than the `single_file` samples and is meant to exercise
-normal multi-file Lua packaging plus a LuaRocks dependency.
+This multi-file CLI is the primary `cjson` packaging fixture. It stores student
+records in JSON and supports both interactive use and deterministic commands for
+automated tests.
 
-=== Features
-
-* JSON file storage through `cjson`
-* interactive menu mode
-* command mode for automated checks
-* student CRUD
-* class filtering and name search
-* course grades
-* total, average, GPA, pass status
-* class summary report
-* course and average ranking
-* CSV import/export
-* timestamped backup
-* smoke test with a temporary data file
-
-=== Files
-
-* `main.lua` - entry point, command mode, and interactive menu
-* `model.lua` - student validation and grade calculations
-* `service.lua` - business operations and CSV import/export
-* `storage.lua` - JSON persistence with temporary-file save
-* `reports.lua` - summary and ranking reports
-* `utils.lua` - CLI, CSV, terminal, and file helpers
-* `smoke_test.lua` - non-interactive project check
-
-=== Dependency
-
-Install `cjson` with LuaRocks if it is not already available:
+== Dependency
 
 [source,sh]
 ----
 luarocks install lua-cjson
-----
-
-Check dependency discovery:
-
-[source,sh]
-----
 lua -e 'require("cjson"); print("cjson ok")'
 ----
 
-=== Direct Use
+The native `cjson` module must match Lua 5.4 and the target architecture.
 
-Run interactive mode:
+== Files
+
+`main.lua` parses commands and runs the interactive menu. `model.lua` validates
+records and calculates grades. `service.lua` owns CRUD, search, ranking, and CSV
+operations. `storage.lua` performs replacement-safe JSON persistence.
+`reports.lua` formats summaries; `utils.lua` provides terminal, CSV, and file
+helpers.
+
+== Run from source
 
 [source,sh]
 ----
-cd test/student_management_system
-lua main.lua
+data=/tmp/luainstaller-students.json
+lua test/student_management_system/main.lua --data "$data" seed
+lua test/student_management_system/main.lua --data "$data" list --sort average
+lua test/student_management_system/main.lua --data "$data" report
+lua test/student_management_system/main.lua --data "$data" rank --course lua
 ----
 
-Seed a JSON file and inspect data from the repository root:
-
-[source,sh]
-----
-lua test/student_management_system/main.lua --data /tmp/students.json seed
-lua test/student_management_system/main.lua --data /tmp/students.json list
-lua test/student_management_system/main.lua --data /tmp/students.json report
-lua test/student_management_system/main.lua --data /tmp/students.json rank --course lua
-----
-
-Add a student:
+Add a record:
 
 [source,sh]
 ----
 lua test/student_management_system/main.lua \
-  --data /tmp/students.json \
-  add \
-  --name "Ivy Chen" \
-  --gender F \
-  --class CS2 \
-  --birth 2004 \
-  --phone 5550109 \
-  --email ivy@example.test \
+  --data /tmp/luainstaller-students.json add \
+  --name 'Ivy Chen' --gender F --class CS2 --birth 2004 \
+  --phone 5550109 --email ivy@example.test \
   --grades lua=96,python=91,math=93,english=88
 ----
 
-CSV import/export:
+CSV operations use `export --out FILE` and `import --file FILE`. Run
+`lua test/student_management_system/main.lua --help` for the full command list.
 
-[source,sh]
-----
-lua test/student_management_system/main.lua --data /tmp/students.json export --out /tmp/students.csv
-lua test/student_management_system/main.lua --data /tmp/students.json import --file /tmp/students.csv
-----
-
-=== Verification
-
-Run the project smoke test:
+== Package and verify
 
 [source,sh]
 ----
 lua test/student_management_system/smoke_test.lua
+luai -t test/student_management_system/main.lua --max-deps 250
+luai -b --dir test/student_management_system/main.lua \
+  -o build/student-manager --max-deps 250
+
+env -i PATH=/usr/bin:/bin \
+  build/student-manager/student-manager \
+  --data /tmp/bundled-students.json seed
 ----
 
-Run syntax checks:
-
-[source,sh]
-----
-find test/student_management_system -maxdepth 1 -name '*.lua' -print0 | xargs -0 -n1 luac -p
-----
-
-Future packaging targets:
-
-[source,sh]
-----
-luai -a test/student_management_system/main.lua
-luai -t test/student_management_system/main.lua
-luai -b test/student_management_system/main.lua -o build/student-manager
-----
-
-Expected dependency behavior:
-
-* Lua modules: `model`, `service`, `storage`, `reports`, `utils`
-* LuaRocks/native module: `cjson`
-* Data file: selected by `--data`, defaulting to `students.json`
+Expected discovery is five project Lua modules plus native `cjson`. The selected
+data file is runtime state and is not embedded in the bundle.

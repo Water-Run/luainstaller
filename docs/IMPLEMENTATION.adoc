@@ -1,428 +1,256 @@
-= Implementation Guide
+= Implementation notes
 :toc: macro
-:toclevels: 4
+:toclevels: 3
 :sectanchors:
 :sectlinks:
-:icons: font
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This guide is for maintainers and advanced users who need to understand
-how `luainstaller` turns an entry script into an executable bundle. It
-describes the data flow, module boundaries, internal contracts, and the
-failure style used by the public API.
-
+This guide is for maintainers changing dependency discovery, manifests,
+launchers, or bundle assembly. Public behavior belongs in
+xref:USAGE.adoc[Using luainstaller].
 
 toc::[]
 
 [#implementation-flow]
-== End-to-End Flow
+== Request flow
 
-Every public operation starts from an entry script and a normalized
-option table. Analysis and trace stop after dependency discovery;
-bundling continues through manifest creation and launcher generation.
+Every public packaging request follows the same front half:
 
 [source,text]
 ----
 CLI or Lua API
-  -> normalize options
-  -> choose discovery mode
-  -> produce dependency plan
-  -> build manifest
-  -> generate Lua bootstrap
-  -> generate and compile C launcher
-  -> assemble onedir output
-  -> optionally wrap as onefile
+  -> normalize and validate options
+  -> discover dependencies
+  -> build compatibility diagnostics
+  -> construct manifest
+  -> dispatch to onedir or onefile
 ----
 
-The important distinction is that dependency discovery and bundle
-assembly are separate phases. A dependency plan says what should be
-packaged. The bundler decides how those files are laid out for a target
-profile.
+`src/init.lua` owns that orchestration. Submodules return structured errors or
+throw internal error tables that are converted at their boundary. CLI rendering
+is kept out of the core modules.
 
-[#implementation-entry-points]
-== Public Entry Points
+[#implementation-api]
+== Public API contract
 
-[cols="1,3",options="header"]
-|===
-|Entry point |Responsibility
+The main module exports:
 
-|`luainstaller.analyze(opts)`
-|Normalize options, run the selected discovery mode, and return Lua
-source/native module lists plus trace records.
+* `analyze(opts)`;
+* `trace(opts)`;
+* `compatibility(opts)`;
+* `bundle(opts)`;
+* `getLogs(opts)`;
+* `clearLogs()`.
 
-|`luainstaller.trace(opts)`
-|Run dependency discovery and add compatibility diagnostics for the
-selected target profile.
-
-|`luainstaller.compatibility(opts)`
-|Report host, target, Lua ABI, mode, native-module count, notes, and
-warnings without building a bundle.
-
-|`luainstaller.bundle(opts)`
-|Run discovery, build a manifest, and dispatch to onedir or onefile
-assembly.
-
-|`src/cli.lua`
-|Parse compact `luai` syntax and full-word `luainstaller` syntax, then
-render stable command-line output.
-|===
-
-Public functions return result tables instead of throwing for normal
-user mistakes:
+Success values have `ok = true`. Failures have this shape:
 
 [source,lua]
 ----
 {
-  ok = false,
-  action = "bundle",
-  error = {
-    type = "ToolchainError",
-    message = "...",
-    details = { ... },
-  },
+    ok = false,
+    error = {
+        type = "InvalidOptionsError",
+        message = "entry is required",
+        option = "entry",
+    },
 }
 ----
 
-Internal modules may throw structured tables while doing file or
-compiler work. `src/init.lua` converts those into public result tables
-at the API boundary.
+Option validation rejects unknown keys, wrong scalar types, sparse lists, and
+unsupported modes before discovery begins. Do not add a CLI option without also
+adding it to API normalization and documentation contracts.
 
-[#implementation-boundaries]
-== Module Boundaries
+[#implementation-modules]
+== Module responsibilities
 
-[cols="1,2,3",options="header"]
-|===
-|Module |Owns |Does not own
+`src/cli.lua`::
+Parses the two CLI grammars and renders results. Source-tree preloads allow the
+checkout to run without installation.
 
-|`src/init.lua`
-|Public API shape, option normalization, dependency-plan dispatch,
-result conversion.
-|CLI rendering, compiler command construction, persistent log storage.
+`src/init.lua`::
+Validates the API options, obtains a dependency plan, creates the manifest, and
+selects onedir or onefile.
 
-|`src/cli.lua`
-|Command grammar, split `luai` / `luainstaller` personalities, text
-rendering, log command options.
-|Dependency resolution rules or bundle layout decisions.
+`src/analyzer.lua`::
+Lexes literal `require` calls, resolves Lua/native candidates, records trace
+decisions, detects cycles, and enforces the dependency limit.
 
-|`src/analyzer.lua`
-|Static require extraction, Lua/native candidate resolution, recursive
-source scanning, trace records.
-|Runtime execution of user code.
+`src/discovery.lua`::
+Selects static, runtime, or manual discovery and applies include/exclude rules.
+Runtime discovery generates and executes a temporary tracer.
 
-|`src/discovery.lua`
-|Choosing static/manual/runtime discovery modes and applying include/exclude
-rules.
-|Manifest schema and launcher compilation.
+`src/manifest.lua`::
+Maps sources to bundle destinations, hashes inputs, and rejects duplicate
+destinations.
 
-|`src/manifest.lua`
-|Schema version 1 manifest, normalized file records, hashes, duplicate
-destination checks.
-|Copying files into the output directory.
+`src/cgen.lua`, `src/runtime.lua`::
+Create and exercise the embedded Lua payload. They contain parallel runtime
+logic; changes to searcher installation, source stripping, or `arg` handling
+must be made and tested in both places.
 
-|`src/path.lua`
-|Slash-normalized path helpers shared by analysis, manifests, and
-bundle assembly.
-|Running shell commands or touching the filesystem.
+`src/launcher.lua`::
+Embeds the bootstrap bytes in the platform-aware C launcher template.
 
-|`src/process.lua`
-|Command execution helpers and shell quoting.
-|Path normalization or bundle-specific error policy.
+`src/bundler.lua`::
+Builds onedir output transactionally, compiles the launcher, copies native
+files and Lua runtime, and writes the manifest/ownership marker.
 
-|`src/result.lua`
-|Shared construction for structured error result tables.
-|Choosing subsystem-specific error types or recovery behavior.
+`src/onefile.lua`::
+Stages onedir, generates the extractor, enforces extraction-path safety, and
+starts the cached inner launcher.
 
-|`src/cgen.lua`
-|Lua bootstrap generation and embedded Lua payload table.
-|Native module copying or C compiler invocation.
+`src/path.lua`, `src/process.lua`, `src/result.lua`::
+Shared normalization, shell execution/quoting, and error constructors.
 
-|`src/launcher.lua`
-|C launcher source generation for the embedded bootstrap.
-|Target-specific output validation.
+`src/platform.lua`, `src/compat.lua`::
+Host detection, target profiles, and user-facing compatibility diagnostics.
 
-|`src/bundler.lua`
-|Onedir validation, target profile checks, native/runtime file copying,
-launcher compilation, final manifest write.
-|Onefile extractor generation.
+`src/logger.lua`::
+Best-effort persistent failure logging below the user home directory.
 
-|`src/onefile.lua`
-|Temporary onedir staging, file embedding, extractor C generation,
-outer executable compilation.
-|Dependency discovery.
+[#implementation-static]
+== Static discovery
 
-|`src/platform.lua`
-|Host detection and target profile facts: suffixes, native extensions,
-runtime paths, Lua prefix.
-|Compiler output parsing.
+The lexer is deliberately narrower than a full Lua parser. It tracks comments,
+quoted strings, and long-bracket strings so that text such as
+`-- require("x")` is ignored. It recognizes:
 
-|`src/compat.lua`
-|Compatibility summary, target notes, native-module warnings.
-|Enforcing compatibility at runtime.
+* `require("name")` and `require "name"`;
+* single quotes and long-bracket literals;
+* `pcall(require, "name")` as optional;
+* `local require = require` followed by normal literal calls.
 
-|`src/logger.lua`
-|Persistent logs under `~/.luainstaller`.
-|The generated bundle manifest.
-|===
+Quoted literal contents are decoded with Lua's text parser in an empty
+environment. Concatenation and computed arguments produce
+`DynamicRequireError`.
 
-[#implementation-discovery]
-== Dependency Discovery
+`ModuleResolver` searches entry-relative templates, then active `package.path`
+and `package.cpath` templates. Trace records retain the requesting file,
+requested name, candidates, selected path/type, and resolution reason.
 
-The default static mode is a require-focused lexer, not a full Lua
-parser. That is deliberate: it keeps discovery predictable and avoids
-executing user code during the normal path.
+The recursive analyzer marks a source visited only after its children complete.
+This makes cycles visible and produces dependency-first ordering for the
+manifest.
 
-Recognized forms include literal requires and optional probes:
+[#implementation-runtime-discovery]
+== Runtime discovery
 
-[source,lua]
-----
-require("model")
-require 'storage'
-require([[reports]])
-pcall(require, "optional.module")
-----
+Runtime mode creates a private `0700` work directory and writes a generated Lua
+tracer. The tracer patches global `require`, extends search paths relative to
+the entry, then executes the entry with the supplied run arguments.
 
-Rejected forms are dynamic because the module name is not known from the
-source text:
+A require record is provisional until the real `require` succeeds. If loading
+fails and the application catches the error with `pcall`, that provisional
+record is removed. Records are flushed before `os.exit`.
 
-[source,lua]
-----
-local name = "model"
-require(name)
-require("plugin." .. kind)
-----
+After execution, recorded names are resolved through the same `ModuleResolver`
+used by static mode. This produces a common dependency/trace shape for later
+stages.
 
-Resolution follows Lua's search model closely enough for packaging:
-
-[arabic]
-. Ignore known Lua built-in modules.
-. Expand the requested name through `package.path`.
-. Expand the requested name through `package.cpath`.
-. Record every candidate path considered.
-. Classify the selected file as Lua source or native module.
-. Recurse into Lua source dependencies.
-
-Trace records are not just debug strings. They are structured data used
-by CLI rendering, manifests, tests, and native-module destination logic.
-Important fields include `requiring_file`, `source_line`, `requested`,
-`optional`, `candidates`, `selected_path`, `selected_type`,
-`classification`, and `reason`.
-
-[#implementation-modes]
-== Discovery Modes
-
-[cols="1,3",options="header"]
-|===
-|Mode |Behavior
-
-|`static`
-|Run the analyzer over literal require calls, resolve through Lua and
-native search paths, and recursively scan Lua source files.
-
-|`manual`
-|Start from an empty automatic plan, add explicit `include` files, then
-apply excludes. Manual includes are treated as Lua source files.
-
-|`runtime`
-|Write a private temp tracer (mode `0700`), wrap `require`, run the
-entry script once, record module names that were actually loaded, and
-resolve those records. Trace files are parsed without `load()`.
-|===
-
-Runtime discovery executes the entry program at build time. It only sees
-the code path exercised by that run. If an application loads modules
-behind different subcommands, pass representative arguments after `--`
-or add manual includes. Treat untrusted entry trees as untrusted code
-during runtime discovery.
+The mode cannot observe unexecuted branches or a `require` reference captured
+before the tracer patch. Manual includes are the escape hatch for both cases.
 
 [#implementation-manifest]
-== Manifest Contract
+== Manifest mapping
 
-`.luai/manifest.lua` is executable Lua data so users can inspect it with
-plain Lua tools:
+Pure-Lua sources preserve paths relative to the entry directory. Files outside
+that tree are placed below a sanitized `external/` path. Native modules start
+with basename destinations; trace information may add a dotted-module
+destination.
 
-[source,lua]
-----
--- generated by luainstaller
-return {
-  version = 1,
-  hash_algorithm = "fnv1a32",
-  entry = { ... },
-  output = { ... },
-  lua = { ... },
-  platform = { ... },
-  launcher = { ... },
-  modules = {
-    lua = { ... },
-    native = { ... },
-    external = {},
-  },
-  manual = { ... },
-  trace = { ... },
-  compatibility = { ... },
-}
-----
+Manifest content hashes and generated-output hashes use the shared
+`manifest.fnv1a32` implementation. The algorithm name is recorded explicitly.
+Do not change it without a marker/manifest version decision.
 
-The manifest is written after the launcher and runtime files have been
-assembled, because it records final output paths, runtime records, and
-compatibility notes. It starts with `-- generated by luainstaller`; the
-bundler also writes `.luai/generated-output.txt` with the output
-directory and hashes for generated top-level files. Both records are used
-when deciding whether an existing output directory is safe to replace.
+`manifest.compatibility` is a packaging requirement list, not a snapshot of the
+build host. Structured host/target values are returned by `trace` and
+`compatibility`.
 
-Manifest invariants:
+[#implementation-bootstrap]
+== Generated launcher and bootstrap
 
-* destination paths are normalized;
-* Lua dependency manifest destinations preserve relative paths under
-  `.luai/lua/`, even though source bytes are embedded into the launcher
-  instead of copied as ordinary files in the current onedir layout;
-* native dependencies are recorded under `.luai/native/`;
-* duplicate destinations fail with `DuplicateModuleError`;
-* file hashes use the manifest's declared `fnv1a32` algorithm;
-* target profile metadata records the selected target OS and launcher
-  profile, not just the build host;
-* trace and compatibility data stay with the generated artifact.
+`launcher.generateSource` combines three pieces:
 
-[#implementation-runtime]
-== Runtime Generation
+. a byte array containing the generated Lua bootstrap;
+. a C launcher template;
+. platform code that resolves the current executable path.
 
-The generated executable embeds Lua source in a bootstrap rather than
-requiring the original source tree at runtime.
+The C launcher sets `arg`, installs a traceback handler, and calls the bootstrap
+with `lua_pcall`. The bootstrap prepends native search paths, installs the
+embedded module searcher at index 2, and runs the entry. Both the entry and
+modules are loaded in text mode.
 
-[source,text]
-----
-cgen.buildPayload
-  -> read entry source and Lua dependency source
-  -> map module names to source records
-  -> emit Lua bootstrap source
+The embedded runtime restores `_G.arg` and removes its package searcher after an
+in-process run. The native process exits immediately afterward, but retaining
+the cleanup makes `src/runtime.lua` safe for tests and API use.
 
-launcher.generateSource
-  -> convert bootstrap source to a C byte array
-  -> append the Lua C API launcher template
-----
+[#implementation-onedir]
+== Onedir transaction and ownership
 
-At runtime the C launcher:
+The final output is validated before staging starts. A private sibling directory
+is then created with an unpredictable name and `0700` mode. All potentially
+failing generation, compilation, copy, and hash operations happen there.
 
-[arabic]
-. creates a Lua state;
-. opens the standard libraries;
-. builds `arg`;
-. installs traceback handling;
-. loads the embedded bootstrap;
-. calls the bootstrap.
+At commit time:
 
-The bootstrap configures native module search paths relative to the
-launcher, installs a bundled Lua source searcher at searcher position 2,
-strips BOM and shebang lines from bundled source, and runs the entry
-chunk.
+. an existing generated output is renamed to a unique backup;
+. the complete staging directory is renamed to the final path;
+. the backup is removed;
+. if the second rename fails, the backup is restored.
 
-[#implementation-dispatch]
-== Onedir and Onefile Dispatch
+The marker records the final path even though it is written in staging. This is
+required for later ownership validation.
 
-`luainstaller.bundle(opts)` always builds a dependency plan and manifest
-first. Then it dispatches by mode:
+The overwrite checks intentionally distrust the generated comment alone. They
+also verify the marker path, top-level allowlist, and file hashes.
 
-[source,text]
-----
-mode = "onedir"  -> bundler.bundleOnedir(opts)
-mode = "onefile" -> onefile.bundleOnefile(opts)
-----
+[#implementation-onefile]
+== Onefile security boundary
 
-Onefile mode stages an ordinary onedir bundle in a temporary directory,
-embeds that staged file set into an extractor, and compiles the outer
-executable. This is why onefile behavior should be debugged by first
-building the corresponding onedir bundle.
+The extractor accepts only safe relative embedded paths. On POSIX it canonicalizes
+the configured temporary root, creates a UID-specific private cache, and checks
+owner/mode with `lstat`. On Windows it rejects reparse-point directories.
+
+Every existing directory component must be a real directory. A symlink at the
+final file is removed; a symlink in a parent path aborts extraction. Cached files
+are accepted only when size and hash match.
+
+Windows child command lines use the CRT quoting rule: ordinary backslashes are
+preserved, backslashes before a quote are doubled appropriately, and trailing
+backslashes are doubled before the closing quote.
 
 [#implementation-errors]
-== Error and Logging Strategy
+== Error boundaries
 
-The public error names are part of the user-facing contract. Tests check
-representative failures so documentation and CLI output can stay stable.
+Use a specific error type when the caller can act on it:
 
-[cols="1,3",options="header"]
-|===
-|Error type |Typical source
+* `ScriptNotFoundError` — entry/include/source missing;
+* `DynamicRequireError` — static discovery cannot prove the name;
+* `ModuleNotFoundError` — no candidate resolves;
+* `DuplicateModuleError` — destination or module-name collision;
+* `InvalidOutputError` — output ownership/safety check failed;
+* `ToolchainError` — required compiler, headers, prefix, or `pkg-config` missing;
+* `CompilationFailedError` — compiler ran and rejected the source/link;
+* `FilesystemError` — create, copy, hash, rename, or extraction preparation
+  failed;
+* `DiscoveryError` — runtime tracer execution or output failed.
 
-|`InvalidOptionsError`
-|Missing entry, unknown mode, invalid CLI option, or malformed numeric
-value.
+Shell commands must quote every path and reject compiler flag metacharacters.
+Never place an unquoted value derived from `arg`, environment variables, or a
+manifest in a command string.
 
-|`ScriptNotFoundError`
-|Entry script or included Lua file does not exist.
+[#implementation-change-checklist]
+== Before merging an implementation change
 
-|`DynamicRequireError`
-|Static analysis found a require call whose name cannot be known
-statically.
+. Add a test that fails for the old behavior.
+. Run syntax checks and all three local test entry points.
+. Inspect generated C with warning flags when launcher/extractor code changes.
+. Run every affected remote target; generated C changes affect all targets.
+. Update the usage or format documentation when a public contract changes.
+. Confirm a failed rebuild cannot damage an existing generated output.
+. Confirm clean-environment execution does not fall back to host Lua modules.
 
-|`ModuleNotFoundError`
-|A requested module cannot be resolved through the active Lua paths.
-
-|`CircularDependencyError`
-|Static discovery found a require cycle among Lua scripts.
-
-|`DependencyLimitExceededError`
-|Recursive discovery exceeded `--max-deps`.
-
-|`DuplicateModuleError`
-|Two files would occupy the same manifest destination or the same native
-copy path under `.luai/native/`.
-
-|`InvalidOutputError`
-|The selected output path is unsafe to overwrite.
-
-|`ToolchainError`
-|Compiler, Lua prefix, Lua headers, Lua runtime, or profile requirements
-are missing, or toolchain metadata is unsafe to pass to the shell.
-
-|`CompilationFailedError`
-|The compiler was found but returned a non-zero status.
-
-|`LuaRuntimeNotFoundError`
-|Linux shared-Lua profile could not locate the linked `liblua` after
-linking.
-
-|`UnsupportedPlatformError`
-|The selected target cannot be built from this host (for example Windows
-onedir without a Linux/MinGW host).
-
-|`FilesystemError`
-|A required mkdir, copy, write, or temp-directory operation failed.
-
-|`DiscoveryError`
-|Runtime discovery could not execute or parse its temporary trace.
-
-|`LauncherGenerationError`
-|Launcher source generation failed before compiler invocation.
-|===
-
-Logs are serialized as Lua source under:
-
-[source,text]
-----
-~/.luainstaller/logs.lua
-----
-
-Each entry records timestamp, level, source, action, message, and
-details. The newest 1000 entries are kept. Logs help diagnose recent
-operations; the manifest remains the authoritative record for a
-specific bundle.
-
-[#implementation-maintainer]
-== Maintainer Checklist
-
-When changing implementation behavior, update the matching user-facing
-contract:
-
-* CLI syntax or output: update `docs/USAGE.adoc`, `luainstaller.1`,
-  `test/contract_docs.lua`, and `test/cli_split_smoke.lua` or the CLI
-  section of `test/smoke_all.lua`.
-* Manifest fields: update this guide, bundle inspection examples, and
-  manifest assertions in tests.
-* Target profiles: update `docs/PLATFORMS-NATIVE-LIMITS.adoc` and
-  remote matrix notes.
-* Output safety: update `docs/BUNDLING.adoc`, troubleshooting entries,
-  and release safety assertions.
-* Error names: update `docs/TROUBLESHOOTING.adoc` and any CLI/API tests
-  that assert exact error text.
+The exact commands are in xref:TESTING.adoc[Testing].
 
 xref:../README.adoc#documentation-index[Back to documentation index]

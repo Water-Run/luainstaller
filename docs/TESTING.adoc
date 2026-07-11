@@ -1,271 +1,219 @@
-= Testing Guide
+= Testing and release gate
 :toc: macro
-:toclevels: 4
+:toclevels: 3
 :sectanchors:
 :sectlinks:
-:icons: font
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This guide describes how to verify `luainstaller` locally and across the
-lab matrix. It separates fast syntax checks, full smoke tests, install
-checks, remote platform checks, expected failures, and documentation
-checks.
-
+Run commands from the repository root. A skipped native or remote check is not
+a release pass unless the release explicitly excludes that target.
 
 toc::[]
 
-[#testing-tiers]
-== Test Tiers
-
-[cols="1,2,3",options="header"]
-|===
-|Tier |Command |Purpose
-
-|Syntax
-|`find src test -type f -name '*.lua' -print0 \| xargs -0 -n1 luac -p`
-|Catch Lua syntax errors before running slower bundle tests.
-
-|Installer shell syntax
-|`sh -n tools/install-source.sh`
-|Catch source installer shell syntax errors.
-
-|CLI split smoke
-|`lua test/cli_split_smoke.lua`
-|Verify `luai` and `luainstaller` accept only their intended command
-forms.
-
-|Documentation contract
-|`lua test/contract_docs.lua`
-|Verify behavior promised by README and `docs/*.adoc`: command
-surfaces, discovery modes, manual include/exclude rules, bundled
-searcher order, structured errors, output safety, inspectable
-manifests, logs, and documentation index policy.
-
-|Full local smoke
-|`lua test/smoke_all.lua`
-|Exercise API contracts, analyzer behavior, compatibility diagnostics,
-manifest safety, launcher generation, onedir bundles, onefile bundles,
-installed CLI behavior, source install behavior, and release safety
-checks.
-|===
-
-Run the local baseline from the repository root:
+[#testing-local]
+== Local baseline
 
 [source,sh]
 ----
 find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-sh -n tools/install-source.sh
+find tools -type f -name '*.sh' -print0 | xargs -0 -n1 sh -n
+git diff --check
+luarocks lint luainstaller-1.0.0-1.rockspec
+
 lua test/cli_split_smoke.lua
 lua test/contract_docs.lua
 lua test/smoke_all.lua
 ----
 
-Some smoke sections skip deeper compile or inspection checks when
-optional tools such as `cc`, `pkg-config`, `readelf`, `curl`, LuaRocks,
-or native sample dependencies are unavailable. A skip is acceptable only
-when the test says why it skipped.
+The three Lua entry points have different purposes:
+
+`test/cli_split_smoke.lua`::
+Checks that `luai` accepts only its flag grammar and `luainstaller` accepts only
+its word-command grammar.
+
+`test/contract_docs.lua`::
+Exercises behavior promised by public documentation: discovery modes,
+include/exclude rules, option validation, output ownership, manifests, bundled
+searcher order, logs, and the documentation index.
+
+`test/smoke_all.lua`::
+Runs the broader packaging audit, including realistic samples, generated C,
+installed commands, source installation, onedir/onefile, native modules,
+runtime cache safety, failed rebuild preservation, and clean-environment runs.
 
 [#testing-smoke]
-== What the Full Smoke Covers
+== What smoke_all must prove
 
-The full smoke test is intentionally broad. It checks:
+The suite is expected to exercise all of these areas:
 
-* sample programs still run directly with Lua;
-* static analysis returns expected Lua and native dependencies;
-* `trace` records include requiring file, source line, selected path,
-  classification, and compatibility data;
-* runtime discovery can record dynamic `require` calls reached by a
-  build-time run;
-* public API calls return structured success and error tables;
-* output safety refuses unsafe overwrite targets;
-* generated manifests preserve expected sections and hashes;
-* C launcher source generation produces buildable code where toolchains
-  are available;
-* onedir and onefile bundles run selected samples;
-* source-installed wrapper scripts can analyze and build;
-* LuaRocks-installed wrappers can run when LuaRocks is available;
-* documentation references used by tests point at current files.
+* source files meet syntax and project header rules;
+* sample applications run before packaging;
+* literal, optional, escaped, local-bound, dynamic, runtime, and manual
+  dependency cases behave as documented;
+* public API failures are structured and logged;
+* generated C compiles and forwards `arg`;
+* an onedir bundle runs without host `LUA_PATH`/`LUA_CPATH`;
+* a native onedir still works when reached through `PATH` and a symlink;
+* onefile reuses matching cache files, repairs executable mode, rejects unsafe
+  cache permissions and parent symlinks, and accepts a canonicalizable TMPDIR;
+* a toolchain failure during rebuild preserves the previous executable;
+* source-installed and LuaRocks-installed command layouts can build a bundle.
+
+Read skips in context. `cc`, `pkg-config`, `readelf`, `curl`, LuaRocks, and
+sample native dependencies enable deeper branches. On the primary release host
+these dependencies should be installed so the branches execute rather than
+skip.
 
 [#testing-samples]
-== Sample Applications
+== Sample applications
 
-[cols="1,2,3",options="header"]
-|===
-|Path |Dependency shape |Why it exists
+`test/single_file/`::
+Small Lua programs used for fast syntax and entry packaging coverage.
 
-|`test/single_file/`
-|Pure Lua, one file per sample.
-|Fast sanity checks for basic CLI and launcher behavior.
+`test/runtime_bundle/`::
+Minimal multi-file payload used for launcher, onedir, and onefile checks.
 
-|`test/runtime_bundle/`
-|Pure Lua multi-file payload.
-|Bundled Lua searcher, C generator, onedir, onefile, and runtime
-argument handling.
+`test/student_management_system/`::
+JSON-backed CLI application; covers multi-file Lua and `cjson`.
 
-|`test/student_management_system/`
-|Lua modules plus `cjson`.
-|Moderate multi-file application with a common native Lua C module.
+`test/savinglua/`::
+SQLite-backed key/value application; covers multiple native dependencies.
 
-|`test/savinglua/`
-|`cjson`, `lsqlite3`, persistent SQLite database.
-|Native module packaging plus runtime arguments that affect persistent
-state.
+`test/ltokei/`::
+Filesystem-based source statistics application.
 
-|`test/firebird_web_sql/`
-|Pegasus, `cjson`, socket modules, optional Firebird/LuaSQL.
-|Web-style dependency graph, optional require probes, and native socket
-handling.
+`test/firebird_web_sql/`::
+HTTP application with authentication and status probe; covers LuaSocket,
+Pegasus, native modules, child process lifetime, and network readiness.
 
-|`test/ltokei/`
-|Lua modules plus `lfs`.
-|CLI-style filesystem traversal and native module loading.
-|===
+Shared test utilities are under `test/support/`. Add reusable process, fixture,
+and assertion helpers there instead of copying them between contract suites.
 
-The samples are not demos only. They are regression fixtures for
-dependency discovery, native module layout, clean runtime behavior, and
-platform-specific failure reporting.
+[#testing-install]
+== Installation checks
 
-[#testing-source-install]
-== Source Install Checks
-
-The source installer should work with only a `lua` command available:
+Source install into an isolated prefix:
 
 [source,sh]
 ----
-rm -rf /tmp/luainstaller-source-prefix
-sh tools/install-source.sh --prefix /tmp/luainstaller-source-prefix
-/tmp/luainstaller-source-prefix/bin/luai -v
-/tmp/luainstaller-source-prefix/bin/luainstaller version
-/tmp/luainstaller-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
+prefix=$(mktemp -d /tmp/luainstaller-prefix.XXXXXX)
+sh tools/install-source.sh --prefix "$prefix"
+"$prefix/bin/luai" -v
+"$prefix/bin/luainstaller" build --dir \
+  test/runtime_bundle/main.lua -o "$prefix/runtime" --max-deps 120
+env -i PATH=/usr/bin:/bin "$prefix/runtime/runtime" source-install
 ----
 
-On a Linux host with headers, `pkg-config`, and a C compiler, the full
-smoke also verifies that a source-installed `luai` can build and run a
-bundle from a clean runtime environment.
-
-[#testing-luarocks]
-== LuaRocks Check
-
-When LuaRocks is available:
+LuaRocks packaging metadata:
 
 [source,sh]
 ----
-rm -rf /tmp/luainstaller-rocktree
-luarocks make --tree /tmp/luainstaller-rocktree luainstaller-1.0.0-1.rockspec
+luarocks lint luainstaller-1.0.0-1.rockspec
+luarocks make luainstaller-1.0.0-1.rockspec --tree /tmp/luainstaller-rocktree
 ----
 
-The smoke suite uses this to catch packaging metadata regressions in the
-rockspec and installed wrapper behavior.
+Before tagging, confirm that the rockspec version, module version, CLI version,
+manual page, and intended Git tag agree.
 
-[#testing-remote]
-== Remote Matrix
+[#testing-linux]
+== Linux x86_64 and ARM64
 
-Remote scripts copy the current checkout to lab machines and verify
-same-environment runtime behavior.
+[source,sh]
+----
+sh tools/remote-test-linux.sh
+----
 
-[cols="1,2,3",options="header"]
-|===
-|Script |Default target |Coverage
+The script copies the checkout to both targets. On x86_64 it runs the complete
+local suite, source install, onedir build, and a clean-environment execution.
 
-|`tools/remote-test-linux.sh`
-|`192.168.10.40` Linux x86_64 and `192.168.5.19` Linux aarch64.
-|x86_64 local baseline, full smoke, source install, and clean-runtime
-source-installed bundle. aarch64 local baseline, source install, and
-analysis; bundle may pass or fail with the expected toolchain error if
-Lua development metadata is missing.
+The ARM64 target does not depend on system Lua development packages. The script
+stages isolated Lua 5.4.8 and LuaRocks prefixes under `/tmp`, installs cjson,
+LuaFileSystem, LuaSocket, Pegasus, and lsqlite3, and runs the complete smoke and
+documentation suites. It also verifies a real ARM64 onedir launcher through its
+path and a symlink, a onefile launcher in a clean environment, 12 concurrent
+cache users, and executable-mode repair. A `ToolchainError` is a failure, not an
+accepted ARM result.
 
-|`tools/remote-test-macos.sh`
-|`yymac06` macOS arm64.
-|Temporary user-local Lua/LuaRocks, source install, pure Lua and native
-sample onedir bundles, pure Lua and student onefile bundles, clean
-`env -i` execution.
+Defaults can be overridden with `LINUX_X64`, `LINUX_X64_PORT`, `LINUX_ARM64`,
+`REMOTE_ROOT`, `SOURCE_CACHE`, `ARM_LUA_PREFIX`, `ARM_LUAROCKS_PREFIX`, and
+`ARM_ROCKTREE`.
 
-|`tools/remote-test-windows.sh`
-|`WINDOWS_TARGETS`, defaulting to Win10 at `192.168.69.130` and Win7 at
-`192.168.69.134`, built from Linux with MinGW.
-|Windows Lua 5.4.8 build, selected native DLL builds, Windows onedir
-bundles, pure Lua and student onefile bundles, Wine and target-host
-execution.
-|===
+[#testing-macos]
+== macOS ARM64
 
-Windows remote verification requires credentials:
+[source,sh]
+----
+MAC_HOST=yymacstudio sh tools/remote-test-macos.sh
+----
+
+The script reaches the Mac through `BASTION`/`BASTION_PORT`, stages source
+archives, and builds isolated Lua 5.4.8 and LuaRocks prefixes under `/tmp`. It
+installs or builds `cjson`, LuaFileSystem, LuaSocket, Pegasus, and `lsqlite3`,
+then verifies:
+
+* pure-Lua and JSON applications as onedir;
+* runtime and student applications as onefile;
+* SQLite storage;
+* filesystem statistics;
+* authenticated Web status endpoint.
+
+The test also compiles the macOS-specific executable-path code and exercises the
+system `/tmp` symlink through onefile extraction.
+
+[#testing-windows]
+== Windows x86_64
 
 [source,sh]
 ----
 WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ----
 
-Set `SSH_OPTS` to override the default SSH options used by the remote
-scripts. Set `WINDOWS_TARGETS='Win10=user@host Win7=user@host'` when the
-lab VM addresses differ from the defaults.
+The script builds a Windows Lua 5.4.8 toolchain and native dependencies with
+MinGW. It first executes the bundle matrix under Wine, then uploads the same
+archive and PowerShell runner to each entry in `WINDOWS_TARGETS`.
 
-[#testing-failures]
-== Expected Failures
+Coverage includes runtime, student management, SQLite, filesystem statistics,
+and the Web service. Both onedir and onefile run with `LUA_PATH` and `LUA_CPATH`
+cleared on Windows. The onefile runtime also verifies that an argument
+containing Windows backslashes and a space survives child-process forwarding.
 
-[cols="1,2,2",options="header"]
-|===
-|Case |Accepted result |Why it is acceptable
+The default target is the lab Windows 10 VM. Start the VM and wait for SSH
+before running the script; restore its original power state afterward. Wine is
+required but does not replace the VM result.
 
-|Linux aarch64 host without Lua headers or Lua `pkg-config` data
-|`ToolchainError` from bundle build.
-|Analysis does not require a compiler; building the C launcher does.
+[#testing-generated-c]
+== Generated C review
 
-|Optional Firebird/LuaSQL module missing
-|Trace records classify it as optional missing.
-|The sample probes optional support through guarded require behavior.
+When changing `src/launcher.lua` or the extractor template in `src/onefile.lua`:
 
-|Local host without optional compile or inspection tools
-|A smoke subsection prints a skip message.
-|The suite checks command availability before running deeper checks.
+* compile on Linux with `-std=c11 -Wall -Wextra -Werror -pedantic` where the
+  platform headers permit it;
+* compile the Windows form with the configured MinGW compiler;
+* compile the macOS form on macOS, not by inspection alone;
+* run argument forwarding and executable-location tests;
+* rerun the full remote matrix because preprocessor branches differ.
 
-|Windows target without installed Lua or LuaRocks
-|Generated bundles still run when built with the Windows Lua prefix.
-|The target is meant to consume the bundle, not build it.
-|===
-
-Unexpected failures are failures that lack a clear skip reason, produce
-an unstructured Lua traceback for a normal user error, or contradict the
-same-environment contract documented in the platform guide.
-
-[#testing-docs]
-== Documentation Checks
-
-The documentation is part of the tested surface. Run:
-
-[source,sh]
-----
-find docs -maxdepth 1 -type f -name '*.adoc' -printf '%f\n' | sort
-rg -n 'Back to documentation index' docs/*.adoc
-rg -n 'xref:|link:' README.adoc docs/*.adoc test/README.adoc
-----
-
-The repository policy for the main documentation set is:
-
-* `README.adoc` is the index and outline;
-* `docs/` contains exactly six top-level `.adoc` guides;
-* every guide links back to `README.adoc` near the top and at the end;
-* guides use the built-in TOC rather than a second hand-written page
-  index table;
-* stale split-out documentation paths such as `docs/README.adoc` and
-  `docs/CLI.adoc` should not be referenced by the current docs.
+Warnings emitted by third-party sources should be identified by source path and
+kept separate from warnings in generated project code.
 
 [#testing-release]
-== Release Checklist
+== Release checklist
 
-Before pushing documentation or packaging changes:
+. Worktree contents are understood; unrelated user changes are preserved.
+. Lua and Shell syntax checks pass.
+. CLI, documentation contracts, and full smoke pass without unexplained skips.
+. The rockspec lints and installs into an empty tree.
+. Linux x86_64 and ARM64 compile and execute.
+. macOS ARM64 native, onedir, onefile, and Web probes pass.
+. Windows final binaries pass under Wine and Windows VM.
+. A native bundle runs with Lua environment variables cleared.
+. Failed rebuild leaves the previous onedir runnable.
+. Onefile cache permission and symlink defenses are exercised.
+. Documentation commands match the final CLI and output layout.
+. Version strings, tag, license, and release notes agree.
 
-[arabic]
-. Run the local baseline commands.
-. Confirm `docs/` still contains six `.adoc` guides.
-. Confirm every guide links back to the README index.
-. Confirm the rockspec source tag exists locally and on `origin`, for
-  example `git tag --list v1.0.0` and
-  `git ls-remote --tags origin refs/tags/v1.0.0`.
-. Run `git diff --check`.
-. Inspect the diff for stale CLI syntax such as `luai build` or
-   `luainstaller -b`.
-. If platform behavior changed, run the matching remote script or state
-   why it was not run.
+Save the command output used for the release decision. A green result from an
+older commit is not evidence for the current tree.
 
 xref:../README.adoc#documentation-index[Back to documentation index]
