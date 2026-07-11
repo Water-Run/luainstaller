@@ -85,4 +85,5 @@ Thumbs.db
 # =========================
 
 .git/
+.worktrees/
 .gitignore.bak
