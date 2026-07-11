@@ -8,13 +8,15 @@ File:
 Date:
     2026-06-24
 Updated:
-    2026-06-24
+    2026-07-11
 ]]
 
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
 package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
 package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
+package.preload["luainstaller.fs"] = function() return dofile("src/fs.lua") end
+package.preload["luainstaller.hash"] = function() return dofile("src/hash.lua") end
 package.preload["luainstaller.process"] = function() return dofile("src/process.lua") end
 package.preload["luainstaller.path"] = function() return dofile("src/path.lua") end
 package.preload["luainstaller.result"] = function() return dofile("src/result.lua") end

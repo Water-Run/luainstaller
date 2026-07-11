@@ -51,6 +51,17 @@ luainstaller build app/main.lua -- --profile staging
 The entry or a manual include cannot be opened. Check the working directory,
 case, and whether the path names a regular file.
 
+`LuaSyntaxError`::
+An entry, discovered dependency, or manual include failed Lua's text compiler.
+The error reports the source path and syntax detail. Fix it before discovery;
+invalid source is never embedded as a deferred runtime surprise.
+
+`SourceChangedError`::
+A source file no longer matches the bytes captured during dependency discovery
+or the later manifest SHA-256 snapshot. Stop concurrent generators or editors,
+restore a stable source tree, and rebuild from analysis. Do not retry copying a
+stale manifest into a different output.
+
 `DynamicRequireError`::
 Static discovery found a computed name or unsupported alias. Use runtime mode
 for a safe executable path, or manual mode with reviewed includes.
@@ -74,11 +85,15 @@ is unsupported. CLI spelling errors are usually caught before the API call.
 `InvalidOutputError`::
 The output already contains user data, has been modified since generation, is a
 symlink, or does not match its ownership marker. Inspect it; do not bypass the
-check blindly.
+check blindly. Only `luainstaller-generated-output-v2` is eligible for automatic
+replacement.
 
 `ToolchainError`::
 A required compiler, Lua prefix, shared runtime, or `pkg-config` record is
-missing.
+missing or does not identify Lua 5.4. Check both `pkg-config --modversion lua`
+and the header's `LUA_VERSION_NUM`; a plausible library filename is not enough.
+The linked-runtime probe must also report `Lua 5.4`. Windows builds require Wine
+to run this probe before publication.
 
 `CompilationFailedError`::
 The compiler ran but failed. Read the captured command and output from the first
@@ -110,6 +125,11 @@ Run analysis with those same environment variables. A common mismatch is using
 one Lua installation to run the source and a different installation to run
 `luai`.
 
+luainstaller resolution is entry-rooted before it consults active Lua search
+templates. Raw `lua app/main.lua` does not add `app/` by itself. If direct source
+execution needs that convention, initialize `package.path` explicitly rather
+than relying on the packager.
+
 For static discovery, check whether the source uses:
 
 * a computed module name;
@@ -136,6 +156,18 @@ profiles or add manual includes for modules loaded on later branches.
 
 A missing module caught by the application's `pcall` is not treated as a
 dependency. A different runtime error inside a module still fails tracing.
+
+Lua 5.4 returns loader data from a successful `require`. The tracer uses that
+real selected file path when available, including after the entry changes
+`package.path`, and snapshots Lua source at the loader boundary. Native loader
+paths are rejected because reads around `dlopen` cannot identify the exact
+mapped bytes; use static discovery for literal native dependencies. A preloaded
+or custom loader must return a `.lua` source path; missing or non-file loader
+data is rejected. All pre-trace cached requires, including builtin names changed
+by `LUA_INIT`, are rejected with `DiscoveryError`; use static/manual mode or
+avoid loading that module before the tracer. An
+incomplete or duplicate completion record is a `DiscoveryError`, not a partial
+success.
 
 If startup changes data, sends requests, or launches services, do not run it as
 a build-time tracer. Use static/manual discovery or add a harmless discovery
@@ -174,7 +206,7 @@ x86_64 archive does not satisfy an ARM64 build.
 [source,sh]
 ----
 x86_64-w64-mingw32-gcc --version
-find "$LUA_PREFIX" -maxdepth 2 -iname 'lua*.dll' -print
+find "$LUA_PREFIX" -type f -name 'lua54.dll' -print
 ----
 
 The current profile requires a Linux host, MinGW x86_64 compiler, headers, and
@@ -205,6 +237,10 @@ On macOS use `otool -L`; on Windows use a PE dependency viewer or
 If direct execution works only without the clean environment, the program is
 falling back to host modules rather than using the bundle.
 
+That fallback is permitted by the same-environment lookup contract: embedded
+modules have precedence, but undeclared names continue to later host searchers.
+It is not evidence that the dependency was packaged.
+
 [#troubleshooting-path]
 == Direct path works but PATH/symlink launch fails
 
@@ -213,8 +249,9 @@ image path through the operating system. If it regresses, collect:
 
 [source,sh]
 ----
-readlink -f "$(command -v app)"
-find /real/bundle/.luai/native -maxdepth 3 -type f -print
+command -v app
+ls -l "$(command -v app)"
+find /real/bundle/.luai/native -type f -print
 env -i PATH=/directory/with/link:/usr/bin:/bin app
 ----
 
@@ -224,16 +261,21 @@ launchers derived native paths directly from `argv[0]`.
 [#troubleshooting-output]
 == Rebuild refuses an existing directory
 
-Read the marker and list top-level entries:
+Read the marker and list the recursive tree:
 
 [source,sh]
 ----
-find build/app -mindepth 1 -maxdepth 2 -print | sort
+find build/app -print | sort
 sed -n '1,160p' build/app/.luai/generated-output.txt
 ----
 
 Common causes are a user file added beside the executable, an edited executable,
 a moved output directory, or an incomplete bundle made by an older release.
+
+The first marker line must be `luainstaller-generated-output-v2`. Its directory
+and file records, including SHA-256 digests, must describe the exact recursive
+file set. v1 output is intentionally never overwritten: after inspecting and
+backing it up, perform a one-time explicit removal or select a new output path.
 
 Use a new output path when uncertain. A current failed rebuild should leave the
 previous generated directory runnable because compilation occurs in staging.
@@ -269,6 +311,11 @@ On POSIX the cache must be a real directory owned by the effective user with no
 group/other permissions. Parent-directory symlinks inside the cache are
 rejected. The temporary root itself is canonicalized, so the standard macOS
 `/tmp -> /private/tmp` link is supported.
+
+A cache hit requires an exact byte comparison with the executable's embedded
+payload; matching size is insufficient. The SHA-256 payload directory changes
+when any framed path, mode, size, or content changes. If a matching cache file
+has the wrong executable mode, the extractor repairs it before launch.
 
 Remove a cache only after confirming that no bundle process is using it:
 
@@ -306,5 +353,10 @@ For a useful report include:
 
 Remove credentials, tokens, home-directory details, and proprietary source
 before sharing logs or manifests.
+
+Concurrent log updates use `logs.lua.lock` and a backup generation. If logging
+returns false, preserve `logs.lua` and `logs.lua.bak` for diagnosis. Do not
+delete an active lock; owner-token release and 120-second stale recovery are
+designed to prevent one process from releasing another writer's lock.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

@@ -43,8 +43,13 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-project_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+if [ -z "$prefix" ]; then
+    echo "install-source.sh: --prefix must not be empty" >&2
+    exit 2
+fi
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+project_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 
 lua_path=$(command -v "$lua_bin" || true)
 if [ -z "$lua_path" ]; then
@@ -52,7 +57,15 @@ if [ -z "$lua_path" ]; then
     exit 1
 fi
 
-lua_version=$("$lua_path" -e 'local v = _VERSION:match("(%d+%.%d+)"); assert(v); print(v)')
+if ! lua_abi=$("$lua_path" -e 'io.write(_VERSION)' 2>/dev/null); then
+    echo "install-source.sh: cannot query Lua interpreter: $lua_path" >&2
+    exit 1
+fi
+if [ "$lua_abi" != "Lua 5.4" ]; then
+    echo "install-source.sh: Lua 5.4 is required; $lua_path reported ${lua_abi:-unknown}" >&2
+    exit 1
+fi
+lua_version=5.4
 lua_share="$prefix/share/lua/$lua_version"
 module_dir="$lua_share/luainstaller"
 bin_dir="$prefix/bin"
@@ -60,7 +73,7 @@ man_dir="$prefix/share/man/man1"
 
 mkdir -p "$module_dir" "$bin_dir" "$man_dir"
 cp "$project_root/src/init.lua" "$lua_share/luainstaller.lua"
-for module in analyzer bundler cgen cli compat discovery launcher logger manifest onefile path platform process result runtime; do
+for module in analyzer bundler cgen cli compat discovery fs hash launcher logger manifest onefile path platform process result runtime; do
     cp "$project_root/src/$module.lua" "$module_dir/$module.lua"
 done
 cp "$project_root/luainstaller.1" "$man_dir/luai.1"
@@ -73,6 +86,14 @@ write_wrapper() {
 set -eu
 
 lua_bin=\${LUAI_LUA:-"$lua_path"}
+if ! lua_abi=\$("\$lua_bin" -e 'io.write(_VERSION)' 2>/dev/null); then
+    echo "$name: cannot query Lua interpreter: \$lua_bin" >&2
+    exit 1
+fi
+if [ "\$lua_abi" != "Lua 5.4" ]; then
+    echo "$name: Lua 5.4 is required; \$lua_bin reported \${lua_abi:-unknown}" >&2
+    exit 1
+fi
 prefix_root=\$(CDPATH= cd -- "\$(dirname -- "\$0")/.." && pwd)
 to_lua_path() {
     if command -v cygpath >/dev/null 2>&1; then

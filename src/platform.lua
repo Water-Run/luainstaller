@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-06-21
+    2026-07-11
 ]]
 
 local process = require("luainstaller.process")
@@ -17,11 +17,29 @@ local M = {}
 
 local PATH_SEP = package.config:sub(1, 1)
 
+function M.normalizeArch(value)
+    local arch = tostring(value or "unknown"):lower()
+    if arch == "amd64" or arch == "x64" or arch == "x86_64" then
+        return "x86_64"
+    end
+    if arch == "aarch64" or arch == "arm64" then
+        return "arm64"
+    end
+    if arch == "x86" or arch:match("^i[3-6]86$") then
+        return "x86"
+    end
+    return arch ~= "" and arch or "unknown"
+end
+
 function M.detectHost()
     if PATH_SEP == "\\" then
         return {
             os = "windows",
-            arch = os.getenv("PROCESSOR_ARCHITECTURE") or "unknown",
+            arch = M.normalizeArch(
+                os.getenv("PROCESSOR_ARCHITEW6432")
+                    or os.getenv("PROCESSOR_ARCHITECTURE")
+                    or "unknown"
+            ),
         }
     end
 
@@ -35,17 +53,25 @@ function M.detectHost()
     end
     return {
         os = os_name,
-        arch = uname_m or "unknown",
+        arch = M.normalizeArch(uname_m),
     }
 end
 
 function M.profile(opts)
     opts = opts or {}
-    local host = M.detectHost()
-    local target_os = opts.target_os or host.os
+    local host = opts.host or M.detectHost()
+    local target_os = opts.target_os
+    if target_os == nil or target_os == "" then
+        target_os = host.os
+    end
+    local target_arch = M.normalizeArch(opts.target_arch
+        or (target_os == "windows" and "x86_64")
+        or host.arch)
     if target_os == "linux" then
         return {
             target_os = "linux",
+            target_arch = target_arch,
+            launcher_profile = "shared-lua",
             executable_suffix = "",
             native_extensions = { ".so" },
             loader_rpath = "$ORIGIN/.luai/native",
@@ -55,6 +81,8 @@ function M.profile(opts)
     if target_os == "macos" then
         return {
             target_os = "macos",
+            target_arch = target_arch,
+            launcher_profile = "static-lua",
             executable_suffix = "",
             native_extensions = { ".so", ".dylib" },
             loader_rpath = "@loader_path/.luai/native",
@@ -64,6 +92,8 @@ function M.profile(opts)
     if target_os == "windows" then
         return {
             target_os = "windows",
+            target_arch = target_arch,
+            launcher_profile = "windows-shared-lua",
             executable_suffix = ".exe",
             native_extensions = { ".dll" },
             loader_rpath = nil,
@@ -72,6 +102,8 @@ function M.profile(opts)
     end
     return {
         target_os = target_os,
+        target_arch = target_arch,
+        launcher_profile = "unknown",
         executable_suffix = "",
         native_extensions = { ".so" },
         loader_rpath = nil,

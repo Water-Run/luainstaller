@@ -82,7 +82,7 @@ Runtime discovery generates and executes a temporary tracer.
 
 `src/manifest.lua`::
 Maps sources to bundle destinations, hashes inputs, and rejects duplicate
-destinations.
+destinations. One source record can carry every traced alias for that file.
 
 `src/cgen.lua`, `src/runtime.lua`::
 Create and exercise the embedded Lua payload. They contain parallel runtime
@@ -100,21 +100,26 @@ files and Lua runtime, and writes the manifest/ownership marker.
 Stages onedir, generates the extractor, enforces extraction-path safety, and
 starts the cached inner launcher.
 
-`src/path.lua`, `src/process.lua`, `src/result.lua`::
-Shared normalization, shell execution/quoting, and error constructors.
+`src/fs.lua`, `src/hash.lua`, `src/path.lua`, `src/process.lua`, `src/result.lua`::
+Checked reads/writes, SHA-256, normalization, shell execution/quoting, and error
+constructors.
 
 `src/platform.lua`, `src/compat.lua`::
 Host detection, target profiles, and user-facing compatibility diagnostics.
 
 `src/logger.lua`::
-Best-effort persistent failure logging below the user home directory.
+Persistent failure logging below the user home directory. A five-second owned
+directory lock serializes updates, a 120-second stale lock may be recovered,
+and checked temporary-file/backup switching preserves the previous generation.
+A successful clear publishes two empty generations so recovery cannot resurrect
+cleared entries. Windows path checks reject junctions and other reparse points.
 
 [#implementation-static]
 == Static discovery
 
-The lexer is deliberately narrower than a full Lua parser. It tracks comments,
-quoted strings, and long-bracket strings so that text such as
-`-- require("x")` is ignored. It recognizes:
+The lexer tracks identifiers, comments, short strings, long strings, and
+punctuation closely enough to distinguish real calls from commented text;
+`-- require("x")`, for example, is ignored. It recognizes:
 
 * `require("name")` and `require "name"`;
 * single quotes and long-bracket literals;
@@ -125,9 +130,13 @@ Quoted literal contents are decoded with Lua's text parser in an empty
 environment. Concatenation and computed arguments produce
 `DynamicRequireError`.
 
-`ModuleResolver` searches entry-relative templates, then active `package.path`
-and `package.cpath` templates. Trace records retain the requesting file,
+`ModuleResolver` uses an entry-rooted convention: it searches templates below
+the entry directory first, then the active `package.path` and `package.cpath`
+templates. This is packager behavior; raw `lua path/to/main.lua` does not
+automatically change Lua's search paths. Trace records retain the requesting file,
 requested name, candidates, selected path/type, and resolution reason.
+Native templates include `?/init` forms and Lua's C-root fallback, so literal
+`pkg` and `pkg.init` requests can safely map to one `pkg/init` library.
 
 The recursive analyzer marks a source visited only after its children complete.
 This makes cycles visible and produces dependency-first ordering for the
@@ -140,9 +149,33 @@ Runtime mode creates a private `0700` work directory and writes a generated Lua
 tracer. The tracer patches global `require`, extends search paths relative to
 the entry, then executes the entry with the supplied run arguments.
 
-A require record is provisional until the real `require` succeeds. If loading
-fails and the application catches the error with `pcall`, that provisional
-record is removed. Records are flushed before `os.exit`.
+A require record is provisional until the real `require` succeeds. Lua 5.4's
+second successful `require` return is loader data; when that loader data names a
+readable `.lua`, runtime discovery records that actual selected path. The Lua
+source is snapshotted at the loader boundary and compared with the stripped
+loader bytecode, so a later rewrite cannot become the accepted build input.
+The loader must also have exactly the source chunk's `_ENV` upvalue bound to the
+tracer's original global environment. A custom environment or additional
+captured state is not reproducible from the packaged source and is rejected.
+Runtime mode rejects `.so`, `.dylib`, and `.dll` loader paths: path reads before
+and after `dlopen` cannot prove which bytes the operating system mapped under
+concurrent replacement. It also rejects a successful custom or preload searcher
+that does not return a `.lua` source path. Use static discovery for literal
+native dependencies. Any module already cached before the tracer starts has no
+verifiable loader snapshot, including a substituted builtin name, and is
+rejected before resolver classification. Use static/manual discovery or avoid
+preloading it before the trace.
+After tracing, every successful non-cached require record must carry a verified
+Lua snapshot even if a searcher was inserted while `require` was already walking
+the searcher table.
+If loading fails and the application catches the error with `pcall`, that
+provisional record is removed. Binary-safe hexadecimal records are flushed
+before `os.exit`.
+
+The trace ends with one completion marker. Missing, repeated, malformed, or
+post-completion records are `DiscoveryError`, so a killed tracer cannot be
+mistaken for a complete dependency plan. The discovery interpreter must report
+exactly Lua 5.4.
 
 After execution, recorded names are resolved through the same `ModuleResolver`
 used by static mode. This produces a common dependency/trace shape for later
@@ -159,13 +192,22 @@ that tree are placed below a sanitized `external/` path. Native modules start
 with basename destinations; trace information may add a dotted-module
 destination.
 
-Manifest content hashes and generated-output hashes use the shared
-`manifest.fnv1a32` implementation. The algorithm name is recorded explicitly.
-Do not change it without a marker/manifest version decision.
+Manifest v2 sets `hash_algorithm = "sha256"`. Static discovery hashes the exact
+bytes it selects, runtime discovery carries Lua loader-boundary snapshots, and
+manual discovery retains the initially validated entry bytes. Manifest construction
+must match those discovery hashes; bundling compares again before generation,
+embedding, and copying. Any mismatch returns `SourceChangedError`. Output
+ownership hashes use the same checked SHA-256 implementation.
+
+Every launcher has both a compile-time Lua 5.4 header guard and a runtime
+`_VERSION` check. Before publication, the bundler compiles and executes a tiny
+program linked with the same inputs as the launcher. Windows runs this probe
+under Wine, so a mislabeled DLL or library cannot pass on filename or
+`pkg-config` metadata alone.
 
 `manifest.compatibility` is a packaging requirement list, not a snapshot of the
-build host. Structured host/target values are returned by `trace` and
-`compatibility`.
+build host. The v2 platform section has distinct `host` and `target` records;
+structured values are returned by `trace` and `compatibility`.
 
 [#implementation-bootstrap]
 == Generated launcher and bootstrap
@@ -181,9 +223,17 @@ with `lua_pcall`. The bootstrap prepends native search paths, installs the
 embedded module searcher at index 2, and runs the entry. Both the entry and
 modules are loaded in text mode.
 
-The embedded runtime restores `_G.arg` and removes its package searcher after an
-in-process run. The native process exits immediately afterward, but retaining
-the cleanup makes `src/runtime.lua` safe for tests and API use.
+The C translation unit refuses headers unless `LUA_VERSION_NUM == 504`.
+Embedded lookup has precedence but retains same-environment fallback to later
+host searchers for undeclared modules; clean-environment tests detect accidental
+reliance on that fallback.
+
+The embedded runtime restores `_G.arg`, its package searcher, and every bundled
+name it temporarily changes in `package.loaded` after an in-process run, on
+both success and failure. It also preserves all entry return values. The native
+process exits immediately afterward, but retaining the cleanup makes
+`src/runtime.lua` safe for nested
+tests and API use.
 
 [#implementation-onedir]
 == Onedir transaction and ownership
@@ -195,15 +245,24 @@ failing generation, compilation, copy, and hash operations happen there.
 At commit time:
 
 . an existing generated output is renamed to a unique backup;
+. the moved backup is revalidated against the pre-build snapshot;
 . the complete staging directory is renamed to the final path;
-. the backup is removed;
+. the backup is revalidated once more and removed;
 . if the second rename fails, the backup is restored.
+
+If either post-move validation detects concurrent content, publication is
+aborted and the previous directory is restored. Unrestorable data remains at a
+reported backup path instead of being deleted.
 
 The marker records the final path even though it is written in staging. This is
 required for later ownership validation.
 
-The overwrite checks intentionally distrust the generated comment alone. They
-also verify the marker path, top-level allowlist, and file hashes.
+The overwrite checks intentionally distrust the generated comment alone. A v2
+marker beginning with `luainstaller-generated-output-v2` declares the final
+path and recursively inventories every real directory and regular file except
+the marker itself. Validation requires an exact tree and checks every file with
+SHA-256. v1 markers, symlinks, devices, unreadable entries, malformed paths,
+duplicates, missing entries, and additional nested content are refused.
 
 [#implementation-onefile]
 == Onefile security boundary
@@ -213,8 +272,12 @@ the configured temporary root, creates a UID-specific private cache, and checks
 owner/mode with `lstat`. On Windows it rejects reparse-point directories.
 
 Every existing directory component must be a real directory. A symlink at the
-final file is removed; a symlink in a parent path aborts extraction. Cached files
-are accepted only when size and hash match.
+final file is removed; a symlink in a parent path aborts extraction. Cached
+files are accepted only when their complete bytes equal the embedded bytes.
+POSIX final-file matching, temporary creation, mode repair, replacement, and
+cleanup are relative to an opened no-follow parent-directory descriptor.
+The deterministic SHA-256 payload ID frames every sorted path, executable bit,
+size, and content. Build-only files and the onedir marker are not embedded.
 
 Windows child command lines use the CRT quoting rule: ordinary backslashes are
 preserved, backslashes before a quote are doubled appropriately, and trailing
@@ -226,6 +289,8 @@ backslashes are doubled before the closing quote.
 Use a specific error type when the caller can act on it:
 
 * `ScriptNotFoundError` — entry/include/source missing;
+* `LuaSyntaxError` — an entry or included/discovered Lua file does not compile;
+* `SourceChangedError` — source bytes differ from the manifest snapshot;
 * `DynamicRequireError` — static discovery cannot prove the name;
 * `ModuleNotFoundError` — no candidate resolves;
 * `DuplicateModuleError` — destination or module-name collision;
@@ -244,7 +309,8 @@ manifest in a command string.
 == Before merging an implementation change
 
 . Add a test that fails for the old behavior.
-. Run syntax checks and all three local test entry points.
+. Run syntax checks and all four local test entry points, including
+  `test/production_edges.lua`.
 . Inspect generated C with warning flags when launcher/extractor code changes.
 . Run every affected remote target; generated C changes affect all targets.
 . Update the usage or format documentation when a public contract changes.

@@ -37,6 +37,14 @@ The output is not a universal executable. The target must match the selected
 operating-system family, CPU architecture, system ABI, and Lua ABI. External
 shared libraries required by Lua C modules are not copied automatically.
 .PP
+Lua 5.4 is the only supported interpreter ABI. Source installation, runtime
+discovery, generated headers, pkg-config metadata, linked runtimes, and native
+modules must all match Lua 5.4. LuaJIT and Lua 5.5 are rejected.
+.PP
+Before publishing, every profile compiles and executes a linked-runtime probe;
+Windows runs that probe under Wine. Generated launchers repeat the runtime
+version check when started.
+.PP
 .B luai
 and
 .B luainstaller
@@ -98,7 +106,9 @@ Use
 .BR runtime ,
 or
 .B manual
-dependency discovery.
+dependency discovery. Runtime discovery accepts only loaders backed by verified
+.B .lua
+source paths. Use static mode for literal native dependencies and other loaders.
 .TP
 .B \-\-no-depscan
 Disable automatic discovery; equivalent to manual mode.
@@ -107,7 +117,8 @@ Disable automatic discovery; equivalent to manual mode.
 Set the maximum discovered Lua source dependency count. Default: 36.
 .TP
 .BI \-\-lua " path"
-Select the Lua interpreter used by runtime discovery.
+Select the Lua interpreter used by runtime discovery. It must report exactly
+Lua 5.4.
 .TP
 .BI \-\-target-os " os"
 Select
@@ -148,13 +159,20 @@ Print oldest records first. The default is newest first.
 Parse literal require calls without running the application. Literal Lua string
 escapes are decoded. Computed names return
 .BR DynamicRequireError .
+Resolution is entry-rooted: entry-directory templates precede the active
+.B package.path
+and
+.BR package.cpath .
+Raw Lua does not add the entry directory automatically.
 .TP
 .B runtime
 Execute the entry under a temporary require tracer. Only executed branches are
 observed. Successfully loaded modules are retained; missing modules caught by
 the application with
 .B pcall
-remain optional.
+remain optional. Lua 5.4 loader data records the path actually selected by
+.BR require ;
+incomplete or duplicate completion output is rejected.
 .TP
 .B manual
 Start with no automatic dependencies and use repeated
@@ -195,16 +213,37 @@ An onedir bundle contains the native executable and a hidden
 directory with generated C source, manifest, output marker, and native files.
 Rebuilds occur in a private sibling staging directory. An existing recognized
 bundle is preserved while compilation runs. Final installation uses sequential
-directory renames, with a brief visibility gap, and is not crash-atomic.
+directory renames, with a brief visibility gap, and is not crash-atomic. The
+moved backup is revalidated before publication and deletion; concurrent content
+aborts replacement and is restored or preserved at a reported backup path.
+.PP
+Manifest version 2 and the
+.B luainstaller-generated-output-v2
+marker use SHA\-256. The marker inventories every generated regular file and
+directory recursively; replacement requires the exact file set and hashes.
+Legacy v1 output requires one-time explicit review and removal and is never
+overwritten automatically.
 .PP
 Onefile extracts a content-addressed onedir payload below the user temporary
 directory. POSIX caches are separated by effective user ID and require
 owner-only permissions. Unsafe paths, parent symlinks, and Windows reparse
-points are rejected.
+points are rejected. Cache reuse compares complete bytes with the embedded
+payload. Its deterministic SHA\-256 ID frames every path, mode, size, and
+content. POSIX cache writes use no-follow, parent-directory-relative file
+operations after validating the parent chain.
+.PP
+Embedded Lua modules precede normal host searchers, but undeclared modules may
+fall through to the host. This same-environment behavior is not a hermetic
+sandbox; verify release bundles with
+.B LUA_PATH
+and
+.B LUA_CPATH
+cleared.
 .SH ENVIRONMENT
 .TP
 .B LUAI_LUA
-Default interpreter for runtime discovery and source-installed wrappers.
+Default interpreter for runtime discovery and source-installed wrappers. A
+source-installed wrapper rejects an override that is not Lua 5.4.
 .TP
 .B LUAI_LUA_PREFIX
 Default Lua prefix for profiled builds.
@@ -239,7 +278,7 @@ is set.
 Inspectable bundle manifest.
 .TP
 .I output/.luai/generated-output.txt
-Generated-output ownership and hash marker.
+Recursive v2 generated-output ownership and SHA\-256 marker.
 .SH EXIT STATUS
 Zero indicates success. Command parsing, analysis, build, extraction, or child
 application failure returns nonzero.
@@ -253,6 +292,9 @@ From a source checkout:
 .nf
 sh tools/install-source.sh \-\-prefix "$HOME/.local"
 .fi
+.PP
+The source installer checks for Lua 5.4 before writing the prefix. LuaRocks
+metadata constrains Lua to versions at least 5.4 and below 5.5.
 .SH LUA API
 The module
 .B luainstaller
@@ -264,6 +306,8 @@ exports
 .BR getLogs ,
 and
 .BR clearLogs .
+Successful log clearing empties both the primary and recovery generation.
+Windows logging rejects reparse-point paths.
 Operations return a table with
 .B ok=true
 or a structured

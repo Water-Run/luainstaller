@@ -30,13 +30,15 @@ description = {
 }
 
 dependencies = {
-    "lua >= 5.4",
+    "lua >= 5.4, < 5.5",
 }
 
 build = {
     type = "builtin",
     modules = {
         ["luainstaller"]          = "src/init.lua",
+        ["luainstaller.fs"]       = "src/fs.lua",
+        ["luainstaller.hash"]     = "src/hash.lua",
         ["luainstaller.logger"]   = "src/logger.lua",
         ["luainstaller.analyzer"] = "src/analyzer.lua",
         ["luainstaller.compat"]   = "src/compat.lua",

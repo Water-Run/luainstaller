@@ -4,18 +4,73 @@ set -eu
 # Lab defaults match /home/waterrun/VM/SSH_Win10_README.md / SSH_Win7_README.md (Win10 OpenSSH, Win7 KTS).
 WINDOWS_HOST=${WINDOWS_HOST:-"waterrun@192.168.69.130"}
 WINDOWS_TARGETS=${WINDOWS_TARGETS:-"Win10=$WINDOWS_HOST"}
-SSH_OPTS=${SSH_OPTS:-"-o StrictHostKeyChecking=no"}
+SSH_OPTS=${SSH_OPTS:-""}
+SSH_KEY_OPTS=${SSH_KEY_OPTS:-"-o BatchMode=yes"}
 REMOTE_TEMP=${REMOTE_TEMP:-"C:/Users/waterrun/AppData/Local/Temp"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
 WIN_PREFIX=${WIN_PREFIX:-"/tmp/luainstaller-win-lua"}
 WIN_TREE=${WIN_TREE:-"/tmp/luainstaller-win-rocks"}
 WIN_OUT=${WIN_OUT:-"/tmp/luainstaller-win-bundles"}
-PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
 LUA_VERSION=5.4.8
 LUA_TARBALL=lua-$LUA_VERSION.tar.gz
 LSQLITE3_ZIP=lsqlite3_v096.zip
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
+LUA_SHA256=4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
+LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
+SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
+
+if printf '%s\n%s\n' "$SSH_OPTS" "$SSH_KEY_OPTS" \
+    | grep -Eiq 'StrictHostKeyChecking|UserKnownHostsFile'; then
+    echo "SSH_OPTS must not override host-key policy" >&2
+    exit 2
+fi
+
+require_safe_tmp_path() {
+    path=$1
+    case "$path" in
+        /tmp/luainstaller-?*) ;;
+        *)
+            echo "unsafe temporary path: $path" >&2
+            exit 2
+            ;;
+    esac
+    case "$path" in
+        *[!A-Za-z0-9._/-]*)
+            echo "unsafe characters in temporary path: $path" >&2
+            exit 2
+            ;;
+    esac
+    case "$path" in
+        *'/../'*|*'/..'|*'/./'*|*'/.'|*'//'*)
+            echo "non-normalized temporary path: $path" >&2
+            exit 2
+            ;;
+    esac
+}
+
+require_safe_windows_temp() {
+    case "$1" in
+        [A-Za-z]:/*) ;;
+        *)
+            echo "unsafe Windows temporary path: $1" >&2
+            exit 2
+            ;;
+    esac
+    case "$1" in
+        *[!A-Za-z0-9._:/-]*)
+            echo "unsafe characters in Windows temporary path: $1" >&2
+            exit 2
+            ;;
+    esac
+    case "$1" in
+        *'/../'*|*'/..'|*'/./'*|*'/.'|*'//'*)
+            echo "non-normalized Windows temporary path: $1" >&2
+            exit 2
+            ;;
+    esac
+}
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -24,27 +79,35 @@ need_cmd() {
     }
 }
 
-require_env() {
-    name=$1
-    eval "value=\${$name:-}"
-    if [ -z "$value" ]; then
-        echo "missing required environment variable: $name" >&2
-        exit 1
-    fi
-}
-
 stage_source() {
     name=$1
     url=$2
-    mkdir -p "$SOURCE_CACHE"
-    if [ ! -s "$SOURCE_CACHE/$name" ]; then
-        curl -fL --connect-timeout 20 --max-time 180 -o "$SOURCE_CACHE/$name" "$url"
+    expected=$3
+    destination=$SOURCE_CACHE/$name
+    if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -f "$destination" ]; }; then
+        echo "unsafe source-cache entry: $destination" >&2
+        exit 1
+    fi
+    if [ -f "$destination" ] \
+        && ! printf '%s  %s\n' "$expected" "$destination" | sha256sum -c - >/dev/null 2>&1; then
+        rm -f "$destination"
+    fi
+    if [ ! -f "$destination" ]; then
+        part=$destination.part.$$
+        rm -f "$part"
+        trap 'rm -f "$part"' EXIT HUP INT TERM
+        curl -fL --connect-timeout 20 --max-time 180 -o "$part" "$url"
+        printf '%s  %s\n' "$expected" "$part" | sha256sum -c -
+        mv "$part" "$destination"
+        trap - EXIT HUP INT TERM
     fi
 }
 
 ensure_windows_lua() {
     if [ -x "$WIN_PREFIX/lua.exe" ] && [ -f "$WIN_PREFIX/bin/lua54.dll" ] && [ -f "$WIN_PREFIX/include/lua.h" ]; then
-        return
+        if WINEDEBUG=-all wine "$WIN_PREFIX/lua.exe" -v 2>&1 | grep 'Lua 5\.4\.8' >/dev/null; then
+            return
+        fi
     fi
     rm -rf "$WIN_PREFIX" /tmp/luainstaller-win-lua-build
     mkdir -p "$WIN_PREFIX/bin" "$WIN_PREFIX/include" /tmp/luainstaller-win-lua-build
@@ -243,6 +306,7 @@ verify_with_wine() {
     quoted_arg='say "hello"\tail'
     output=$(wine "$WIN_OUT/runtime-onefile.exe" "$quoted_arg")
     printf '%s\n' "$output" | grep -F "hello $quoted_arg"
+    # shellcheck disable=SC1003 # The final backslash is literal inside single quotes.
     trailing_arg='C:\Alpha Beta\trail\'
     output=$(wine "$WIN_OUT/runtime-onefile.exe" "$trailing_arg")
     printf '%s\n' "$output" | grep -F "hello $trailing_arg"
@@ -418,28 +482,73 @@ PS1
     for target in $WINDOWS_TARGETS; do
         label=${target%%=*}
         host=${target#*=}
+        case "$host" in
+            ''|-*)
+                echo "unsafe Windows SSH target: $host" >&2
+                exit 2
+                ;;
+        esac
         echo "windows remote target $label ($host)"
-        SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
-        SSHPASS=$WINDOWS_PASSWORD sshpass -e scp $SSH_OPTS "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
-        SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh $SSH_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote_ps1"
+        if [ -n "${WINDOWS_PASSWORD:-}" ]; then
+            # shellcheck disable=SC2086 # SSH_OPTS is a documented option-word list.
+            SSHPASS=$WINDOWS_PASSWORD sshpass -e scp -o StrictHostKeyChecking=yes $SSH_OPTS "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
+            # shellcheck disable=SC2086 # SSH_OPTS is a documented option-word list.
+            SSHPASS=$WINDOWS_PASSWORD sshpass -e scp -o StrictHostKeyChecking=yes $SSH_OPTS "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
+            # shellcheck disable=SC2086 # SSH_OPTS is a documented option-word list.
+            SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh -o StrictHostKeyChecking=yes $SSH_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote_ps1"
+        else
+            # shellcheck disable=SC2086 # Both variables are documented option-word lists.
+            scp -o StrictHostKeyChecking=yes $SSH_OPTS $SSH_KEY_OPTS "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
+            # shellcheck disable=SC2086 # Both variables are documented option-word lists.
+            scp -o StrictHostKeyChecking=yes $SSH_OPTS $SSH_KEY_OPTS "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
+            # shellcheck disable=SC2086,SC2029 # Option words and the quoted remote path expand locally by design.
+            ssh -o StrictHostKeyChecking=yes $SSH_OPTS $SSH_KEY_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote_ps1"
+        fi
     done
 }
+
+for safe_path in "$SOURCE_CACHE" "$WIN_PREFIX" "$WIN_TREE" "$WIN_OUT"; do
+    require_safe_tmp_path "$safe_path"
+done
+require_safe_windows_temp "$REMOTE_TEMP"
+if [ -z "$WINDOWS_TARGETS" ]; then
+    echo "WINDOWS_TARGETS must name at least one required lab" >&2
+    exit 2
+fi
+umask 077
+if [ -L "$SOURCE_CACHE" ] || { [ -e "$SOURCE_CACHE" ] && [ ! -d "$SOURCE_CACHE" ]; }; then
+    echo "unsafe source-cache directory: $SOURCE_CACHE" >&2
+    exit 1
+fi
+mkdir -p "$SOURCE_CACHE"
+# shellcheck disable=SC2012 # Path characters are validated; numeric ls is portable across target hosts.
+cache_owner=$(LC_ALL=C ls -dn "$SOURCE_CACHE" | awk '{ print $3 }')
+test "$cache_owner" = "$(id -u)" || { echo "source cache is not owned by this user" >&2; exit 1; }
+chmod 700 "$SOURCE_CACHE"
 
 need_cmd curl
 need_cmd lua
 need_cmd luarocks
 need_cmd wine
-need_cmd sshpass
+need_cmd scp
+need_cmd ssh
+need_cmd sha256sum
 need_cmd x86_64-w64-mingw32-gcc
 need_cmd x86_64-w64-mingw32-ar
 need_cmd x86_64-w64-mingw32-ranlib
-require_env WINDOWS_PASSWORD
+if [ -n "${WINDOWS_PASSWORD:-}" ]; then
+    need_cmd sshpass
+fi
 
-stage_source "$LUA_TARBALL" "https://www.lua.org/ftp/$LUA_TARBALL"
-stage_source "$LSQLITE3_ZIP" 'https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6'
-stage_source "$SQLITE_ZIP" 'https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip'
+stage_source "$LUA_TARBALL" "https://www.lua.org/ftp/$LUA_TARBALL" "$LUA_SHA256"
+stage_source "$LSQLITE3_ZIP" 'https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6' "$LSQLITE3_SHA256"
+stage_source "$SQLITE_ZIP" 'https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip' "$SQLITE_SHA256"
 ensure_windows_lua
 build_windows_deps
 build_bundles
 verify_with_wine
+if [ "${WINDOWS_LOCAL_ONLY:-0}" = 1 ]; then
+    echo "windows local Wine gate ok"
+    exit 0
+fi
 run_remote_windows

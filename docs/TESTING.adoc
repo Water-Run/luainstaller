@@ -17,16 +17,17 @@ toc::[]
 [source,sh]
 ----
 find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-find tools -type f -name '*.sh' -print0 | xargs -0 -n1 sh -n
+for script in tools/*.sh; do sh -n "$script"; done
 git diff --check
 luarocks lint luainstaller-1.0.0-1.rockspec
 
 lua test/cli_split_smoke.lua
 lua test/contract_docs.lua
+lua test/production_edges.lua
 lua test/smoke_all.lua
 ----
 
-The three Lua entry points have different purposes:
+The four Lua entry points have different purposes:
 
 `test/cli_split_smoke.lua`::
 Checks that `luai` accepts only its flag grammar and `luainstaller` accepts only
@@ -36,6 +37,13 @@ its word-command grammar.
 Exercises behavior promised by public documentation: discovery modes,
 include/exclude rules, option validation, output ownership, manifests, bundled
 searcher order, logs, and the documentation index.
+
+`test/production_edges.lua`::
+Exercises fail-closed production boundaries: Lua lexical/syntax cases, checked
+I/O, source mutation, module aliases, runtime loader paths, recursive SHA-256
+ownership, target path collisions, compiler ABI checks, deterministic onefile
+output/cache repair, concurrent logs, installer rejection, and remote-script
+safety contracts.
 
 `test/smoke_all.lua`::
 Runs the broader packaging audit, including realistic samples, generated C,
@@ -59,6 +67,11 @@ The suite is expected to exercise all of these areas:
   cache permissions and parent symlinks, and accepts a canonicalizable TMPDIR;
 * a toolchain failure during rebuild preserves the previous executable;
 * source-installed and LuaRocks-installed command layouts can build a bundle.
+
+The production-edge suite additionally compiles captured launcher/extractor C
+with strict GCC/Clang flags, executes ASan/UBSan builds where available, proves
+repeated onefile bytes are identical, and runs a 60-process logging contention
+case. No filtered `EDGE_FILTER` run substitutes for the unfiltered release run.
 
 Read skips in context. `cc`, `pkg-config`, `readelf`, `curl`, LuaRocks, and
 sample native dependencies enable deeper branches. On the primary release host
@@ -105,6 +118,10 @@ sh tools/install-source.sh --prefix "$prefix"
 env -i PATH=/usr/bin:/bin "$prefix/runtime/runtime" source-install
 ----
 
+The installer checks `_VERSION` before creating the prefix and requires exactly
+Lua 5.4. Installed wrappers repeat that check for `LUAI_LUA`; include a negative
+LuaJIT or older-Lua probe when changing installation code.
+
 LuaRocks packaging metadata:
 
 [source,sh]
@@ -125,19 +142,27 @@ sh tools/remote-test-linux.sh
 ----
 
 The script copies the checkout to both targets. On x86_64 it runs the complete
-local suite, source install, onedir build, and a clean-environment execution.
+local suite (including `test/production_edges.lua`), source install, onedir
+build, and a clean-environment execution. Smoke output containing `skipped` is
+a gate failure.
 
 The ARM64 target does not depend on system Lua development packages. The script
-stages isolated Lua 5.4.8 and LuaRocks prefixes under `/tmp`, installs cjson,
-LuaFileSystem, LuaSocket, Pegasus, and lsqlite3, and runs the complete smoke and
-documentation suites. It also verifies a real ARM64 onedir launcher through its
-path and a symlink, a onefile launcher in a clean environment, 12 concurrent
-cache users, and executable-mode repair. A `ToolchainError` is a failure, not an
-accepted ARM result.
+stages isolated Lua 5.4.8 and LuaRocks prefixes under `/tmp`, installs pinned
+cjson, LuaFileSystem, LuaSocket, mimetypes, Pegasus, and lsqlite3, and runs the
+complete smoke and documentation suites. It also verifies a real ARM64 onedir
+launcher through its path and a symlink, a onefile launcher in a clean
+environment, 12 concurrent cache users, and executable-mode repair. A
+`ToolchainError` is a failure, not an accepted ARM result.
 
 Defaults can be overridden with `LINUX_X64`, `LINUX_X64_PORT`, `LINUX_ARM64`,
 `REMOTE_ROOT`, `SOURCE_CACHE`, `ARM_LUA_PREFIX`, `ARM_LUAROCKS_PREFIX`, and
 `ARM_ROCKTREE`.
+
+Every destructive override must be a normalized, conservatively named
+`/tmp/luainstaller-*` path. `/`, traversal such as `/../`, symbolic-link source
+caches, foreign-owned caches, and unsafe characters abort before SSH or
+deletion. Repository transfer is built from `git ls-files -z`, so untracked
+credentials and local artifacts are not archived.
 
 [#testing-macos]
 == macOS ARM64
@@ -149,9 +174,11 @@ MAC_HOST=yymacstudio sh tools/remote-test-macos.sh
 
 The script reaches the Mac through `BASTION`/`BASTION_PORT`, stages source
 archives, and builds isolated Lua 5.4.8 and LuaRocks prefixes under `/tmp`. It
-installs or builds `cjson`, LuaFileSystem, LuaSocket, Pegasus, and `lsqlite3`,
-then verifies:
+installs or builds pinned `cjson`, LuaFileSystem, LuaSocket, mimetypes, Pegasus,
+and `lsqlite3`, then verifies:
 
+* `test/cli_split_smoke.lua`, `test/contract_docs.lua`, and
+  `test/smoke_all.lua` with the isolated Lua 5.4 runtime and pinned rocks;
 * pure-Lua and JSON applications as onedir;
 * runtime and student applications as onefile;
 * SQLite storage;
@@ -161,11 +188,19 @@ then verifies:
 The test also compiles the macOS-specific executable-path code and exercises the
 system `/tmp` symlink through onefile extraction.
 
+`REMOTE_ROOT`, `LUA_PREFIX`, `LUAROCKS_PREFIX`, `ROCKTREE`, `PREFIX`, and
+`SOURCE_CACHE` use the same normalized `/tmp/luainstaller-*` guard as Linux.
+
 [#testing-windows]
 == Windows x86_64
 
 [source,sh]
 ----
+# Add the lab host key through a verified channel, then confirm it is present.
+ssh-keygen -F 192.168.69.130
+sh tools/remote-test-windows.sh
+
+# Password mode is optional when key authentication is unavailable.
 WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ----
 
@@ -178,9 +213,59 @@ and the Web service. Both onedir and onefile run with `LUA_PATH` and `LUA_CPATH`
 cleared on Windows. The onefile runtime also verifies that an argument
 containing Windows backslashes and a space survives child-process forwarding.
 
+Every SSH and SCP invocation supplies `StrictHostKeyChecking=yes`; configurable
+SSH option lists are rejected if they attempt to override host-key or known-hosts
+policy. The script never accepts a new or changed host key automatically. With
+no `WINDOWS_PASSWORD`, SSH and SCP use direct key authentication plus batch
+mode. Password mode wraps only those commands with `sshpass -e`, keeping the
+secret out of command arguments.
+
+To run the local MinGW/Wine half without claiming a remote pass:
+
+[source,sh]
+----
+WINDOWS_LOCAL_ONLY=1 sh tools/remote-test-windows.sh
+----
+
+The command prints `windows local Wine gate ok` and exits before SSH. A release
+still requires a second run without `WINDOWS_LOCAL_ONLY=1` against every entry
+in nonempty `WINDOWS_TARGETS`.
+
 The default target is the lab Windows 10 VM. Start the VM and wait for SSH
 before running the script; restore its original power state afterward. Wine is
 required but does not replace the VM result.
+
+[#testing-source-pins]
+== Remote source integrity
+
+Linux, macOS, and Windows scripts verify every cached file and every fresh
+download with SHA-256 before atomic rename. The pinned upstream digests are:
+
+[cols="2,3,4",options="header"]
+|===
+|Archive |Official URL |SHA-256
+
+|Lua 5.4.8
+|`https://www.lua.org/ftp/lua-5.4.8.tar.gz`
+|`4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae`
+
+|LuaRocks 3.12.2
+|`https://luarocks.org/releases/luarocks-3.12.2.tar.gz`
+|`b0e0c85205841ddd7be485f53d6125766d18a81d226588d2366931e9a1484492`
+
+|lsqlite3 v0.9.6 source archive
+|`https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6`
+|`ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82`
+
+|SQLite 3.53.2 amalgamation
+|`https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip`
+|`8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32`
+|===
+
+When an upstream version changes, obtain the archive from the documented
+official URL, verify it independently, update the filename, version pin, and
+digest together, then rerun every affected architecture. Never “fix” a mismatch
+by replacing only the digest of an unexplained cached file.
 
 [#testing-generated-c]
 == Generated C review
@@ -202,7 +287,8 @@ kept separate from warnings in generated project code.
 
 . Worktree contents are understood; unrelated user changes are preserved.
 . Lua and Shell syntax checks pass.
-. CLI, documentation contracts, and full smoke pass without unexplained skips.
+. CLI, documentation, production-edge, and full smoke suites pass unfiltered
+  without unexplained skips.
 . The rockspec lints and installs into an empty tree.
 . Linux x86_64 and ARM64 compile and execute.
 . macOS ARM64 native, onedir, onefile, and Web probes pass.
@@ -210,6 +296,12 @@ kept separate from warnings in generated project code.
 . A native bundle runs with Lua environment variables cleared.
 . Failed rebuild leaves the previous onedir runnable.
 . Onefile cache permission and symlink defenses are exercised.
+. Repeated onefile builds are byte-identical and logger contention passes three
+  consecutive runs.
+. Generated C is warning-clean under strict flags and sanitizer execution has no
+  findings.
+. Remote source hashes, tracked-tree archives, safe temporary roots, and strict
+  SSH host keys are verified.
 . Documentation commands match the final CLI and output layout.
 . Version strings, tag, license, and release notes agree.
 

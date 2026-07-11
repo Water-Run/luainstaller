@@ -10,15 +10,20 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-02-22
+    2026-07-11
 ]]
 
 
+local analyzer = require("luainstaller.analyzer")
 local bundler  = require("luainstaller.bundler")
 local compat   = require("luainstaller.compat")
+local fs       = require("luainstaller.fs")
+local hash     = require("luainstaller.hash")
 local logger   = require("luainstaller.logger")
 local manifest = require("luainstaller.manifest")
 local onefile  = require("luainstaller.onefile")
+local path     = require("luainstaller.path")
+local platform = require("luainstaller.platform")
 local discovery = require("luainstaller.discovery")
 local result = require("luainstaller.result")
 
@@ -79,6 +84,9 @@ Values:
     DISCOVERY: Runtime dependency discovery failed
     LAUNCHER_GENERATION: Launcher source generation failed unexpectedly
     LUA_RUNTIME_NOT_FOUND: Linked Lua runtime could not be located
+    LUA_SYNTAX: Entry or dependency contains invalid Lua syntax
+    SOURCE_CHANGED: Source bytes changed after the manifest snapshot
+    INVALID_MANIFEST: Manifest source or hash metadata is invalid
 ]]
 M.ErrorTypes = {
     SCRIPT_NOT_FOUND      = "ScriptNotFoundError",
@@ -96,19 +104,13 @@ M.ErrorTypes = {
     DISCOVERY             = "DiscoveryError",
     LAUNCHER_GENERATION   = "LauncherGenerationError",
     LUA_RUNTIME_NOT_FOUND = "LuaRuntimeNotFoundError",
+    LUA_SYNTAX            = "LuaSyntaxError",
+    SOURCE_CHANGED        = "SourceChangedError",
+    INVALID_MANIFEST      = "InvalidManifestError",
 }
 
 
 local makeError = result.error
-
-local function fileExists(path)
-    local handle = io.open(path, "rb")
-    if handle then
-        handle:close()
-        return true
-    end
-    return false
-end
 
 local function invalidOption(option, message)
     return makeError("InvalidOptionsError", message or ("invalid option: " .. tostring(option)), {
@@ -129,6 +131,9 @@ local function normalizeSequenceOption(opts, key)
         if type(item_value) ~= "string" then
             return nil, invalidOption(key, key .. " entries must be strings")
         end
+        if item_value:find("\0", 1, true) then
+            return nil, invalidOption(key, key .. " entries must not contain NUL bytes")
+        end
         copy[i] = item_value
     end
     for item_key in pairs(value) do
@@ -147,6 +152,9 @@ local function validateOptionalString(opts, key)
     if value ~= nil and type(value) ~= "string" then
         return invalidOption(key, key .. " must be a string")
     end
+    if type(value) == "string" and value:find("\0", 1, true) then
+        return invalidOption(key, key .. " must not contain NUL bytes")
+    end
     return nil
 end
 
@@ -163,8 +171,10 @@ local function validateMaxDeps(opts)
     if value == nil then
         return nil
     end
-    if type(value) ~= "number" or value < 1 or value ~= math.floor(value) then
-        return invalidOption("max_deps", "max_deps must be a positive integer")
+    if type(value) ~= "number" or value ~= value
+        or value == math.huge or value == -math.huge
+        or value < 1 or value ~= math.floor(value) then
+        return invalidOption("max_deps", "max_deps must be a finite positive integer")
     end
     return nil
 end
@@ -182,6 +192,22 @@ local function validateTargetOs(opts)
     end
     if not VALID_TARGET_OS[value] then
         return invalidOption("target_os", "target_os must be one of: linux, macos, windows")
+    end
+    return nil
+end
+
+local function validateLauncherProfile(opts)
+    local value = opts.launcher_profile
+    if value == nil or value == "" then return nil end
+    local profile = platform.profile({
+        target_os = opts.target_os or os.getenv("LUAI_TARGET_OS"),
+        lua_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
+    })
+    if value ~= profile.launcher_profile then
+        return invalidOption("launcher_profile", string.format(
+            "launcher_profile is derived from the target and must be %s",
+            tostring(profile.launcher_profile)
+        ))
     end
     return nil
 end
@@ -218,6 +244,9 @@ local function normalizeOptions(opts)
     if type(opts.entry) ~= "string" or opts.entry == "" then
         return nil, makeError("InvalidOptionsError", "entry is required")
     end
+    if opts.entry:find("\0", 1, true) then
+        return nil, invalidOption("entry", "entry must not contain NUL bytes")
+    end
     local include, include_err = normalizeSequenceOption(opts, "include")
     if not include then
         return nil, include_err
@@ -240,9 +269,16 @@ local function normalizeOptions(opts)
             return nil, err
         end
     end
+    if type(opts.out) == "string" and opts.out:find("%c") then
+        return nil, invalidOption("out", "out must not contain control bytes")
+    end
     local target_os_err = validateTargetOs(opts)
     if target_os_err then
         return nil, target_os_err
+    end
+    local launcher_profile_err = validateLauncherProfile(opts)
+    if launcher_profile_err then
+        return nil, launcher_profile_err
     end
     for _, key in ipairs({ "depscan", "verbose" }) do
         local err = validateOptionalBoolean(opts, key)
@@ -254,6 +290,9 @@ local function normalizeOptions(opts)
     local normalized = {}
     for key, value in pairs(opts) do
         normalized[key] = value
+    end
+    if normalized.target_os == "" then
+        normalized.target_os = nil
     end
     normalized.include = include
     normalized.exclude = exclude
@@ -272,8 +311,10 @@ local function recordFailure(action, failure)
     return failure
 end
 
-local function dependencyPlan(opts)
-    return discovery.plan(opts)
+local function dependencyPlan(opts, initial_source_hashes)
+    return discovery.plan(opts, {
+        initial_source_hashes = initial_source_hashes,
+    })
 end
 
 local function validateBundleMode(mode)
@@ -298,13 +339,22 @@ local function analyzeContext(opts, config)
             return nil, mode_err
         end
     end
-    if not fileExists(normalized.entry) then
+    local entry_content, entry_read_err = fs.readRegularFile(normalized.entry)
+    if entry_content == nil then
         return nil, makeError("ScriptNotFoundError", string.format("Lua script not found: %s", normalized.entry), {
             script_path = normalized.entry,
+            cause = entry_read_err,
         })
     end
+    local syntax_ok, syntax_err = pcall(analyzer.validateSource, entry_content, normalized.entry)
+    if not syntax_ok then
+        return nil, result.fromThrown(syntax_err)
+    end
 
-    local dependencies, dep_err = dependencyPlan(normalized)
+    local entry_path = path.normalize(path.absolute(normalized.entry))
+    local dependencies, dep_err = dependencyPlan(normalized, {
+        [entry_path] = hash.sha256(entry_content),
+    })
     if not dependencies then
         return nil, dep_err
     end
@@ -421,6 +471,7 @@ function M.bundle(opts)
         launcher_profile = normalized.launcher_profile,
         target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
         lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
+        source_hashes = context.dependencies.source_hashes,
     })
     if not built_manifest.ok then
         return recordFailure("bundle", built_manifest)

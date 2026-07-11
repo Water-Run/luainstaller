@@ -16,6 +16,12 @@ The project provides two command names:
 
 Both commands call the same Lua API and produce the same bundles.
 
+The supported interpreter range is Lua `>= 5.4` and `< 5.5`; in practice every
+installer, discovery process, header set, and linked runtime must identify as
+Lua 5.4. LuaJIT and other Lua major/minor ABIs are rejected. A linked-runtime
+probe runs before publication; Windows cross-builds therefore require Wine in
+addition to MinGW.
+
 toc::[]
 
 [#quick-start]
@@ -43,6 +49,7 @@ keeps the manifest, generated C source, and copied native libraries visible.
 
 [source,sh]
 ----
+lua test/runtime_bundle/main.lua direct
 luai -a test/runtime_bundle/main.lua --max-deps 120
 luai -t test/runtime_bundle/main.lua --max-deps 120
 luai -b --dir test/runtime_bundle/main.lua \
@@ -71,6 +78,12 @@ target environments must agree on all four of these boundaries:
 * CPU architecture;
 * system and compiler ABI;
 * Lua major/minor ABI.
+
+The generated launcher enforces `LUA_VERSION_NUM == 504`, and Linux additionally
+requires `pkg-config --modversion lua` to report 5.4. This is a same-environment
+packager, not a hermetic sandbox: embedded modules win, but an undeclared module
+may fall through to the target host's normal Lua/native searchers. Always run a
+release candidate once with `LUA_PATH` and `LUA_CPATH` cleared.
 
 Pure-Lua modules are embedded in the launcher. Lua C modules are copied into the
 bundle, but their dependent system libraries are not discovered recursively.
@@ -164,14 +177,17 @@ From the repository root:
 [source,sh]
 ----
 find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-find tools -type f -name '*.sh' -print0 | xargs -0 -n1 sh -n
+for script in tools/*.sh; do sh -n "$script"; done
 lua test/cli_split_smoke.lua
 lua test/contract_docs.lua
+lua test/production_edges.lua
 lua test/smoke_all.lua
 luarocks lint luainstaller-1.0.0-1.rockspec
 ----
 
 `test/contract_docs.lua` checks promises made by the public documentation.
+`test/production_edges.lua` covers fail-closed filesystem behavior, source
+mutation, SHA-256 ownership, concurrency, ABI rejection, and reproducibility.
 `test/smoke_all.lua` exercises dependency discovery, generated launchers,
 native modules, installed commands, onedir, onefile, and output safety.
 

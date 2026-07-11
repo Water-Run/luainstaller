@@ -12,7 +12,8 @@ Updated:
 ]]
 
 local launcher = require("luainstaller.launcher")
-local manifest_mod = require("luainstaller.manifest")
+local fs = require("luainstaller.fs")
+local hash_mod = require("luainstaller.hash")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
@@ -31,10 +32,13 @@ local basename = path.basename
 local stem = path.stem
 local isWithin = path.isWithin
 local isSafeRelative = path.isSafeRelative
+local validateTargetRelative = path.validateTargetRelative
+local targetKey = path.targetKey
 local commandOutput = process.output
 local shellQuote = process.shellQuote
 local makeError = result.error
-local GENERATED_MARKER = "luainstaller-generated-output-v1"
+local GENERATED_MARKER = "luainstaller-generated-output-v2"
+local GENERATED_MARKER_RELATIVE = ".luai/generated-output.txt"
 local writeFile
 local validateOutputDirectory
 
@@ -98,24 +102,100 @@ local function fileExists(path)
     return true
 end
 
-local function readFile(path)
-    local file = io.open(path, "rb")
-    if not file then
-        return nil
+local function contentHash(content, algorithm)
+    if algorithm == "fnv1a32" then
+        return hash_mod.fnv1a32(content)
     end
-    local content = file:read("*a") or ""
-    file:close()
-    return content
+    if algorithm == "sha256" then
+        return hash_mod.sha256(content)
+    end
+    return nil, makeError("InvalidManifestError", "Unsupported manifest hash algorithm: " .. tostring(algorithm), {
+        hash_algorithm = algorithm,
+    })
 end
 
-local fnv1a32 = manifest_mod.fnv1a32
+local function sourceChangedError(source_path, expected_hash, actual_hash, algorithm, details)
+    details = details or {}
+    details.source_path = normalizePath(source_path)
+    details.expected_hash = expected_hash
+    details.actual_hash = actual_hash
+    details.hash_algorithm = algorithm
+    return makeError("SourceChangedError", "Source changed during build: " .. tostring(source_path), details)
+end
 
-local function fileHash(path)
-    local content = readFile(path)
-    if content == nil then
-        return nil
+local function manifestSourceEntries(manifest)
+    if type(manifest) ~= "table" or type(manifest.entry) ~= "table"
+        or type(manifest.modules) ~= "table" then
+        return nil, makeError("InvalidManifestError", "Manifest is missing source metadata")
     end
-    return fnv1a32(content)
+    local entries = {}
+    entries[#entries + 1] = manifest.entry
+    for _, group_name in ipairs({ "lua", "native", "external" }) do
+        local group = manifest.modules[group_name]
+        if group ~= nil and type(group) ~= "table" then
+            return nil, makeError("InvalidManifestError", "Manifest module group must be a table", {
+                module_group = group_name,
+            })
+        end
+        for _, entry in ipairs(group or {}) do
+            if type(entry) ~= "table" then
+                return nil, makeError("InvalidManifestError", "Manifest source entry must be a table", {
+                    module_group = group_name,
+                })
+            end
+            entries[#entries + 1] = entry
+        end
+    end
+    return entries
+end
+
+local function manifestSourceHashes(manifest)
+    local algorithm = manifest and manifest.hash_algorithm
+    local _, algorithm_err = contentHash("", algorithm)
+    if algorithm_err then return nil, algorithm_err end
+    local hashes = {}
+    local entries, entries_err = manifestSourceEntries(manifest)
+    if not entries then return nil, entries_err end
+    for _, entry in ipairs(entries) do
+        if type(entry.source_path) ~= "string" or entry.source_path == ""
+            or type(entry.content_hash) ~= "string" or entry.content_hash == "" then
+            return nil, makeError("InvalidManifestError", "Manifest source entry is missing a path or hash", {
+                source_path = entry.source_path,
+            })
+        end
+        local source_path = normalizePath(entry.source_path)
+        local previous = hashes[source_path]
+        if previous and previous ~= entry.content_hash then
+            return nil, makeError("InvalidManifestError", "Manifest has conflicting hashes for one source", {
+                source_path = source_path,
+                first_hash = previous,
+                second_hash = entry.content_hash,
+            })
+        end
+        hashes[source_path] = entry.content_hash
+    end
+    return hashes
+end
+
+local function verifyManifestSources(manifest)
+    local algorithm = manifest and manifest.hash_algorithm
+    local entries, entries_err = manifestSourceEntries(manifest)
+    if not entries then return entries_err end
+    for _, entry in ipairs(entries) do
+        local source_path = entry.source_path
+        local content, read_err = fs.readRegularFile(source_path)
+        if content == nil then
+            return sourceChangedError(source_path, entry.content_hash, nil, algorithm, {
+                cause = read_err,
+            })
+        end
+        local actual_hash, hash_err = contentHash(content, algorithm)
+        if hash_err then return hash_err end
+        if actual_hash ~= entry.content_hash then
+            return sourceChangedError(source_path, entry.content_hash, actual_hash, algorithm)
+        end
+    end
+    return nil
 end
 
 local function pathExists(path)
@@ -133,118 +213,239 @@ local function isSymlink(path)
     return ok == true
 end
 
-local function directoryIsEmpty(path)
-    local ok, output = commandOutput("find " .. shellQuote(path) .. " -mindepth 1 -maxdepth 1 | head -n 1")
-    return ok and output == ""
+local function invalidOutputInventory(path, message, details)
+    details = details or {}
+    details.path = details.path or path
+    return makeError("InvalidOutputError", message, details)
 end
 
-local function generatedManifestHasPrefix(path)
-    local manifest_path = normalizePath(path .. "/.luai/manifest.lua")
-    local file = io.open(manifest_path, "rb")
-    if not file then
-        return false
+local function validInventoryPath(value)
+    return type(value) == "string"
+        and value ~= ""
+        and value == normalizePath(value)
+        and isSafeRelative(value)
+        and not value:find("[\0\t\r\n]")
+end
+
+local function listTree(root)
+    root = normalizePath(root)
+    local ok, raw = commandOutput("find " .. shellQuote(root) .. " -print0")
+    if not ok then
+        return nil, invalidOutputInventory(root, "Cannot inspect output tree safely", {
+            output = raw,
+        })
     end
-    local prefix = file:read(#"-- generated by luainstaller") or ""
-    file:close()
-    return prefix == "-- generated by luainstaller"
+    local root_terminator = raw:find("\0", 1, true)
+    if not root_terminator
+        or normalizePath(raw:sub(1, root_terminator - 1)) ~= root then
+        return nil, invalidOutputInventory(root, "Output tree listing omitted its root")
+    end
+    local prefix = root == "/" and "/" or (root .. "/")
+    local entries = {}
+    local position = root_terminator + 1
+    while position <= #raw do
+        local terminator = raw:find("\0", position, true)
+        if not terminator then
+            return nil, invalidOutputInventory(root, "Output tree listing is incomplete")
+        end
+        local absolute = normalizePath(raw:sub(position, terminator - 1))
+        position = terminator + 1
+        if absolute:sub(1, #prefix) ~= prefix then
+            return nil, invalidOutputInventory(root, "Output tree entry escapes its root", {
+                unexpected_path = absolute,
+            })
+        end
+        local relative = absolute:sub(#prefix + 1)
+        if not validInventoryPath(relative) then
+            return nil, invalidOutputInventory(root, "Output tree contains an unsafe path", {
+                unexpected_path = absolute,
+            })
+        end
+
+        local item = { path = relative }
+        if isSymlink(absolute) then
+            return nil, invalidOutputInventory(root, "Output tree contains a symbolic link", {
+                unexpected_path = absolute,
+            })
+        elseif directoryExists(absolute) then
+            item.kind = "dir"
+        elseif fs.isRegularFile(absolute) then
+            local content, read_err = fs.readRegularFile(absolute)
+            if content == nil then
+                return nil, invalidOutputInventory(root, "Cannot read generated output file", {
+                    unexpected_path = absolute,
+                    cause = read_err,
+                })
+            end
+            item.kind = "file"
+            item.hash = hash_mod.sha256(content)
+        else
+            return nil, invalidOutputInventory(root, "Output tree contains an unsupported file type", {
+                unexpected_path = absolute,
+            })
+        end
+        entries[#entries + 1] = item
+    end
+    table.sort(entries, function(left, right)
+        return left.path < right.path
+    end)
+    return entries
 end
 
 local function readGeneratedMarker(path)
-    local marker_path = normalizePath(path .. "/.luai/generated-output.txt")
-    local content = readFile(marker_path)
-    if not content then
-        return nil
+    local marker_path = normalizePath(path .. "/" .. GENERATED_MARKER_RELATIVE)
+    local content, read_err = fs.readFile(marker_path)
+    if content == nil then
+        return nil, invalidOutputInventory(path, "Generated output marker is missing or unreadable", {
+            unexpected_path = marker_path,
+            cause = read_err,
+        })
     end
-    local marker = {
-        files = {},
-    }
-    local first = true
-    for line in (content .. "\n"):gmatch("([^\n]*)\n") do
-        if first then
-            first = false
-            if line ~= GENERATED_MARKER then
-                return nil
+    if content:sub(-1) ~= "\n" then
+        return nil, invalidOutputInventory(path, "Generated output marker is incomplete", {
+            unexpected_path = marker_path,
+        })
+    end
+
+    local lines = {}
+    for line in content:gmatch("([^\n]*)\n") do
+        if line == "" then
+            return nil, invalidOutputInventory(path, "Generated output marker contains an empty record", {
+                unexpected_path = marker_path,
+            })
+        end
+        lines[#lines + 1] = line
+    end
+    if lines[1] == "luainstaller-generated-output-v1" then
+        return nil, invalidOutputInventory(path, "Legacy v1 output requires explicit migration and will not be overwritten", {
+            unexpected_path = marker_path,
+            legacy_version = 1,
+            migration_required = true,
+        })
+    end
+    if lines[1] ~= GENERATED_MARKER then
+        return nil, invalidOutputInventory(path, "Generated output marker has an unsupported version", {
+            unexpected_path = marker_path,
+        })
+    end
+
+    local marker = { entries = {} }
+    for index = 2, #lines do
+        local line = lines[index]
+        if line:sub(1, #"output_dir=") == "output_dir=" then
+            if marker.output_dir ~= nil then
+                return nil, invalidOutputInventory(path, "Generated output marker repeats output_dir", {
+                    unexpected_path = marker_path,
+                })
             end
-        elseif line:sub(1, #"output_dir=") == "output_dir=" then
             marker.output_dir = normalizePath(line:sub(#"output_dir=" + 1))
-        elseif line:sub(1, #"file\t") == "file\t" then
-            local rel, hash = line:match("^file\t([^\t]+)\t([0-9a-f]+)$")
-            if not rel or not hash then
-                return nil
+        else
+            local kind, relative, digest = line:match("^(dir)\t([^\t]+)$")
+            if not kind then
+                kind, relative, digest = line:match("^(file)\t([^\t]+)\t([0-9a-f]+)$")
             end
-            marker.files[#marker.files + 1] = {
-                path = normalizePath(rel),
-                hash = hash,
+            if not kind or not validInventoryPath(relative)
+                or relative == GENERATED_MARKER_RELATIVE
+                or (kind == "file" and (type(digest) ~= "string" or #digest ~= 64))
+                or marker.entries[relative] ~= nil then
+                return nil, invalidOutputInventory(path, "Generated output marker contains an invalid inventory record", {
+                    unexpected_path = marker_path,
+                    record = line,
+                })
+            end
+            marker.entries[relative] = {
+                kind = kind,
+                path = relative,
+                hash = digest,
             }
-        elseif line ~= "" then
-            return nil
         end
     end
-    if marker.output_dir == nil then
-        return nil
+    if marker.output_dir == nil or marker.output_dir == "" then
+        return nil, invalidOutputInventory(path, "Generated output marker is missing output_dir", {
+            unexpected_path = marker_path,
+        })
     end
     return marker
 end
 
-local function generatedMarkerMatches(path, allowed)
-    local marker = readGeneratedMarker(path)
-    if not marker then
-        return false, normalizePath(path .. "/.luai/generated-output.txt")
+local function generatedMarkerMatches(path, allowed, declared_output_dir)
+    local marker, marker_err = readGeneratedMarker(path)
+    if not marker then return false, marker_err end
+    local expected_output_dir = normalizePath(declared_output_dir or path)
+    if marker.output_dir ~= expected_output_dir then
+        return false, invalidOutputInventory(path, "Generated output marker belongs to another directory", {
+            unexpected_path = normalizePath(path .. "/" .. GENERATED_MARKER_RELATIVE),
+            declared_output_dir = marker.output_dir,
+            expected_output_dir = expected_output_dir,
+        })
     end
-    if marker.output_dir ~= normalizePath(path) then
-        return false, normalizePath(path .. "/.luai/generated-output.txt")
-    end
-    local marked = {}
-    for _, item in ipairs(marker.files) do
-        local rel = item.path
-        if rel == "" or rel:sub(1, 1) == "/" or rel == ".." or rel:sub(1, 3) == "../"
-            or rel:find("/../", 1, true) or rel:sub(-3) == "/.." or not allowed[rel] then
-            return false, normalizePath(path .. "/" .. rel)
+
+    local inventory, inventory_err = listTree(path)
+    if not inventory then return false, inventory_err end
+    local actual = {}
+    local marker_file_seen = false
+    for _, item in ipairs(inventory) do
+        local top_level = item.path:match("^[^/]+")
+        if not allowed[top_level] then
+            return false, invalidOutputInventory(path, "Generated output contains an unexpected top-level entry", {
+                unexpected_path = normalizePath(path .. "/" .. item.path),
+            })
         end
-        local actual_hash = fileHash(normalizePath(path .. "/" .. rel))
-        if actual_hash == nil or actual_hash ~= item.hash then
-            return false, normalizePath(path .. "/" .. rel)
+        if item.path == GENERATED_MARKER_RELATIVE then
+            if item.kind ~= "file" then
+                return false, invalidOutputInventory(path, "Generated output marker is not a regular file", {
+                    unexpected_path = normalizePath(path .. "/" .. item.path),
+                })
+            end
+            marker_file_seen = true
+        else
+            actual[item.path] = item
         end
-        marked[rel] = true
     end
-    for name in pairs(allowed) do
-        if name ~= ".luai" and pathExists(normalizePath(path .. "/" .. name)) and not marked[name] then
-            return false, normalizePath(path .. "/" .. name)
+    if not marker_file_seen then
+        return false, invalidOutputInventory(path, "Generated output marker is absent from the output tree")
+    end
+
+    for relative, expected in pairs(marker.entries) do
+        local item = actual[relative]
+        if not item or item.kind ~= expected.kind
+            or (item.kind == "file" and item.hash ~= expected.hash) then
+            return false, invalidOutputInventory(path, "Generated output no longer matches its ownership marker", {
+                unexpected_path = normalizePath(path .. "/" .. relative),
+            })
         end
     end
-    return true
+    for relative in pairs(actual) do
+        if marker.entries[relative] == nil then
+            return false, invalidOutputInventory(path, "Generated output contains unowned nested content", {
+                unexpected_path = normalizePath(path .. "/" .. relative),
+            })
+        end
+    end
+    return true, marker
 end
 
-local function generatedDirectoryHasOnlyAllowedEntries(path, allowed)
-    local ok, output = commandOutput("find " .. shellQuote(path) .. " -mindepth 1 -maxdepth 1")
-    if not ok then
-        return false, output
+local function writeGeneratedMarker(path, declared_output_dir)
+    local marker_path = normalizePath(path .. "/" .. GENERATED_MARKER_RELATIVE)
+    if pathExists(marker_path) or isSymlink(marker_path) then
+        return makeError("FilesystemError", "Staging output already contains a generated marker", {
+            path = marker_path,
+        })
     end
-    for line in output:gmatch("[^\n]+") do
-        local name = basename(line)
-        if not allowed[name] then
-            return false, line
-        end
-    end
-    return true
-end
-
-local function writeGeneratedMarker(path, file_entries, declared_output_dir)
+    local inventory, inventory_err = listTree(path)
+    if not inventory then return inventory_err end
     local lines = {
         GENERATED_MARKER,
         "output_dir=" .. normalizePath(declared_output_dir or path),
     }
-    for _, item in ipairs(file_entries or {}) do
-        local rel = normalizePath(item.path)
-        local hash = fileHash(normalizePath(path .. "/" .. rel))
-        if not hash then
-            return makeError("FilesystemError", "Cannot hash generated output file: " .. tostring(rel), {
-                path = normalizePath(path .. "/" .. rel),
-            })
+    for _, item in ipairs(inventory) do
+        if item.kind == "dir" then
+            lines[#lines + 1] = "dir\t" .. item.path
+        else
+            lines[#lines + 1] = "file\t" .. item.path .. "\t" .. item.hash
         end
-        lines[#lines + 1] = "file\t" .. rel .. "\t" .. hash
     end
-    return writeFile(normalizePath(path .. "/.luai/generated-output.txt"), table.concat(lines, "\n") .. "\n")
+    return writeFile(marker_path, table.concat(lines, "\n") .. "\n")
 end
 
 local function validateLuaPrefix(prefix)
@@ -274,8 +475,6 @@ local function validateWindowsLuaPrefix(prefix)
     local candidates = {
         normalizePath(prefix .. "/bin/lua54.dll"),
         normalizePath(prefix .. "/lua54.dll"),
-        normalizePath(prefix .. "/bin/lua.dll"),
-        normalizePath(prefix .. "/lua.dll"),
     }
     for _, candidate in ipairs(candidates) do
         if fileExists(candidate) then
@@ -294,18 +493,15 @@ local function validateWindowsLuaPrefix(prefix)
 end
 
 writeFile = function(path, content)
-    local file = io.open(path, "wb")
-    if not file then
-        return makeError("FilesystemError", "Cannot write file: " .. tostring(path), {
-            path = path,
-        })
-    end
-    file:write(content or "")
-    file:close()
-    return nil
+    local ok, write_err = fs.writeFile(path, content or "")
+    if ok then return nil end
+    return makeError("FilesystemError", "Cannot write file: " .. tostring(path), {
+        path = path,
+        cause = write_err,
+    })
 end
 
-local function copyFile(source, destination)
+local function copyFile(source, destination, expected_hash, hash_algorithm)
     local dir_err = ensureDirectory(dirname(destination))
     if dir_err then
         return dir_err
@@ -317,6 +513,22 @@ local function copyFile(source, destination)
             destination = destination,
             output = output,
         })
+    end
+    if expected_hash ~= nil then
+        local copied, read_err = fs.readRegularFile(destination)
+        if copied == nil then
+            return sourceChangedError(source, expected_hash, nil, hash_algorithm, {
+                destination_path = destination,
+                cause = read_err,
+            })
+        end
+        local actual_hash, hash_err = contentHash(copied, hash_algorithm)
+        if hash_err then return hash_err end
+        if actual_hash ~= expected_hash then
+            return sourceChangedError(source, expected_hash, actual_hash, hash_algorithm, {
+                destination_path = destination,
+            })
+        end
     end
     return nil
 end
@@ -348,6 +560,12 @@ local function copyLuaRuntime(exe_path, native_dir)
         })
     end
     local destination = normalizePath(native_dir .. "/" .. lua_name)
+    if pathExists(destination) or isSymlink(destination) then
+        return makeError("DuplicateModuleError", "Lua runtime destination collides with a native module", {
+            source_path = normalizePath(lua_path),
+            destination_path = destination,
+        })
+    end
     local err = copyFile(lua_path, destination)
     if err then
         return err
@@ -426,6 +644,38 @@ end
 
 local function serializeManifest(manifest)
     return "-- generated by luainstaller\nreturn " .. serializeValue(manifest, "")
+end
+
+local function abiProbeSource()
+    return [[
+#include <stdio.h>
+#include <string.h>
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM != 504
+#error "luainstaller requires Lua 5.4 headers"
+#endif
+
+int main(void) {
+    lua_State *state = luaL_newstate();
+    const char *version;
+    int matches;
+    if (!state) return 70;
+    luaL_openlibs(state);
+    lua_getglobal(state, "_VERSION");
+    version = lua_tostring(state, -1);
+    matches = version != NULL && strcmp(version, "Lua 5.4") == 0;
+    if (!matches) {
+        fprintf(stderr, "expected linked Lua 5.4 runtime, got %s\n",
+                version != NULL ? version : "unknown");
+    }
+    lua_pop(state, 1);
+    lua_close(state);
+    return matches ? 0 : 42;
+}
+]]
 end
 
 local function executableName(out_path, entry, profile)
@@ -523,22 +773,30 @@ local function captureOutputSnapshot(path_value)
     if not pathExists(path_value) then
         return { kind = "absent" }
     end
-    if directoryIsEmpty(path_value) then
+    local inventory, inventory_err = listTree(path_value)
+    if not inventory then return nil, inventory_err end
+    if #inventory == 0 then
         return { kind = "empty" }
     end
-    local marker = readFile(normalizePath(path_value .. "/.luai/generated-output.txt"))
+    local marker, read_err = fs.readFile(normalizePath(path_value .. "/" .. GENERATED_MARKER_RELATIVE))
+    if marker == nil then
+        return nil, invalidOutputInventory(path_value, "Cannot snapshot generated output marker", {
+            cause = read_err,
+        })
+    end
     return {
         kind = "generated",
-        marker_hash = marker and fnv1a32(marker) or nil,
+        marker_hash = hash_mod.sha256(marker),
     }
 end
 
-local function outputSnapshotMatches(path_value, allowed, snapshot)
-    local validation_err = validateOutputDirectory(path_value, allowed)
+local function outputSnapshotMatches(path_value, allowed, snapshot, declared_output_dir)
+    local validation_err = validateOutputDirectory(path_value, allowed, declared_output_dir)
     if validation_err then
         return false, validation_err
     end
-    local current = captureOutputSnapshot(path_value)
+    local current, snapshot_err = captureOutputSnapshot(path_value)
+    if not current then return false, snapshot_err end
     if current.kind ~= snapshot.kind
         or current.marker_hash ~= snapshot.marker_hash then
         return false, makeError("InvalidOutputError", "Output changed while the bundle was being built", {
@@ -571,6 +829,31 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
                 output = tostring(rename_err),
             })
         end
+        local moved_unchanged, moved_err = outputSnapshotMatches(
+            backup_path,
+            allowed,
+            snapshot,
+            final_path
+        )
+        if not moved_unchanged then
+            local restored, restore_err = os.rename(backup_path, final_path)
+            if moved_err and moved_err.error then
+                moved_err.error.path = final_path
+                moved_err.error.backup_path = backup_path
+                moved_err.error.restored = restored and true or false
+                moved_err.error.restore_error = restored and nil or tostring(restore_err)
+            end
+            return moved_err or makeError(
+                "InvalidOutputError",
+                "Output changed while it was being moved to a backup",
+                {
+                    path = final_path,
+                    backup_path = backup_path,
+                    restored = restored and true or false,
+                    restore_error = restored and nil or tostring(restore_err),
+                }
+            )
+        end
     end
 
     local committed, commit_err = os.rename(stage_path, final_path)
@@ -592,6 +875,39 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
     end
 
     if backup_path then
+        local still_unchanged, backup_changed_err = outputSnapshotMatches(
+            backup_path,
+            allowed,
+            snapshot,
+            final_path
+        )
+        if not still_unchanged then
+            local staged_again, stage_restore_err = os.rename(final_path, stage_path)
+            local restored, restore_err
+            if staged_again then
+                restored, restore_err = os.rename(backup_path, final_path)
+            end
+            if backup_changed_err and backup_changed_err.error then
+                backup_changed_err.error.path = final_path
+                backup_changed_err.error.backup_path = backup_path
+                backup_changed_err.error.restored = restored and true or false
+                backup_changed_err.error.committed = not staged_again
+                backup_changed_err.error.restore_error = restored and nil
+                    or tostring(restore_err or stage_restore_err)
+            end
+            return backup_changed_err or makeError(
+                "InvalidOutputError",
+                "Previous output changed before its backup could be removed",
+                {
+                    path = final_path,
+                    backup_path = backup_path,
+                    restored = restored and true or false,
+                    committed = not staged_again,
+                    restore_error = restored and nil
+                        or tostring(restore_err or stage_restore_err),
+                }
+            )
+        end
         local cleanup_err = removeTree(backup_path)
         if cleanup_err then
             return makeError("FilesystemError", "Output was installed but previous output backup could not be removed", {
@@ -609,15 +925,21 @@ local function linuxHost()
     return ok and output:match("^Linux") ~= nil
 end
 
+local function macosHost()
+    local ok, output = commandOutput("uname -s")
+    return ok and output:match("^Darwin") ~= nil
+end
+
 local function unsafeOutputError(path)
     return makeError("InvalidOutputError", "Refusing to overwrite unsafe output directory: " .. tostring(path), {
         path = path,
     })
 end
 
-validateOutputDirectory = function(path, allowed_generated_entries)
+local function validateOutputLocation(path)
     local normalized = normalizePath(path)
-    if normalized == "/" or normalized == "." or normalized == "" then
+    if normalized == "/" or normalized == "//" or normalized == "." or normalized == ""
+        or normalized:match("^%a:/$") then
         return unsafeOutputError(path)
     end
     if normalized == currentDirectory() then
@@ -632,28 +954,26 @@ validateOutputDirectory = function(path, allowed_generated_entries)
                 path = path,
             })
         end
-        local empty = directoryIsEmpty(normalized)
-        local generated = not empty and generatedManifestHasPrefix(normalized)
-        if not empty and not generated then
-            return makeError("InvalidOutputError", "Refusing to overwrite non-luainstaller output directory: " .. tostring(path), {
-                path = path,
-            })
-        end
-        if generated then
-            local generated_only, unexpected = generatedDirectoryHasOnlyAllowedEntries(normalized, allowed_generated_entries or {})
-            if not generated_only then
-                return makeError("InvalidOutputError", "Refusing to overwrite luainstaller output directory with unexpected files: " .. tostring(path), {
-                    path = path,
-                    unexpected_path = unexpected,
-                })
-            end
-            local marker_ok, marker_path = generatedMarkerMatches(normalized, allowed_generated_entries or {})
-            if not marker_ok then
-                return makeError("InvalidOutputError", "Refusing to overwrite luainstaller output directory without matching generated marker: " .. tostring(path), {
-                    path = path,
-                    unexpected_path = marker_path,
-                })
-            end
+    end
+    return nil
+end
+
+validateOutputDirectory = function(path, allowed_generated_entries, declared_output_dir)
+    local location_err = validateOutputLocation(path)
+    if location_err then
+        return location_err
+    end
+    local normalized = normalizePath(path)
+    if pathExists(normalized) then
+        local inventory, inventory_err = listTree(normalized)
+        if not inventory then return inventory_err end
+        if #inventory > 0 then
+            local marker_ok, marker_or_err = generatedMarkerMatches(
+                normalized,
+                allowed_generated_entries or {},
+                declared_output_dir
+            )
+            if not marker_ok then return marker_or_err end
         end
     end
     return nil
@@ -662,19 +982,31 @@ end
 local function traceModuleMaps(trace)
     local lua_names = {}
     local native_names = {}
+    local function addAlias(target, source_path, requested)
+        if type(requested) ~= "string" or requested == "" then
+            return
+        end
+        source_path = normalizePath(source_path)
+        local aliases = target[source_path]
+        if not aliases then
+            aliases = {}
+            target[source_path] = aliases
+        end
+        aliases[requested] = true
+    end
     for _, item in ipairs(trace or {}) do
         if item.selected_path and item.requested then
             if item.classification == "lua" or item.selected_type == "lua" then
-                lua_names[normalizePath(item.selected_path)] = item.requested
+                addAlias(lua_names, item.selected_path, item.requested)
             elseif item.classification == "native" or item.selected_type == "native" then
-                native_names[normalizePath(item.selected_path)] = item.requested
+                addAlias(native_names, item.selected_path, item.requested)
             end
         end
     end
     return lua_names, native_names
 end
 
-local function nativeDestinations(native_path, module_name, native_dir)
+local function nativeDestinations(native_path, module_names, native_dir, target_os)
     local destinations = {}
     local seen = {}
     local function add(candidate)
@@ -683,7 +1015,18 @@ local function nativeDestinations(native_path, module_name, native_dir)
             return makeError("InvalidOptionsError", "Native module destination escapes .luai/native", {
                 destination = candidate,
                 native_dir = native_dir,
-                module_name = module_name,
+                module_names = module_names,
+            })
+        end
+        local prefix = normalizePath(native_dir) .. "/"
+        local relative = candidate:sub(#prefix + 1)
+        local valid, reason = validateTargetRelative(relative, target_os)
+        if not valid then
+            return makeError("InvalidOptionsError", "Invalid native target path: " .. tostring(relative), {
+                destination = candidate,
+                target_path = relative,
+                target_os = target_os,
+                reason = reason,
             })
         end
         if not seen[candidate] then
@@ -697,7 +1040,21 @@ local function nativeDestinations(native_path, module_name, native_dir)
     if err then
         return nil, err
     end
-    if module_name and module_name ~= "" then
+    local aliases = {}
+    if type(module_names) == "string" then
+        aliases[1] = module_names
+    elseif type(module_names) == "table" then
+        for module_name, enabled in pairs(module_names) do
+            if enabled then aliases[#aliases + 1] = module_name end
+        end
+        table.sort(aliases)
+    end
+    for _, module_name in ipairs(aliases) do
+        if type(module_name) ~= "string" or module_name == "" then
+            return nil, makeError("InvalidOptionsError", "Native module name must be a non-empty string", {
+                module_name = module_name,
+            })
+        end
         if module_name:find("[/\\]", 1) then
             return nil, makeError("InvalidOptionsError", "Native module name must not contain path separators", {
                 module_name = module_name,
@@ -718,8 +1075,52 @@ local function nativeDestinations(native_path, module_name, native_dir)
     return destinations
 end
 
+local function validateTargetTree(root, target_os)
+    local inventory, inventory_err = listTree(root)
+    if not inventory then return inventory_err end
+    local owners = {}
+    for _, item in ipairs(inventory) do
+        local valid, reason = validateTargetRelative(item.path, target_os)
+        if not valid then
+            return makeError("InvalidOptionsError", "Generated target path is not portable: " .. item.path, {
+                target_path = item.path,
+                target_os = target_os,
+                reason = reason,
+            })
+        end
+        local key = targetKey(item.path, target_os)
+        local owner = owners[key]
+        if owner and owner ~= item.path then
+            return makeError("DuplicateModuleError", "Generated target paths collide: "
+                .. owner .. " and " .. item.path, {
+                first_destination = owner,
+                second_destination = item.path,
+                target_os = target_os,
+            })
+        end
+        owners[key] = item.path
+    end
+    return nil
+end
+
 function M.bundleOnedir(opts)
     opts = opts or {}
+    local manifest = opts.manifest
+    local dependencies = opts.dependencies or { scripts = {}, libraries = {} }
+    local entry = opts.entry
+    if type(manifest) ~= "table" then
+        return makeError("InvalidOptionsError", "manifest is required")
+    end
+    if type(entry) ~= "string" or entry == "" then
+        return makeError("InvalidOptionsError", "entry is required")
+    end
+
+    local final_out_dir = absolutePath(opts.out or defaultOut(entry))
+    local location_err = validateOutputLocation(final_out_dir)
+    if location_err then
+        return location_err
+    end
+
     if type(io.popen) ~= "function" then
         return makeError("ToolchainError", "io.popen is required to build onedir bundles")
     end
@@ -733,7 +1134,6 @@ function M.bundleOnedir(opts)
         if not linuxHost() then
             return makeError("UnsupportedPlatformError", "windows onedir bundling requires a Linux host with MinGW")
         end
-        local prefix_err
         -- Convention: success is (nil, data); failure is a single error table.
         local windows_prefix_error
         windows_prefix_error, windows_lua = validateWindowsLuaPrefix(profile.lua_prefix)
@@ -746,7 +1146,16 @@ function M.bundleOnedir(opts)
                 output = cc_output,
             })
         end
+        local wine_ok, wine_output = commandOutput("wine --version")
+        if not wine_ok then
+            return makeError("ToolchainError", "Windows onedir bundling requires Wine for the linked Lua ABI probe", {
+                output = wine_output,
+            })
+        end
     elseif profile.target_os == "macos" then
+        if not macosHost() then
+            return makeError("UnsupportedPlatformError", "macos onedir bundling requires a macOS host")
+        end
         local prefix_err = validateLuaPrefix(profile.lua_prefix)
         if prefix_err then
             return prefix_err
@@ -759,18 +1168,21 @@ function M.bundleOnedir(opts)
         return makeError("UnsupportedPlatformError", "unsupported onedir target: " .. tostring(profile.target_os))
     end
 
-    local manifest = opts.manifest
-    local dependencies = opts.dependencies or { scripts = {}, libraries = {} }
-    local entry = opts.entry
-    if type(manifest) ~= "table" then
-        return makeError("InvalidOptionsError", "manifest is required")
-    end
-    if type(entry) ~= "string" or entry == "" then
-        return makeError("InvalidOptionsError", "entry is required")
-    end
-
-    local final_out_dir = absolutePath(opts.out or defaultOut(entry))
     local exe_name = executableName(final_out_dir, entry, profile)
+    local exe_valid, exe_reason = validateTargetRelative(exe_name, profile.target_os)
+    if not exe_valid then
+        return makeError("InvalidOptionsError", "Executable name is not portable for the target: " .. exe_name, {
+            target_path = exe_name,
+            target_os = profile.target_os,
+            reason = exe_reason,
+        })
+    end
+    if targetKey(exe_name, profile.target_os) == targetKey(".luai", profile.target_os) then
+        return makeError("InvalidOptionsError", "Executable name collides with the .luai metadata directory", {
+            target_path = exe_name,
+            target_os = profile.target_os,
+        })
+    end
     local allowed_generated_entries = {
         [".luai"] = true,
         [exe_name] = true,
@@ -778,15 +1190,22 @@ function M.bundleOnedir(opts)
     if windows_lua then
         allowed_generated_entries[windows_lua.dll_name] = true
     end
+    local output_err = validateOutputDirectory(final_out_dir, allowed_generated_entries)
+    if output_err then
+        return output_err
+    end
     local output_lock, lock_err = acquireOutputLock(final_out_dir)
     if not output_lock then
         return lock_err
     end
-    local output_err = validateOutputDirectory(final_out_dir, allowed_generated_entries)
+    output_err = validateOutputDirectory(final_out_dir, allowed_generated_entries)
     if output_err then
         return releaseOutputLock(output_lock, output_err)
     end
-    local output_snapshot = captureOutputSnapshot(final_out_dir)
+    local output_snapshot, snapshot_err = captureOutputSnapshot(final_out_dir)
+    if not output_snapshot then
+        return releaseOutputLock(output_lock, snapshot_err)
+    end
 
     local out_dir, stage_err = createStagingDirectory(final_out_dir)
     if not out_dir then
@@ -812,12 +1231,18 @@ function M.bundleOnedir(opts)
         return abandon(err)
     end
 
+    local source_hashes, source_hash_err = manifestSourceHashes(manifest)
+    if not source_hashes then
+        return abandon(source_hash_err)
+    end
     local lua_names, native_names = traceModuleMaps(opts.trace or manifest.trace or {})
     local c_source
     local ok_generate, generated = pcall(launcher.generateSource, {
         entry = entry,
         dependencies = dependencies,
         module_names = lua_names,
+        source_hashes = source_hashes,
+        source_hash_algorithm = manifest.hash_algorithm,
         native_dir = ".luai/native",
     })
     if not ok_generate then
@@ -833,51 +1258,61 @@ function M.bundleOnedir(opts)
     local native_owners = {}
     for _, path in ipairs(dependencies.libraries or {}) do
         local normalized = normalizePath(path)
-        local destinations, dest_err = nativeDestinations(normalized, native_names[normalized], native_dir)
+        local canonical = normalizePath(absolutePath(path))
+        local expected_hash = source_hashes[canonical]
+        if expected_hash == nil then
+            return abandon(makeError("InvalidManifestError", "Manifest is missing a native source hash", {
+                source_path = canonical,
+            }))
+        end
+        local destinations, dest_err = nativeDestinations(
+            normalized,
+            native_names[canonical] or native_names[normalized],
+            native_dir,
+            profile.target_os
+        )
         if not destinations then
             return abandon(dest_err)
         end
         for _, destination in ipairs(destinations) do
-            local owner = native_owners[destination]
-            if owner and owner ~= normalized then
+            local destination_key = targetKey(destination, profile.target_os)
+            local owner = native_owners[destination_key]
+            if owner and (owner.source ~= canonical or owner.path ~= destination) then
                 return abandon(makeError("DuplicateModuleError", "Duplicate native destination: " .. destination, {
                     destination_path = destination,
-                    first_source = owner,
-                    second_source = normalized,
+                    first_destination = owner.path,
+                    first_source = owner.source,
+                    second_source = canonical,
+                    target_os = profile.target_os,
                 }))
             end
-            native_owners[destination] = normalized
-            err = copyFile(normalized, destination)
+            native_owners[destination_key] = {
+                source = canonical,
+                path = destination,
+            }
+            err = copyFile(
+                normalized,
+                destination,
+                expected_hash,
+                manifest.hash_algorithm
+            )
             if err then
                 return abandon(err)
             end
         end
     end
 
-    local compile_cmd
-    if profile.target_os == "windows" then
-        compile_cmd = table.concat({
-            shellQuote(windowsCompiler()),
-            shellQuote(c_path),
-            "-I" .. shellQuote(windows_lua.include_dir),
-            "-L" .. shellQuote(windows_lua.dll_dir),
-            "-o",
-            shellQuote(exe_path),
-            "-static-libgcc",
-            "-l" .. windows_lua.library_name,
-        }, " ")
-    elseif profile.target_os == "macos" then
-        compile_cmd = table.concat({
-            "cc",
-            shellQuote(c_path),
-            "-I" .. shellQuote(profile.lua_prefix .. "/include"),
-            "-o",
-            shellQuote(exe_path),
-            "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
-            shellQuote(profile.lua_prefix .. "/lib/liblua.a"),
-            "-lm",
-        }, " ")
-    else
+    local linux_tokens
+    if profile.target_os == "linux" then
+        local version_ok, lua_version = commandOutput("pkg-config --modversion lua")
+        lua_version = tostring(lua_version or ""):gsub("%s+$", "")
+        local lua54 = lua_version == "5.4"
+            or lua_version:match("^5%.4[%.%-%+][0-9A-Za-z%.%-%+]*$") ~= nil
+        if not version_ok or not lua54 then
+            return abandon(makeError("ToolchainError", "pkg-config must resolve the Lua 5.4 ABI", {
+                version = lua_version,
+            }))
+        end
         local pkg_ok, pkg_flags = commandOutput("pkg-config --cflags --libs lua")
         if not pkg_ok then
             return abandon(makeError("ToolchainError", "pkg-config cannot find lua", {
@@ -885,19 +1320,50 @@ function M.bundleOnedir(opts)
             }))
         end
 
-        local tokens, token_err = sanitizePkgConfigFlags(pkg_flags:gsub("%s+$", ""))
-        if not tokens then
+        local token_err
+        linux_tokens, token_err = sanitizePkgConfigFlags(pkg_flags:gsub("%s+$", ""))
+        if not linux_tokens then
             return abandon(token_err)
         end
-        compile_cmd = table.concat({
+    end
+
+    local function compileCommand(source_path, output_path)
+        if profile.target_os == "windows" then
+            return table.concat({
+                shellQuote(windowsCompiler()),
+                shellQuote(source_path),
+                "-I" .. shellQuote(windows_lua.include_dir),
+                "-L" .. shellQuote(windows_lua.dll_dir),
+                "-o",
+                shellQuote(output_path),
+                "-static-libgcc",
+                "-Wl,--no-insert-timestamp",
+                "-l" .. windows_lua.library_name,
+            }, " ")
+        end
+        if profile.target_os == "macos" then
+            return table.concat({
+                "cc",
+                shellQuote(source_path),
+                "-I" .. shellQuote(profile.lua_prefix .. "/include"),
+                "-o",
+                shellQuote(output_path),
+                "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
+                shellQuote(profile.lua_prefix .. "/lib/liblua.a"),
+                "-lm",
+            }, " ")
+        end
+        return table.concat({
             "cc",
-            shellQuote(c_path),
+            shellQuote(source_path),
             "-o",
-            shellQuote(exe_path),
+            shellQuote(output_path),
             "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
-            table.concat(tokens, " "),
+            table.concat(linux_tokens, " "),
         }, " ")
     end
+
+    local compile_cmd = compileCommand(c_path, exe_path)
     local compile_ok, compile_output = commandOutput(compile_cmd)
     if not compile_ok then
         return abandon(makeError("CompilationFailedError", "C launcher compilation failed", {
@@ -907,7 +1373,13 @@ function M.bundleOnedir(opts)
     end
 
     if profile.target_os ~= "windows" then
-        commandOutput("chmod +x " .. shellQuote(exe_path))
+        local chmod_ok, chmod_output = commandOutput("chmod +x " .. shellQuote(exe_path))
+        if not chmod_ok then
+            return abandon(makeError("FilesystemError", "Cannot mark launcher executable", {
+                path = exe_path,
+                output = chmod_output,
+            }))
+        end
     end
 
     if profile.target_os == "windows" then
@@ -917,6 +1389,16 @@ function M.bundleOnedir(opts)
             return abandon(err)
         end
         local native_dll = normalizePath(native_dir .. "/" .. windows_lua.dll_name)
+        if pathExists(native_dll) or isSymlink(native_dll) then
+            return abandon(makeError(
+                "DuplicateModuleError",
+                "Lua runtime destination collides with a native module",
+                {
+                    source_path = normalizePath(windows_lua.dll_path),
+                    destination_path = native_dll,
+                }
+            ))
+        end
         err = copyFile(windows_lua.dll_path, native_dll)
         if err then
             return abandon(err)
@@ -942,17 +1424,84 @@ function M.bundleOnedir(opts)
         manifest.launcher.lua_runtime = runtime_record
     end
 
+    local abi_probe_c = normalizePath(build_dir .. "/lua-abi-probe.c")
+    local abi_probe_exe = normalizePath(
+        build_dir .. "/lua-abi-probe" .. (profile.target_os == "windows" and ".exe" or "")
+    )
+    err = writeFile(abi_probe_c, abiProbeSource())
+    if err then
+        return abandon(err)
+    end
+    local abi_compile_cmd = compileCommand(abi_probe_c, abi_probe_exe)
+    local abi_compile_ok, abi_compile_output = commandOutput(abi_compile_cmd)
+    if not abi_compile_ok then
+        return abandon(makeError("ToolchainError", "Cannot compile the linked Lua runtime ABI probe", {
+            command = abi_compile_cmd,
+            output = abi_compile_output,
+        }))
+    end
+    if profile.target_os ~= "windows" then
+        local probe_mode_ok, probe_mode_output = commandOutput(
+            "chmod +x " .. shellQuote(abi_probe_exe)
+        )
+        if not probe_mode_ok then
+            return abandon(makeError("FilesystemError", "Cannot mark the Lua ABI probe executable", {
+                path = abi_probe_exe,
+                output = probe_mode_output,
+            }))
+        end
+    end
+    local abi_probe_runtime
+    if profile.target_os == "windows" then
+        abi_probe_runtime = normalizePath(build_dir .. "/" .. windows_lua.dll_name)
+        err = copyFile(windows_lua.dll_path, abi_probe_runtime)
+        if err then return abandon(err) end
+    end
+    local abi_run_cmd
+    if profile.target_os == "windows" then
+        abi_run_cmd = "WINEDEBUG=-all wine " .. shellQuote(abi_probe_exe)
+    elseif profile.target_os == "linux" then
+        local library_path = native_dir
+        local inherited_library_path = os.getenv("LD_LIBRARY_PATH")
+        if inherited_library_path and inherited_library_path ~= "" then
+            library_path = library_path .. ":" .. inherited_library_path
+        end
+        abi_run_cmd = "LD_LIBRARY_PATH=" .. shellQuote(library_path)
+            .. " " .. shellQuote(abi_probe_exe)
+    else
+        abi_run_cmd = shellQuote(abi_probe_exe)
+    end
+    local abi_ok, abi_output = commandOutput(abi_run_cmd)
+    if not abi_ok then
+        return abandon(makeError("ToolchainError", "The linked Lua runtime is not the Lua 5.4 ABI", {
+            command = abi_run_cmd,
+            output = abi_output,
+        }))
+    end
+    local removed_probe = os.remove(abi_probe_exe)
+    local removed_probe_source = os.remove(abi_probe_c)
+    local removed_probe_runtime = not abi_probe_runtime or os.remove(abi_probe_runtime)
+    if not removed_probe or not removed_probe_source or not removed_probe_runtime then
+        return abandon(makeError("FilesystemError", "Cannot remove the completed Lua ABI probe", {
+            executable = abi_probe_exe,
+            source = abi_probe_c,
+            runtime = abi_probe_runtime,
+        }))
+    end
+
+    err = verifyManifestSources(manifest)
+    if err then
+        return abandon(err)
+    end
     err = writeFile(normalizePath(luai_dir .. "/manifest.lua"), serializeManifest(manifest))
     if err then
         return abandon(err)
     end
-    local generated_files = {
-        { path = exe_name },
-    }
-    if windows_lua then
-        generated_files[#generated_files + 1] = { path = windows_lua.dll_name }
+    err = validateTargetTree(out_dir, profile.target_os)
+    if err then
+        return abandon(err)
     end
-    err = writeGeneratedMarker(out_dir, generated_files, final_out_dir)
+    err = writeGeneratedMarker(out_dir, final_out_dir)
     if err then
         return abandon(err)
     end

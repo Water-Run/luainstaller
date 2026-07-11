@@ -29,6 +29,11 @@ A Linux x86_64 bundle is not a Windows or Linux ARM64 bundle. A Lua 5.4 native
 module is not loadable by a Lua 5.3 runtime merely because its filename is the
 same.
 
+The package metadata allows Lua >= 5.4 and < 5.5, but every concrete toolchain
+component must identify as exactly Lua 5.4: the analysis interpreter, runtime
+tracer, headers, `pkg-config` record, linked runtime, and native modules all
+share that major/minor ABI. LuaJIT is not a supported substitute.
+
 [#platforms-profiles]
 == Build profiles
 
@@ -46,12 +51,19 @@ same.
 
 |Windows x86_64
 |MinGW launcher plus Lua DLL beside executable and under `.luai/native`
-|Linux host, x86_64 MinGW compiler, and Windows Lua prefix
+|Linux host, x86_64 MinGW compiler, Wine, and Windows Lua prefix
 |===
 
 `--target-os` selects one of these profiles. It does not cross-compile Lua C
 modules found in the source environment; those modules must already match the
 target.
+
+All generated launcher sources contain a `LUA_VERSION_NUM == 504` compile-time
+guard. Supplying older or newer headers stops at compilation even if a prefix
+has the expected filenames. The bundler also executes a program linked to the
+selected runtime and requires its `_VERSION` to be exactly `Lua 5.4`; Windows
+uses Wine for this pre-publication probe. The launcher repeats that runtime
+check on every execution.
 
 [#platforms-linux]
 == Linux
@@ -66,6 +78,10 @@ The Linux compiler command is derived from `pkg-config` and adds:
 After compilation, `ldd` is used to locate the linked `liblua`. A static-only
 Lua installation is insufficient for this profile because there is no shared
 runtime to copy.
+
+Before compilation, `pkg-config --modversion lua` must parse as 5.4. Compiler
+flags from a differently named or mismatched Lua package are rejected rather
+than trusted based on `-llua` alone.
 
 For a custom Lua build, expose a temporary or permanent `lua.pc`:
 
@@ -91,6 +107,11 @@ The macOS profile requires a static Lua prefix:
 └── lib/liblua.a
 ----
 
+The launcher and onefile extractor retain the linker's content-derived
+`LC_UUID`. Current macOS releases require that load command at execution time;
+using the linker's deterministic default also preserves repeated-build byte
+identity when the inputs and output basename are unchanged.
+
 [source,sh]
 ----
 luainstaller build --dir app/main.lua \
@@ -110,12 +131,13 @@ or notarize output.
 == Windows
 
 The Windows profile currently targets x86_64 from Linux using MinGW. The prefix
-must provide headers and one of these DLL names:
+must provide headers and one of these ABI-specific DLL locations:
 
 * `bin/lua54.dll`;
-* `lua54.dll`;
-* `bin/lua.dll`;
-* `lua.dll`.
+* `lua54.dll`.
+
+A generic `lua.dll` is not accepted because its filename does not prove the
+required 5.4 import ABI.
 
 [source,sh]
 ----
@@ -129,9 +151,10 @@ Set `LUAI_WINDOWS_CC` to override `x86_64-w64-mingw32-gcc`. The Lua DLL import
 name, import library behavior, and native modules must be compatible with that
 compiler family.
 
-Wine is useful for fast feedback, but a Windows VM remains part of the release
-gate. Windows command-line quoting, DLL lookup, filesystem semantics, and
-endpoint security behavior can differ from Wine.
+Wine is required for the build-time linked-runtime probe and fast feedback, but
+a Windows VM remains part of the release gate. Windows command-line quoting,
+DLL lookup, filesystem semantics, and endpoint security behavior can differ
+from Wine.
 
 Generated Windows launchers and the onefile extractor currently use the narrow
 Win32 process/path APIs. They preserve quoting for ACP-representable arguments,
@@ -139,6 +162,13 @@ but executable paths, temporary paths, or arguments containing characters that
 cannot be represented by the active Windows ANSI code page are unsupported.
 Use ASCII-compatible paths and arguments until the generated runtime moves to
 the wide-character Win32 APIs.
+
+Target-relative bundle paths also reject control bytes, drive/ADS syntax,
+Windows reserved device names, trailing dots/spaces, and case-folded collisions.
+macOS and Windows destination collisions are checked case-insensitively even
+when the build host filesystem is case-sensitive. Non-ASCII target-relative
+paths are rejected for these two targets because byte-wise Lua case conversion
+cannot safely model their filesystem Unicode normalization and case folding.
 
 [#platforms-native]
 == Native Lua C modules
@@ -181,7 +211,7 @@ load errors occur when the application first requires the module.
 
 |Linux lab host
 |x86_64
-|Full local suite, source install, clean-environment onedir run
+|All four local suites, source install, clean-environment onedir run
 
 |NVIDIA DGX Spark
 |aarch64
@@ -191,8 +221,8 @@ and executable-mode repair
 
 |Mac Studio
 |arm64
-|Lua 5.4.8, native LuaRocks modules, onedir/onefile application matrix, Web
-service probe
+|Lua 5.4.8, pinned native LuaRocks modules, portable core suites,
+onedir/onefile application matrix, Web service probe
 
 |Wine
 |Windows x86_64

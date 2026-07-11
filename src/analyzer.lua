@@ -1,7 +1,7 @@
 --[[
 Dependency analyzer for Lua scripts.
 Provides comprehensive static analysis including require
-extraction via a state-machine lexer, module path resolution
+extraction via a token-aware lexer, module path resolution
 across package.path and package.cpath, native library
 detection (.so, .dll, .dylib), and recursive dependency
 graph construction with cycle detection and topological sort.
@@ -16,6 +16,8 @@ Updated:
     2026-07-11
 ]]
 
+local fs = require("luainstaller.fs")
+local hash = require("luainstaller.hash")
 local path = require("luainstaller.path")
 
 -- ============================================================
@@ -51,7 +53,6 @@ local BUILTIN_MODULES = {
     ["string"]    = true,
     ["table"]     = true,
     ["utf8"]      = true,
-    ["bit32"]     = true,
 }
 
 --@description: Default maximum dependency count
@@ -70,12 +71,7 @@ local pathExtension = path.extension
 --@param path: string - File path to probe
 --@return: boolean - True when the file can be opened for reading
 local function fileExists(path)
-    local handle = io.open(path, "r")
-    if handle then
-        handle:close()
-        return true
-    end
-    return false
+    return fs.isRegularFile(path)
 end
 
 
@@ -85,15 +81,15 @@ end
 --@return: string - File content
 --@raise: error table when the file cannot be opened
 local function readFileContent(path)
-    local handle = io.open(path, "rb")
-    if not handle then
+    local content, read_err = fs.readRegularFile(path)
+    if content == nil then
         error({
             type    = "ScriptNotFoundError",
             message = string.format("Cannot read file: %s", path),
+            script_path = path,
+            cause = read_err,
         })
     end
-    local content = handle:read("*a")
-    handle:close()
     return content
 end
 
@@ -187,32 +183,42 @@ function errors.moduleNotFound(module_name, script_path, searched_paths)
     }
 end
 
--- ============================================================
--- Lexer State Enumeration
--- ============================================================
+function errors.luaSyntax(script_path, detail)
+    return {
+        type = "LuaSyntaxError",
+        message = string.format("Invalid Lua syntax in %s: %s", script_path, tostring(detail)),
+        script_path = script_path,
+        detail = tostring(detail),
+    }
+end
 
---[[
-State values for the Lua source lexer state machine.
+local function prepareSource(source)
+    source = tostring(source or "")
+    if source:sub(1, 3) == "\239\187\191" then
+        source = source:sub(4)
+    end
+    if source:sub(1, 2) == "#!" then
+        local newline_start, newline_end = source:find("\r\n", 1, true)
+        if not newline_start then
+            newline_start, newline_end = source:find("[\r\n]")
+        end
+        if newline_start then
+            source = "\n" .. source:sub(newline_end + 1)
+        else
+            source = ""
+        end
+    end
+    return source
+end
 
-Enum:
-    LexerState
-Values:
-    NORMAL: Default code context
-    IN_STRING_SINGLE: Inside a single-quoted string literal
-    IN_STRING_DOUBLE: Inside a double-quoted string literal
-    IN_LONG_STRING: Inside a long bracket string literal
-    IN_LINE_COMMENT: Inside a single-line comment
-    IN_BLOCK_COMMENT: Inside a block comment
-]]
-local LexerState = {
-    NORMAL           = 1,
-    IN_STRING_SINGLE = 2,
-    IN_STRING_DOUBLE = 3,
-    IN_LONG_STRING   = 4,
-    IN_LINE_COMMENT  = 5,
-    IN_BLOCK_COMMENT = 6,
-}
-
+local function validateSource(source, script_path)
+    local prepared = prepareSource(source)
+    local loader, syntax_err = load(prepared, "@" .. tostring(script_path), "t", {})
+    if not loader then
+        error(errors.luaSyntax(script_path, syntax_err))
+    end
+    return prepared
+end
 
 -- ============================================================
 -- LuaLexer
@@ -220,7 +226,7 @@ local LexerState = {
 
 --[[
 Lightweight Lua lexer focused on extracting static require
-statements. Uses a state machine to correctly skip strings
+statements. Uses token-aware scanning to correctly skip strings
 and comments. Supports direct require calls, pcall-wrapped
 requires, and all Lua string literal forms.
 
@@ -232,8 +238,6 @@ Fields:
     file_path: string - Origin file path for diagnostics
     pos: number - Current byte position (1-based)
     line: number - Current line number
-    state: number - Current LexerState value
-    bracket_level: number - Active long bracket level
 ]]
 local LuaLexer = {}
 LuaLexer.__index = LuaLexer
@@ -245,14 +249,14 @@ LuaLexer.__index = LuaLexer
 --@return: LuaLexer - New lexer instance
 --@usage: local lexer = LuaLexer.new(code, "main.lua")
 function LuaLexer.new(source_code, file_path)
+    source_code        = prepareSource(source_code)
     local self         = setmetatable({}, LuaLexer)
     self.source        = source_code
     self.source_len    = #source_code
     self.file_path     = file_path
     self.pos           = 1
     self.line          = 1
-    self.state         = LexerState.NORMAL
-    self.bracket_level = 0
+    self.previous_token = nil
     return self
 end
 
@@ -363,66 +367,72 @@ function LuaLexer:checkClosingBracket(expected_level)
         and level == expected_level
 end
 
---@description: Advance past whitespace characters while tracking line numbers
+--@description: Advance one Lua source character while normalizing line counts
+--@param self: LuaLexer - Lexer instance
+function LuaLexer:advanceCharacter()
+    local ch = self:currentChar()
+    if ch == "\r" then
+        self.pos = self.pos + 1
+        if self:currentChar() == "\n" then
+            self.pos = self.pos + 1
+        end
+        self.line = self.line + 1
+    elseif ch == "\n" then
+        self.pos = self.pos + 1
+        self.line = self.line + 1
+    else
+        self.pos = self.pos + 1
+    end
+end
+
+--@description: Advance past all Lua whitespace while tracking line numbers
 --@param self: LuaLexer - Lexer instance
 function LuaLexer:skipWhitespace()
+    while self.pos <= self.source_len and self:currentChar():match("%s") do
+        self:advanceCharacter()
+    end
+end
+
+--@description: Skip a line or long-bracket comment at the current position
+--@param self: LuaLexer - Lexer instance
+function LuaLexer:skipComment()
+    if self:currentChar() ~= "-" or self:peekChar() ~= "-" then
+        return
+    end
+    local level = self:peekChar(2) == "[" and self:countBracketLevel(2) or -1
+    if level >= 0 then
+        self.pos = self.pos + 4 + level
+        while self.pos <= self.source_len do
+            if self:currentChar() == "]" and self:checkClosingBracket(level) then
+                self.pos = self.pos + 2 + level
+                return
+            end
+            self:advanceCharacter()
+        end
+        return
+    end
+
+    self.pos = self.pos + 2
     while self.pos <= self.source_len do
         local ch = self:currentChar()
-        if ch ~= " " and ch ~= "\t" and ch ~= "\n" and ch ~= "\r" then
-            break
-        end
-        if ch == "\n" then
-            self.line = self.line + 1
+        if ch == "\r" or ch == "\n" then
+            self:advanceCharacter()
+            return
         end
         self.pos = self.pos + 1
     end
 end
 
---@description: Update the lexer state machine for the current character
+--@description: Skip Lua whitespace and comments
 --@param self: LuaLexer - Lexer instance
---@param char: string - Current character
-function LuaLexer:updateState(char)
-    if self.state == LexerState.NORMAL then
-        if char == "-" and self:peekChar() == "-" then
-            if self:peekChar(2) == "[" then
-                local level = self:countBracketLevel(2)
-                if level >= 0 then
-                    self.state = LexerState.IN_BLOCK_COMMENT
-                    self.bracket_level = level
-                    return
-                end
-            end
-            self.state = LexerState.IN_LINE_COMMENT
-        elseif char == "'" then
-            self.state = LexerState.IN_STRING_SINGLE
-        elseif char == '"' then
-            self.state = LexerState.IN_STRING_DOUBLE
-        elseif char == "[" then
-            local level = self:countBracketLevel(0)
-            if level >= 0 then
-                self.state = LexerState.IN_LONG_STRING
-                self.bracket_level = level
-            end
-        end
-    elseif self.state == LexerState.IN_STRING_SINGLE then
-        if char == "'" and self:isNotEscaped() then
-            self.state = LexerState.NORMAL
-        end
-    elseif self.state == LexerState.IN_STRING_DOUBLE then
-        if char == '"' and self:isNotEscaped() then
-            self.state = LexerState.NORMAL
-        end
-    elseif self.state == LexerState.IN_LONG_STRING then
-        if char == "]" and self:checkClosingBracket(self.bracket_level) then
-            self.state = LexerState.NORMAL
-        end
-    elseif self.state == LexerState.IN_LINE_COMMENT then
-        if char == "\n" then
-            self.state = LexerState.NORMAL
-        end
-    elseif self.state == LexerState.IN_BLOCK_COMMENT then
-        if char == "]" and self:checkClosingBracket(self.bracket_level) then
-            self.state = LexerState.NORMAL
+function LuaLexer:skipTrivia()
+    while self.pos <= self.source_len do
+        if self:currentChar():match("%s") then
+            self:skipWhitespace()
+        elseif self:currentChar() == "-" and self:peekChar() == "-" then
+            self:skipComment()
+        else
+            return
         end
     end
 end
@@ -433,17 +443,17 @@ end
 --@return: string - Content of the string literal
 --@raise: DynamicRequireError on unterminated or concatenated strings
 function LuaLexer:extractStringLiteral(start_line)
+    local start_pos = self.pos
     local quote = self:currentChar()
     self.pos = self.pos + 1
-    local parts = {}
 
     while self.pos <= self.source_len do
         local ch = self:currentChar()
         if ch == quote and self:isNotEscaped() then
             self.pos = self.pos + 1
-            local raw = table.concat(parts)
+            local raw = self.source:sub(start_pos, self.pos - 1)
             local decoder, decode_err = load(
-                "return " .. quote .. raw .. quote,
+                "return " .. raw,
                 "=(luainstaller-require-literal)",
                 "t",
                 {}
@@ -461,19 +471,16 @@ function LuaLexer:extractStringLiteral(start_line)
                     "Invalid string literal in require"
                 ))
             end
-            self:checkNoConcatenation(start_line, result)
             return result
         end
         if ch == "\\" then
-            parts[#parts + 1] = ch
             self.pos = self.pos + 1
             if self.pos <= self.source_len then
-                parts[#parts + 1] = self:currentChar()
+                self:advanceCharacter()
             end
         else
-            parts[#parts + 1] = ch
+            self:advanceCharacter()
         end
-        self.pos = self.pos + 1
     end
 
     error(errors.dynamicRequire(
@@ -488,50 +495,40 @@ end
 --@return: string - Content of the long string literal
 --@raise: DynamicRequireError on unterminated strings
 function LuaLexer:extractLongStringLiteral(level, start_line)
+    local start_pos = self.pos
     self.pos = self.pos + 2 + level
-    local parts = {}
 
     while self.pos <= self.source_len do
         if self:currentChar() == "]" and self:checkClosingBracket(level) then
             self.pos = self.pos + 2 + level
-            local result = table.concat(parts)
-            self:checkNoConcatenation(start_line, result)
+            local raw = self.source:sub(start_pos, self.pos - 1)
+            local decoder, decode_err = load(
+                "return " .. raw,
+                "=(luainstaller-require-long-literal)",
+                "t",
+                {}
+            )
+            if not decoder then
+                error(errors.dynamicRequire(
+                    self.file_path, start_line,
+                    "Invalid long string literal in require: " .. tostring(decode_err)
+                ))
+            end
+            local ok, result = pcall(decoder)
+            if not ok or type(result) ~= "string" then
+                error(errors.dynamicRequire(
+                    self.file_path, start_line,
+                    "Invalid long string literal in require"
+                ))
+            end
             return result
         end
-        if self:currentChar() == "\n" then
-            self.line = self.line + 1
-        end
-        parts[#parts + 1] = self:currentChar()
-        self.pos = self.pos + 1
+        self:advanceCharacter()
     end
 
     error(errors.dynamicRequire(
         self.file_path, start_line, "Unterminated long string in require"
     ))
-end
-
---@description: Verify that no string concatenation operator follows the literal
---@param self: LuaLexer - Lexer instance
---@param start_line: number - Line where the require keyword appeared
---@param module_name: string - The extracted module name so far
---@raise: DynamicRequireError when concatenation is detected
-function LuaLexer:checkNoConcatenation(start_line, module_name)
-    local saved = self.pos
-    while self.pos <= self.source_len do
-        local ch = self:currentChar()
-        if ch ~= " " and ch ~= "\t" and ch ~= "\r" and ch ~= "\n" then
-            break
-        end
-        self.pos = self.pos + 1
-    end
-    if self.pos + 1 <= self.source_len
-        and self.source:sub(self.pos, self.pos + 1) == ".." then
-        error(errors.dynamicRequire(
-            self.file_path, start_line,
-            string.format("require('%s' .. ...) - concatenation unsupported", module_name)
-        ))
-    end
-    self.pos = saved
 end
 
 --@description: Parse a pcall(require, 'module') statement
@@ -541,8 +538,15 @@ function LuaLexer:parsePcallRequire()
     local saved_pos  = self.pos
     local saved_line = self.line
 
-    self.pos         = self.pos + #"pcall"
-    self:skipWhitespace()
+    if self.previous_token == "function"
+        or self.previous_token == "."
+        or self.previous_token == ":" then
+        self.pos = self.pos + #"pcall"
+        return nil
+    end
+
+    self.pos = self.pos + #"pcall"
+    self:skipTrivia()
 
     if self:currentChar() ~= "(" then
         self.pos  = saved_pos
@@ -550,25 +554,16 @@ function LuaLexer:parsePcallRequire()
         return nil
     end
     self.pos = self.pos + 1
-    self:skipWhitespace()
+    self:skipTrivia()
 
-    if self.pos + #"require" - 1 > self.source_len
-        or self.source:sub(self.pos, self.pos + #"require" - 1) ~= "require" then
+    if not self:matchKeyword("require") then
         self.pos  = saved_pos
         self.line = saved_line
         return nil
     end
-    local after_req = self.pos + #"require"
-    if after_req <= self.source_len then
-        local nxt = self.source:sub(after_req, after_req)
-        if nxt:match("[%w_.:]") then
-            self.pos  = saved_pos
-            self.line = saved_line
-            return nil
-        end
-    end
-    self.pos = after_req
-    self:skipWhitespace()
+    local require_line = self.line
+    self.pos = self.pos + #"require"
+    self:skipTrivia()
 
     if self:currentChar() ~= "," then
         self.pos  = saved_pos
@@ -576,7 +571,7 @@ function LuaLexer:parsePcallRequire()
         return nil
     end
     self.pos = self.pos + 1
-    self:skipWhitespace()
+    self:skipTrivia()
 
     local ch = self:currentChar()
     local module_name
@@ -591,17 +586,36 @@ function LuaLexer:parsePcallRequire()
     end
 
     if not module_name then
-        self.pos  = saved_pos
-        self.line = saved_line
-        return nil
+        error(errors.dynamicRequire(
+            self.file_path,
+            require_line,
+            "pcall(require, <computed>)"
+        ))
     end
 
-    self:skipWhitespace()
+    self:skipTrivia()
+    if self.source:sub(self.pos, self.pos + 1) == ".." then
+        error(errors.dynamicRequire(
+            self.file_path,
+            require_line,
+            string.format("pcall(require, '%s' .. ...)", module_name)
+        ))
+    end
     if self:currentChar() == ")" then
         self.pos = self.pos + 1
+    elseif self:currentChar() ~= "," then
+        error(errors.dynamicRequire(
+            self.file_path,
+            require_line,
+            "pcall(require, <computed>)"
+        ))
     end
 
-    return module_name
+    return {
+        name = module_name,
+        line = require_line,
+        optional = true,
+    }
 end
 
 --@description: Parse a require statement and extract the module name
@@ -612,9 +626,15 @@ function LuaLexer:parseRequire()
     local saved_pos  = self.pos
     local saved_line = self.line
 
-    self.pos         = self.pos + #"require"
-    local after_keyword = self.pos
-    self:skipWhitespace()
+    if self.previous_token == "function"
+        or self.previous_token == "."
+        or self.previous_token == ":" then
+        self.pos = self.pos + #"require"
+        return nil
+    end
+
+    self.pos = self.pos + #"require"
+    self:skipTrivia()
 
     local ch = self:currentChar()
     local has_paren = false
@@ -622,44 +642,47 @@ function LuaLexer:parseRequire()
     if ch == "(" then
         has_paren = true
         self.pos = self.pos + 1
-        self:skipWhitespace()
+        self:skipTrivia()
         ch = self:currentChar()
     end
 
+    local module_name
     if ch == '"' or ch == "'" then
-        local module_name = self:extractStringLiteral(saved_line)
-        if has_paren then
-            self:skipWhitespace()
-            if self:currentChar() == ")" then
-                self.pos = self.pos + 1
-            end
-        end
-        return module_name
-    end
-
-    if ch == "[" then
+        module_name = self:extractStringLiteral(saved_line)
+    elseif ch == "[" then
         local level = self:countBracketLevel(0)
         if level >= 0 then
-            local module_name = self:extractLongStringLiteral(level, saved_line)
-            if has_paren then
-                self:skipWhitespace()
-                if self:currentChar() == ")" then
-                    self.pos = self.pos + 1
-                end
-            end
-            return module_name
+            module_name = self:extractLongStringLiteral(level, saved_line)
         end
     end
 
-    local before_keyword = self.source:sub(1, saved_pos - 1)
-    local line_start = before_keyword:match(".*\n()") or 1
-    local statement_prefix = self.source:sub(line_start, saved_pos - 1)
-    if statement_prefix:match("^%s*local%s+$")
-        or (not has_paren
-            and before_keyword:match("local%s+require%s*=%s*$")
-            and (self.source:sub(after_keyword):match("^%s*$")
-                or self.source:sub(after_keyword):match("^%s*[\r\n;]")
-                or self.source:sub(after_keyword):match("^%s*%-%-"))) then
+    if module_name then
+        if has_paren then
+            self:skipTrivia()
+            if self.source:sub(self.pos, self.pos + 1) == ".." then
+                error(errors.dynamicRequire(
+                    self.file_path,
+                    saved_line,
+                    string.format("require('%s' .. ...)", module_name)
+                ))
+            end
+            if self:currentChar() == ")" then
+                self.pos = self.pos + 1
+            elseif self:currentChar() ~= "," then
+                error(errors.dynamicRequire(
+                    self.file_path,
+                    saved_line,
+                    "require(<computed>)"
+                ))
+            end
+        end
+        return {
+            name = module_name,
+            line = saved_line,
+        }
+    end
+
+    if not has_paren and ch ~= "{" then
         return nil
     end
 
@@ -681,33 +704,45 @@ function LuaLexer:extractRequires()
 
     while self.pos <= self.source_len do
         local char = self:currentChar()
-        self:updateState(char)
-
-        if self.state == LexerState.NORMAL then
-            if self:matchKeyword("pcall") then
-                local ok, mod = pcall(self.parsePcallRequire, self)
-                if not ok and type(mod) == "table" and mod.type then
-                    error(mod)
-                end
-                if ok and mod then
-                    result[#result + 1] = { name = mod, line = self.line, optional = true }
-                    goto next_iter
-                end
+        if char:match("%s") then
+            self:skipWhitespace()
+        elseif char == "-" and self:peekChar() == "-" then
+            self:skipComment()
+        elseif char == "'" or char == '"' then
+            self:extractStringLiteral(self.line)
+            self.previous_token = "string"
+        elseif char == "[" and self:countBracketLevel(0) >= 0 then
+            self:extractLongStringLiteral(self:countBracketLevel(0), self.line)
+            self.previous_token = "string"
+        elseif self:matchKeyword("pcall") then
+            local pcall_pos = self.pos
+            local record = self:parsePcallRequire()
+            if record then
+                result[#result + 1] = record
+            elseif self.pos == pcall_pos then
+                self.pos = self.pos + #"pcall"
             end
-            if self:matchKeyword("require") then
-                local mod = self:parseRequire()
-                if mod then
-                    result[#result + 1] = { name = mod, line = self.line }
-                end
-                goto next_iter
+            self.previous_token = "pcall"
+        elseif self:matchKeyword("require") then
+            local record = self:parseRequire()
+            if record then
+                result[#result + 1] = record
             end
+            self.previous_token = "require"
+        elseif char:match("[%a_]") then
+            local identifier = self.source:match("^([%a_][%w_]*)", self.pos)
+            self.previous_token = identifier
+            self.pos = self.pos + #identifier
+        elseif self.source:sub(self.pos, self.pos + 2) == "..." then
+            self.previous_token = "..."
+            self.pos = self.pos + 3
+        elseif self.source:sub(self.pos, self.pos + 1) == ".." then
+            self.previous_token = ".."
+            self.pos = self.pos + 2
+        else
+            self.previous_token = char
+            self:advanceCharacter()
         end
-
-        if char == "\n" then
-            self.line = self.line + 1
-        end
-        self.pos = self.pos + 1
-        ::next_iter::
     end
 
     return result
@@ -799,11 +834,16 @@ function ModuleResolver:buildSearchTemplates()
 
     if IS_WINDOWS then
         addNative(base .. "/?.dll")
+        addNative(base .. "/?/init.dll")
         addNative(base .. "/lib/?.dll")
+        addNative(base .. "/lib/?/init.dll")
     else
         addNative(base .. "/?.so")
+        addNative(base .. "/?/init.so")
         addNative(base .. "/lib/?.so")
+        addNative(base .. "/lib/?/init.so")
         addNative(base .. "/?.dylib")
+        addNative(base .. "/?/init.dylib")
     end
 end
 
@@ -892,12 +932,27 @@ function ModuleResolver:buildCandidates(module_name, from_script)
             path     = expandTemplate(tpl),
         }
     end
-    for _, tpl in ipairs(self.native_templates) do
-        candidates[#candidates + 1] = {
-            type     = "native",
-            template = tpl,
-            path     = expandTemplate(tpl),
-        }
+    local native_seen = {}
+    local function addNativeCandidates(module_fragment, croot)
+        for _, tpl in ipairs(self.native_templates) do
+            local candidate_path = (tpl:gsub("%?", function()
+                return module_fragment
+            end))
+            if not native_seen[candidate_path] then
+                native_seen[candidate_path] = true
+                candidates[#candidates + 1] = {
+                    type     = "native",
+                    template = tpl,
+                    path     = candidate_path,
+                    croot    = croot and true or nil,
+                }
+            end
+        end
+    end
+    addNativeCandidates(module_path, false)
+    local root_name = module_name:match("^([^%.]+)%.")
+    if root_name then
+        addNativeCandidates(root_name, true)
     end
     return candidates
 end
@@ -1009,6 +1064,7 @@ function DependencyAnalyzer.new(entry_script, max_dependencies)
     self.dep_count        = 0
     self.native_libs      = {}
     self.native_set       = {}
+    self.source_hashes    = {}
     self.trace            = {}
     return self
 end
@@ -1035,6 +1091,7 @@ function DependencyAnalyzer:analyze()
     return {
         scripts   = self:generateManifest(),
         libraries = self.native_libs,
+        source_hashes = self.source_hashes,
     }
 end
 
@@ -1092,7 +1149,9 @@ function DependencyAnalyzer:analyzeRecursive(script_path)
         error(errors.scriptNotFound(script_path))
     end
 
-    local source_code = readFileContent(script_path)
+    local source_bytes = readFileContent(script_path)
+    self.source_hashes[normalizePath(script_path)] = hash.sha256(source_bytes)
+    local source_code = validateSource(source_bytes, script_path)
     local lexer = LuaLexer.new(source_code, script_path)
     local requires = lexer:extractRequires()
 
@@ -1184,6 +1243,8 @@ M.LuaLexer           = LuaLexer
 M.ModuleResolver     = ModuleResolver
 M.DependencyAnalyzer = DependencyAnalyzer
 M.errors             = errors
+M.prepareSource      = prepareSource
+M.validateSource     = validateSource
 
 
 --@description: Analyze Lua script dependencies starting from an entry script

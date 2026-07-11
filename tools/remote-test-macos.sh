@@ -10,7 +10,7 @@ LUAROCKS_PREFIX=${LUAROCKS_PREFIX:-"/tmp/luainstaller-mac-luarocks"}
 ROCKTREE=${ROCKTREE:-"/tmp/luainstaller-mac-rocktree"}
 PREFIX=${PREFIX:-"/tmp/luainstaller-mac-prefix"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
-PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 LUA_TARBALL=lua-5.4.8.tar.gz
 LUA_URL=https://www.lua.org/ftp/$LUA_TARBALL
 LUAROCKS_TARBALL=luarocks-3.12.2.tar.gz
@@ -19,6 +19,33 @@ LSQLITE3_ZIP=lsqlite3_v096.zip
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
 LSQLITE3_URL='https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6'
 SQLITE_URL='https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip'
+LUA_SHA256=4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
+LUAROCKS_SHA256=b0e0c85205841ddd7be485f53d6125766d18a81d226588d2366931e9a1484492
+LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
+SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
+
+require_safe_tmp_path() {
+    path=$1
+    case "$path" in
+        /tmp/luainstaller-?*) ;;
+        *)
+            echo "unsafe temporary path: $path" >&2
+            exit 2
+            ;;
+    esac
+    case "$path" in
+        *[!A-Za-z0-9._/-]*)
+            echo "unsafe characters in temporary path: $path" >&2
+            exit 2
+            ;;
+    esac
+    case "$path" in
+        *'/../'*|*'/..'|*'/./'*|*'/.'|*'//'*)
+            echo "non-normalized temporary path: $path" >&2
+            exit 2
+            ;;
+    esac
+}
 
 quote_remote() {
     printf "'"
@@ -29,17 +56,32 @@ quote_remote() {
 stage_source() {
     name=$1
     url=$2
-    mkdir -p "$SOURCE_CACHE"
-    if [ ! -s "$SOURCE_CACHE/$name" ]; then
-        curl -fL --connect-timeout 20 --max-time 180 -o "$SOURCE_CACHE/$name" "$url"
+    expected=$3
+    destination=$SOURCE_CACHE/$name
+    if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -f "$destination" ]; }; then
+        echo "unsafe source-cache entry: $destination" >&2
+        exit 1
+    fi
+    if [ -f "$destination" ] \
+        && ! printf '%s  %s\n' "$expected" "$destination" | sha256sum -c - >/dev/null 2>&1; then
+        rm -f "$destination"
+    fi
+    if [ ! -f "$destination" ]; then
+        part=$destination.part.$$
+        rm -f "$part"
+        trap 'rm -f "$part"' EXIT HUP INT TERM
+        curl -fL --connect-timeout 20 --max-time 180 -o "$part" "$url"
+        printf '%s  %s\n' "$expected" "$part" | sha256sum -c -
+        mv "$part" "$destination"
+        trap - EXIT HUP INT TERM
     fi
 }
 
 stage_macos_sources() {
-    stage_source "$LUA_TARBALL" "$LUA_URL"
-    stage_source "$LUAROCKS_TARBALL" "$LUAROCKS_URL"
-    stage_source "$LSQLITE3_ZIP" "$LSQLITE3_URL"
-    stage_source "$SQLITE_ZIP" "$SQLITE_URL"
+    stage_source "$LUA_TARBALL" "$LUA_URL" "$LUA_SHA256"
+    stage_source "$LUAROCKS_TARBALL" "$LUAROCKS_URL" "$LUAROCKS_SHA256"
+    stage_source "$LSQLITE3_ZIP" "$LSQLITE3_URL" "$LSQLITE3_SHA256"
+    stage_source "$SQLITE_ZIP" "$SQLITE_URL" "$SQLITE_SHA256"
     scp -P "$BASTION_PORT" \
         "$SOURCE_CACHE/$LUA_TARBALL" \
         "$SOURCE_CACHE/$LUAROCKS_TARBALL" \
@@ -55,14 +97,40 @@ copy_tree_macos() {
     mac_host=$(quote_remote "$MAC_HOST")
     remote_root=$(quote_remote "$REMOTE_ROOT")
     mac_cmd=$(quote_remote "rm -rf $remote_root && mkdir -p $remote_root && tar -xf - -C $remote_root")
-    tar --exclude=.git -C "$PROJECT_ROOT" -cf - . \
-        | ssh -p "$BASTION_PORT" "$BASTION" "ssh $mac_host $mac_cmd"
+    ssh -p "$BASTION_PORT" "$BASTION" "ssh $mac_host $mac_cmd" \
+        <"$TRACKED_ARCHIVE"
+}
+
+create_tracked_tree_archive() {
+    TRACKED_LIST=$SOURCE_CACHE/tracked-files.$$.list
+    TRACKED_ARCHIVE=$SOURCE_CACHE/tracked-tree.$$.tar
+    rm -f "$TRACKED_LIST" "$TRACKED_ARCHIVE"
+    (cd "$PROJECT_ROOT" && git ls-files -z) >"$TRACKED_LIST"
+    (cd "$PROJECT_ROOT" && tar --null -T "$TRACKED_LIST" -cf "$TRACKED_ARCHIVE")
+    rm -f "$TRACKED_LIST"
 }
 
 remote_sh() {
     mac_host=$(quote_remote "$MAC_HOST")
     ssh -p "$BASTION_PORT" "$BASTION" "ssh $mac_host 'sh -s'"
 }
+
+for safe_path in "$REMOTE_ROOT" "$LUA_PREFIX" "$LUAROCKS_PREFIX" "$ROCKTREE" \
+    "$PREFIX" "$SOURCE_CACHE"; do
+    require_safe_tmp_path "$safe_path"
+done
+command -v git >/dev/null 2>&1 || { echo "missing command: git" >&2; exit 1; }
+command -v sha256sum >/dev/null 2>&1 || { echo "missing command: sha256sum" >&2; exit 1; }
+umask 077
+if [ -L "$SOURCE_CACHE" ] || { [ -e "$SOURCE_CACHE" ] && [ ! -d "$SOURCE_CACHE" ]; }; then
+    echo "unsafe source-cache directory: $SOURCE_CACHE" >&2
+    exit 1
+fi
+mkdir -p "$SOURCE_CACHE"
+# shellcheck disable=SC2012 # Path characters are validated; numeric ls is portable across target hosts.
+cache_owner=$(LC_ALL=C ls -dn "$SOURCE_CACHE" | awk '{ print $3 }')
+test "$cache_owner" = "$(id -u)" || { echo "source cache is not owned by this user" >&2; exit 1; }
+chmod 700 "$SOURCE_CACHE"
 
 stage_macos_sources
 
@@ -71,23 +139,49 @@ set -eu
 LUA_PREFIX=$(quote_remote "$LUA_PREFIX")
 LUAROCKS_PREFIX=$(quote_remote "$LUAROCKS_PREFIX")
 ROCKTREE=$(quote_remote "$ROCKTREE")
+LUA_SHA256=$LUA_SHA256
+LUAROCKS_SHA256=$LUAROCKS_SHA256
+LSQLITE3_SHA256=$LSQLITE3_SHA256
+SQLITE_SHA256=$SQLITE_SHA256
 
-if [ ! -x "\$LUA_PREFIX/bin/lua" ]; then
-    rm -rf "\$LUA_PREFIX" /tmp/lua-5.4.8
-    cd /tmp
-    tar -xzf "$LUA_TARBALL"
-    cd lua-5.4.8
+command -v shasum >/dev/null 2>&1 || {
+    echo "missing macOS command: shasum" >&2
+    exit 1
+}
+
+verify_source() {
+    expected=\$1
+    source_path=\$2
+    actual=\$(shasum -a 256 "\$source_path" | awk '{ print \$1 }')
+    if [ "\$actual" != "\$expected" ]; then
+        echo "source archive hash mismatch: \$source_path" >&2
+        exit 1
+    fi
+}
+verify_source "\$LUA_SHA256" "/tmp/$LUA_TARBALL"
+verify_source "\$LUAROCKS_SHA256" "/tmp/$LUAROCKS_TARBALL"
+verify_source "\$LSQLITE3_SHA256" "/tmp/$LSQLITE3_ZIP"
+verify_source "\$SQLITE_SHA256" "/tmp/$SQLITE_ZIP"
+
+if [ ! -x "\$LUA_PREFIX/bin/lua" ] \
+    || ! "\$LUA_PREFIX/bin/lua" -v 2>&1 | grep '^Lua 5\.4\.8 ' >/dev/null; then
+    rm -rf "\$LUA_PREFIX" /tmp/luainstaller-mac-lua-build
+    mkdir -p /tmp/luainstaller-mac-lua-build
+    tar -xzf "/tmp/$LUA_TARBALL" -C /tmp/luainstaller-mac-lua-build
+    cd /tmp/luainstaller-mac-lua-build/lua-5.4.8
     make clean >/tmp/luainstaller-macos-lua-clean.log 2>&1 || true
     make macosx >/tmp/luainstaller-macos-lua-build.log 2>&1
     make INSTALL_TOP="\$LUA_PREFIX" install >/tmp/luainstaller-macos-lua-install.log 2>&1
 fi
 "\$LUA_PREFIX/bin/lua" -v
+test "\$("\$LUA_PREFIX/bin/lua" -e 'io.write(_VERSION)')" = "Lua 5.4"
 
-if [ ! -x "\$LUAROCKS_PREFIX/bin/luarocks" ]; then
-    rm -rf "\$LUAROCKS_PREFIX" /tmp/luarocks-3.12.2
-    cd /tmp
-    tar -xzf "$LUAROCKS_TARBALL"
-    cd luarocks-3.12.2
+if [ ! -x "\$LUAROCKS_PREFIX/bin/luarocks" ] \
+    || ! "\$LUAROCKS_PREFIX/bin/luarocks" --version | grep '3\.12\.2' >/dev/null; then
+    rm -rf "\$LUAROCKS_PREFIX" /tmp/luainstaller-mac-luarocks-build
+    mkdir -p /tmp/luainstaller-mac-luarocks-build
+    tar -xzf "/tmp/$LUAROCKS_TARBALL" -C /tmp/luainstaller-mac-luarocks-build
+    cd /tmp/luainstaller-mac-luarocks-build/luarocks-3.12.2
     ./configure --prefix="\$LUAROCKS_PREFIX" --with-lua="\$LUA_PREFIX" >/tmp/luainstaller-macos-luarocks-configure.log
     make >/tmp/luainstaller-macos-luarocks-build.log
     make install >/tmp/luainstaller-macos-luarocks-install.log
@@ -96,13 +190,29 @@ fi
 
 DEPS_LUA_PATH="\$ROCKTREE/share/lua/5.4/?.lua;\$ROCKTREE/share/lua/5.4/?/init.lua;;"
 DEPS_LUA_CPATH="\$ROCKTREE/lib/lua/5.4/?.so;\$ROCKTREE/lib/lua/5.4/?/init.so;;"
-if ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("cjson"); require("lfs"); require("socket.core"); require("pegasus")' >/tmp/luainstaller-macos-native-check.log 2>&1; then
+deps_ready=true
+for pinned_dependency in \
+    'lua-cjson 2.1.0.10-1' \
+    'luafilesystem 1.9.0-1' \
+    'luasocket 3.1.0-1' \
+    'mimetypes 1.1.0-2' \
+    'pegasus 1.1.0-0'; do
+    if ! "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" \
+        show \$pinned_dependency >/dev/null 2>&1; then
+        deps_ready=false
+    fi
+done
+if [ "\$deps_ready" != true ] \
+    || ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" \
+        -e 'require("cjson"); require("lfs"); require("socket.core"); require("mimetypes"); require("pegasus")' \
+        >/tmp/luainstaller-macos-native-check.log 2>&1; then
     rm -rf "\$ROCKTREE"
     mkdir -p "\$ROCKTREE"
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force lua-cjson >/tmp/luainstaller-macos-cjson.log 2>&1
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force luafilesystem >/tmp/luainstaller-macos-lfs.log 2>&1
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force luasocket >/tmp/luainstaller-macos-luasocket.log 2>&1
-    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force pegasus >/tmp/luainstaller-macos-pegasus.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force lua-cjson 2.1.0.10-1 >/tmp/luainstaller-macos-cjson.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force luafilesystem 1.9.0-1 >/tmp/luainstaller-macos-lfs.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force luasocket 3.1.0-1 >/tmp/luainstaller-macos-luasocket.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force mimetypes 1.1.0-2 >/tmp/luainstaller-macos-mimetypes.log 2>&1
+    "\$LUAROCKS_PREFIX/bin/luarocks" --tree "\$ROCKTREE" install --force pegasus 1.1.0-0 >/tmp/luainstaller-macos-pegasus.log 2>&1
 fi
 if ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("lsqlite3")' >/tmp/luainstaller-macos-lsqlite-check.log 2>&1; then
     rm -rf /tmp/luainstaller-mac-lsqlite-build
@@ -121,15 +231,20 @@ if ! LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/l
         "\$LSQLITE_DIR/lsqlite3.c" "\$SQLITE_DIR/sqlite3.c" \
         -o "\$ROCKTREE/lib/lua/5.4/lsqlite3.so"
 fi
-LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("cjson"); require("lfs"); require("socket.core"); require("pegasus"); require("lsqlite3"); print("mac native deps ok")'
+LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -e 'require("cjson"); require("lfs"); require("socket.core"); require("mimetypes"); require("pegasus"); require("lsqlite3"); print("mac native deps ok")'
 EOF
 
+create_tracked_tree_archive
+trap 'rm -f "$TRACKED_LIST" "$TRACKED_ARCHIVE"' EXIT HUP INT TERM
 copy_tree_macos
+rm -f "$TRACKED_ARCHIVE"
+trap - EXIT HUP INT TERM
 
 remote_sh <<EOF
 set -eu
 REMOTE_ROOT=$(quote_remote "$REMOTE_ROOT")
 LUA_PREFIX=$(quote_remote "$LUA_PREFIX")
+LUAROCKS_PREFIX=$(quote_remote "$LUAROCKS_PREFIX")
 ROCKTREE=$(quote_remote "$ROCKTREE")
 PREFIX=$(quote_remote "$PREFIX")
 DEPS_LUA_PATH="\$ROCKTREE/share/lua/5.4/?.lua;\$ROCKTREE/share/lua/5.4/?/init.lua;;"
@@ -154,36 +269,58 @@ exe_path() {
 
 cd "\$REMOTE_ROOT"
 sh tools/install-source.sh --lua "\$LUA_PREFIX/bin/lua" --prefix "\$PREFIX"
+PATH="\$LUAROCKS_PREFIX/bin:\$LUA_PREFIX/bin:\$PATH"
+LUA_PATH="\$DEPS_LUA_PATH"
+LUA_CPATH="\$DEPS_LUA_CPATH"
+LUAI_LUA_PREFIX="\$LUA_PREFIX"
+export PATH LUA_PATH LUA_CPATH LUAI_LUA_PREFIX
+"\$LUA_PREFIX/bin/lua" test/cli_split_smoke.lua
+"\$LUA_PREFIX/bin/lua" test/contract_docs.lua
+smoke_output=\$("\$LUA_PREFIX/bin/lua" test/smoke_all.lua)
+printf '%s\n' "\$smoke_output"
+if printf '%s\n' "\$smoke_output" | grep -i 'skipped' >/dev/null; then
+    echo "macOS smoke suite reported a skipped probe" >&2
+    exit 1
+fi
 
 rm -rf /tmp/luainstaller-mac-runtime
 bundle test/runtime_bundle/main.lua /tmp/luainstaller-mac-runtime
 output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-runtime)" macos-clean)
 printf '%s\n' "\$output" | grep "hello macos-clean"
 
-rm -rf /tmp/luainstaller-mac-student /tmp/macos-students.json
+rm -rf /tmp/luainstaller-mac-student
+rm -f /tmp/luainstaller-macos-students.json
 bundle test/student_management_system/main.lua /tmp/luainstaller-mac-student
-output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json seed)
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/luainstaller-macos-students.json seed)
 printf '%s\n' "\$output" | grep "Seeded 8 students"
-output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/macos-students.json list --sort average)
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-student)" --data /tmp/luainstaller-macos-students.json list --sort average)
 printf '%s\n' "\$output" | grep "Ada Lovelace"
 
 rm -rf /tmp/luainstaller-mac-onefile-runtime
 bundle_onefile test/runtime_bundle/main.lua /tmp/luainstaller-mac-onefile-runtime
+runtime_onefile_hash=\$(shasum -a 256 /tmp/luainstaller-mac-onefile-runtime | awk '{ print \$1 }')
+rm -f /tmp/luainstaller-mac-onefile-runtime
+bundle_onefile test/runtime_bundle/main.lua /tmp/luainstaller-mac-onefile-runtime
+rebuilt_onefile_hash=\$(shasum -a 256 /tmp/luainstaller-mac-onefile-runtime | awk '{ print \$1 }')
+test "\$runtime_onefile_hash" = "\$rebuilt_onefile_hash"
+echo "macOS onefile reproducibility ok"
 output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-runtime mac-onefile-runtime)
 printf '%s\n' "\$output" | grep "hello mac-onefile-runtime"
 
-rm -rf /tmp/luainstaller-mac-onefile-student /tmp/macos-onefile-students.json
+rm -rf /tmp/luainstaller-mac-onefile-student
+rm -f /tmp/luainstaller-macos-onefile-students.json
 bundle_onefile test/student_management_system/main.lua /tmp/luainstaller-mac-onefile-student
-output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json seed)
+output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/luainstaller-macos-onefile-students.json seed)
 printf '%s\n' "\$output" | grep "Seeded 8 students"
-output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/macos-onefile-students.json list --sort average)
+output=\$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-mac-onefile-student --data /tmp/luainstaller-macos-onefile-students.json list --sort average)
 printf '%s\n' "\$output" | grep "Ada Lovelace"
 
-rm -rf /tmp/luainstaller-mac-savinglua /tmp/macos-savinglua.sqlite3
+rm -rf /tmp/luainstaller-mac-savinglua
+rm -f /tmp/luainstaller-macos-savinglua.sqlite3
 bundle test/savinglua/main.lua /tmp/luainstaller-mac-savinglua
-output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}')
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/luainstaller-macos-savinglua.sqlite3 put users:ada '{"name":"Ada Lovelace","score":98}')
 printf '%s\n' "\$output" | grep "stored users:ada"
-output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/macos-savinglua.sqlite3 get users:ada)
+output=\$(env -i PATH=/usr/bin:/bin "\$(exe_path /tmp/luainstaller-mac-savinglua)" --db /tmp/luainstaller-macos-savinglua.sqlite3 get users:ada)
 printf '%s\n' "\$output" | grep "Ada Lovelace"
 
 rm -rf /tmp/luainstaller-mac-ltokei
@@ -194,12 +331,12 @@ printf '%s\n' "\$output" | grep "Total"
 rm -rf /tmp/luainstaller-mac-firebird
 bundle test/firebird_web_sql/server.lua /tmp/luainstaller-mac-firebird
 PORT=\$((20000 + \$\$ % 20000))
-env -i PATH=/usr/bin:/bin FIREBIRD_WEB_SQL_PORT="\$PORT" FIREBIRD_WEB_SQL_TOKEN=testtoken "\$(exe_path /tmp/luainstaller-mac-firebird)" >/tmp/macos-firebird.log 2>&1 &
+env -i PATH=/usr/bin:/bin FIREBIRD_WEB_SQL_PORT="\$PORT" FIREBIRD_WEB_SQL_TOKEN=testtoken "\$(exe_path /tmp/luainstaller-mac-firebird)" >/tmp/luainstaller-macos-firebird.log 2>&1 &
 PID=\$!
 trap 'kill "\$PID" >/dev/null 2>&1 || true' EXIT
 for i in \$(seq 1 40); do
     if ! kill -0 "\$PID" >/dev/null 2>&1; then
-        cat /tmp/macos-firebird.log
+        cat /tmp/luainstaller-macos-firebird.log
         exit 1
     fi
     response=\$(curl -fsS "http://127.0.0.1:\$PORT/api/status" -H "X-Auth-Token: testtoken" 2>/dev/null || true)
@@ -211,6 +348,6 @@ for i in \$(seq 1 40); do
     fi
     sleep 0.25
 done
-cat /tmp/macos-firebird.log
+cat /tmp/luainstaller-macos-firebird.log
 exit 1
 EOF

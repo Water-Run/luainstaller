@@ -15,6 +15,12 @@ Turns documented behavior into executable contracts. It covers discovery,
 manual include/exclude precedence, option validation, output ownership,
 manifests, bundled searcher order, logs, and documentation navigation.
 
+`production_edges.lua`::
+Checks production failure boundaries: syntax and lexer edge cases, checked I/O,
+source snapshots, recursive SHA-256 ownership, target paths and Lua ABI,
+deterministic onefile extraction, concurrent logs, source installation, and
+remote-script safety.
+
 `smoke_all.lua`::
 Runs the comprehensive local audit: syntax, samples, API, generated C,
 installation layouts, onedir, onefile, native dependencies, safety regressions,
@@ -23,12 +29,13 @@ and clean-environment execution.
 `support/`::
 Shared fixture, process, loader, and assertion helpers for the contract suites.
 
-Run all three from the repository root:
+Run all four from the repository root:
 
 [source,sh]
 ----
 lua test/cli_split_smoke.lua
 lua test/contract_docs.lua
+lua test/production_edges.lua
 lua test/smoke_all.lua
 ----
 
@@ -83,8 +90,16 @@ Remote coverage is driven by:
 ----
 sh tools/remote-test-linux.sh
 MAC_HOST=yymacstudio sh tools/remote-test-macos.sh
+sh tools/remote-test-windows.sh
+# Or, when verified key authentication is unavailable:
 WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ----
+
+Remote scripts accept destructive paths only below normalized
+`/tmp/luainstaller-*` roots, transfer Git-tracked files, and verify pinned source
+archives. Windows defaults to `StrictHostKeyChecking=yes`; provision and verify
+the host key before running it. `WINDOWS_LOCAL_ONLY=1` runs MinGW/Wine coverage
+but is not a substitute for the required Windows lab.
 
 == Adding coverage
 

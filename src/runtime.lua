@@ -12,7 +12,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-10
+    2026-07-11
 ]]
 
 local M = {}
@@ -27,10 +27,14 @@ function M.stripSource(source)
         source = source:sub(4)
     end
     if source:sub(1, 2) == "#!" then
-        local rest = source:match("^[^\n]*(\n?.*)$")
-        source = rest or ""
-        if source:sub(1, 1) == "\n" then
-            source = source:sub(2)
+        local newline_start, newline_end = source:find("\r\n", 1, true)
+        if not newline_start then
+            newline_start, newline_end = source:find("[\r\n]")
+        end
+        if newline_start then
+            source = "\n" .. source:sub(newline_end + 1)
+        else
+            source = ""
         end
     end
     return source
@@ -47,6 +51,16 @@ local function loadPayloadSource(record, chunk_name)
         })
     end
     return loader
+end
+
+local function restoreLoadedModules(loaded, previous_modules)
+    for name, previous in pairs(previous_modules) do
+        if previous.present then
+            rawset(loaded, name, previous.value)
+        else
+            rawset(loaded, name, nil)
+        end
+    end
 end
 
 function M.install(payload)
@@ -86,7 +100,22 @@ function M.run(payload, run_args)
         })
     end
 
-    local uninstall = M.install(payload)
+    local loaded = package.loaded
+    local previous_modules = {}
+    for name in pairs(payload.modules or {}) do
+        local value = rawget(loaded, name)
+        previous_modules[name] = {
+            present = value ~= nil,
+            value = value,
+        }
+        rawset(loaded, name, nil)
+    end
+
+    local install_ok, uninstall = pcall(M.install, payload)
+    if not install_ok then
+        restoreLoadedModules(loaded, previous_modules)
+        error(uninstall, 0)
+    end
     local old_arg = _G.arg
     local runtime_arg = { [0] = entry.path or entry.id or "__entry__" }
     for i = 1, #run_args do
@@ -94,18 +123,22 @@ function M.run(payload, run_args)
     end
     _G.arg = runtime_arg
 
-    local ok, result = pcall(function()
+    local results = table.pack(pcall(function()
         local entry_loader = loadPayloadSource(entry, "@" .. tostring(entry.path or entry.id or "__entry__"))
         return entry_loader()
-    end)
+    end))
 
     _G.arg = old_arg
-    uninstall()
+    local uninstall_ok, uninstall_err = pcall(uninstall)
+    restoreLoadedModules(loaded, previous_modules)
 
-    if not ok then
-        error(result)
+    if not results[1] then
+        error(results[2], 0)
     end
-    return result
+    if not uninstall_ok then
+        error(uninstall_err, 0)
+    end
+    return table.unpack(results, 2, results.n)
 end
 
 return M

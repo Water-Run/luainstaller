@@ -9,13 +9,15 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-06-27
+    2026-07-11
 ]]
 
 local M = {}
 
 local PRELOADS = {
     { "luainstaller", "src/init.lua" },
+    { "luainstaller.fs", "src/fs.lua" },
+    { "luainstaller.hash", "src/hash.lua" },
     { "luainstaller.path", "src/path.lua" },
     { "luainstaller.process", "src/process.lua" },
     { "luainstaller.result", "src/result.lua" },

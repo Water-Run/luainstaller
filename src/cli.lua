@@ -50,6 +50,8 @@ local function installSourcePreloads()
     -- Clear cached installed modules so checkout source wins over LuaRocks.
     local module_names = {
         "luainstaller",
+        "luainstaller.fs",
+        "luainstaller.hash",
         "luainstaller.process",
         "luainstaller.path",
         "luainstaller.result",
@@ -71,6 +73,12 @@ local function installSourcePreloads()
 
     package.preload["luainstaller.process"] = package.preload["luainstaller.process"] or function()
         return dofile(sourcePath("process.lua"))
+    end
+    package.preload["luainstaller.fs"] = package.preload["luainstaller.fs"] or function()
+        return dofile(sourcePath("fs.lua"))
+    end
+    package.preload["luainstaller.hash"] = package.preload["luainstaller.hash"] or function()
+        return dofile(sourcePath("hash.lua"))
     end
     package.preload["luainstaller.path"] = package.preload["luainstaller.path"] or function()
         return dofile(sourcePath("path.lua"))

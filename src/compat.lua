@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-22
 Updated:
-    2026-06-22
+    2026-07-11
 ]]
 
 local platform = require("luainstaller.platform")
@@ -26,16 +26,6 @@ end
 
 local function modeName(opts)
     return opts and opts.mode or "onedir"
-end
-
-local function launcherProfile(target_os)
-    if target_os == "macos" then
-        return "static-lua"
-    end
-    if target_os == "windows" then
-        return "windows-shared-lua"
-    end
-    return "shared-lua"
 end
 
 local function countLibraries(dependencies)
@@ -65,6 +55,9 @@ function M.diagnose(opts)
     if profile.target_os ~= host.os then
         warnings[#warnings + 1] = "target profile differs from the build host; verify with the target runtime"
     end
+    if profile.target_arch ~= platform.normalizeArch(host.arch) then
+        warnings[#warnings + 1] = "target architecture differs from the build host; verify every native dependency"
+    end
 
     if profile.target_os == "windows" then
         notes[#notes + 1] = "Windows bundles require a compatible Lua DLL and compiler-runtime family"
@@ -79,8 +72,9 @@ function M.diagnose(opts)
         host = host,
         target = {
             os = profile.target_os,
+            arch = profile.target_arch,
             executable_suffix = profile.executable_suffix,
-            launcher_profile = opts.launcher_profile or launcherProfile(profile.target_os),
+            launcher_profile = profile.launcher_profile,
         },
         lua = lua,
         mode = modeName(opts),

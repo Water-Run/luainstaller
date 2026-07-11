@@ -24,6 +24,10 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM != 504
+#error "luainstaller requires Lua 5.4 headers"
+#endif
+
 static int luai_traceback(lua_State *L)
 {
     const char *message = lua_tostring(L, 1);
@@ -99,6 +103,17 @@ static int luai_load_bootstrap(lua_State *L)
 #endif
 }
 
+static int luai_runtime_is_54(lua_State *L)
+{
+    const char *version;
+    int matches;
+    lua_getglobal(L, "_VERSION");
+    version = lua_tostring(L, -1);
+    matches = version != NULL && strcmp(version, "Lua 5.4") == 0;
+    lua_pop(L, 1);
+    return matches;
+}
+
 int main(int argc, char **argv)
 {
     lua_State *L;
@@ -113,6 +128,12 @@ int main(int argc, char **argv)
     }
 
     luaL_openlibs(L);
+    if (!luai_runtime_is_54(L))
+    {
+        fputs("luainstaller: linked Lua runtime is not Lua 5.4\n", stderr);
+        lua_close(L);
+        return 70;
+    }
     luai_push_arg(L, argc, argv);
 
     lua_pushcfunction(L, luai_traceback);
