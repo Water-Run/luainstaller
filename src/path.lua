@@ -35,9 +35,10 @@ function M.normalize(value)
     end
 
     local parts = {}
+    local root_depth = prefix == "//" and 2 or 0
     for segment in path:gmatch("[^/]+") do
         if segment == ".." then
-            if #parts > 0 and parts[#parts] ~= ".." then
+            if #parts > root_depth and parts[#parts] ~= ".." then
                 parts[#parts] = nil
             elseif prefix == "" then
                 parts[#parts + 1] = ".."
@@ -56,7 +57,14 @@ end
 
 function M.isAbsolute(value)
     local path = tostring(value or "")
-    return path:sub(1, 1) == "/" or path:match("^%a:[/\\]") ~= nil
+    local first = path:sub(1, 1)
+    return first == "/" or first == "\\" or path:match("^%a:[/\\]") ~= nil
+end
+
+function M.isDriveRelative(value)
+    local candidate = tostring(value or "")
+    return candidate:match("^%a:") ~= nil
+        and candidate:match("^%a:[/\\]") == nil
 end
 
 --@description: True when path is root or a descendant of root after normalization.
@@ -193,6 +201,9 @@ end
 
 function M.absolute(value)
     local normalized = M.normalize(value)
+    if M.isDriveRelative(normalized) then
+        return normalized
+    end
     if M.isAbsolute(normalized) then
         return normalized
     end
@@ -201,7 +212,8 @@ end
 
 function M.dirname(value)
     local normalized = M.normalize(value)
-    if normalized == "/" or normalized == "//" or normalized:match("^%a:/$") then
+    if normalized == "/" or normalized == "//" or normalized:match("^%a:/$")
+        or normalized:match("^//[^/]+/[^/]+$") then
         return normalized
     end
     local slash = normalized:match("^.*()/")
@@ -223,7 +235,7 @@ end
 function M.join(left, right)
     left = M.normalize(left)
     right = tostring(right or "")
-    if M.isAbsolute(right) then
+    if M.isAbsolute(right) or M.isDriveRelative(right) then
         return M.normalize(right)
     end
     if left == "." then

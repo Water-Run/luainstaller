@@ -4,8 +4,8 @@ set -eu
 # Lab defaults match /home/waterrun/VM/SSH_Win10_README.md / SSH_Win7_README.md (Win10 OpenSSH, Win7 KTS).
 WINDOWS_HOST=${WINDOWS_HOST:-"waterrun@192.168.69.130"}
 WINDOWS_TARGETS=${WINDOWS_TARGETS:-"Win10=$WINDOWS_HOST"}
-SSH_OPTS=${SSH_OPTS:-""}
-SSH_KEY_OPTS=${SSH_KEY_OPTS:-"-o BatchMode=yes"}
+SSH_PORT=${SSH_PORT:-22}
+SSH_IDENTITY_FILE=${SSH_IDENTITY_FILE:-""}
 REMOTE_TEMP=${REMOTE_TEMP:-"C:/Users/waterrun/AppData/Local/Temp"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
 WIN_PREFIX=${WIN_PREFIX:-"/tmp/luainstaller-win-lua"}
@@ -21,11 +21,30 @@ LUA_SHA256=4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
 LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
 
-if printf '%s\n%s\n' "$SSH_OPTS" "$SSH_KEY_OPTS" \
-    | grep -Eiq 'StrictHostKeyChecking|UserKnownHostsFile'; then
-    echo "SSH_OPTS must not override host-key policy" >&2
-    exit 2
-fi
+require_no_symlink_ancestors() {
+    candidate=$1
+    remainder=${candidate#/tmp/}
+    current=/tmp
+    saved_ifs=$IFS
+    IFS=/
+    # shellcheck disable=SC2086 # The validated path is intentionally split on '/'.
+    set -- $remainder
+    IFS=$saved_ifs
+    for component do
+        current=$current/$component
+        if [ -L "$current" ]; then
+            echo "unsafe symlink ancestor in temporary path: $current" >&2
+            exit 2
+        fi
+        if [ -e "$current" ] && [ ! -d "$current" ]; then
+            echo "unsafe non-directory ancestor in temporary path: $current" >&2
+            exit 2
+        fi
+        if [ ! -e "$current" ]; then
+            break
+        fi
+    done
+}
 
 require_safe_tmp_path() {
     path=$1
@@ -48,6 +67,7 @@ require_safe_tmp_path() {
             exit 2
             ;;
     esac
+    require_no_symlink_ancestors "$path"
 }
 
 require_safe_windows_temp() {
@@ -77,6 +97,140 @@ need_cmd() {
         echo "missing command: $1" >&2
         exit 1
     }
+}
+
+validate_remote_configuration() {
+    if [ -n "${SSH_OPTS:-}" ] || [ -n "${SSH_KEY_OPTS:-}" ]; then
+        echo "SSH_OPTS must not override host-key policy" >&2
+        exit 2
+    fi
+    case "$SSH_PORT" in
+        ''|*[!0-9]*)
+            echo "SSH_PORT must be an integer from 1 through 65535" >&2
+            exit 2
+            ;;
+    esac
+    if [ "$SSH_PORT" -lt 1 ] || [ "$SSH_PORT" -gt 65535 ]; then
+        echo "SSH_PORT must be an integer from 1 through 65535" >&2
+        exit 2
+    fi
+    if [ -n "$SSH_IDENTITY_FILE" ]; then
+        case "$SSH_IDENTITY_FILE" in
+            -*)
+                echo "SSH_IDENTITY_FILE must be a regular file path" >&2
+                exit 2
+                ;;
+        esac
+        if [ ! -f "$SSH_IDENTITY_FILE" ] || [ -L "$SSH_IDENTITY_FILE" ]; then
+            echo "SSH_IDENTITY_FILE must be a non-symlink regular file" >&2
+            exit 2
+        fi
+    fi
+    if [ -z "$WINDOWS_TARGETS" ]; then
+        echo "WINDOWS_TARGETS must name at least one required lab" >&2
+        exit 2
+    fi
+    need_cmd base64
+    need_cmd iconv
+    need_cmd scp
+    need_cmd ssh
+    if [ -n "${WINDOWS_PASSWORD:-}" ]; then
+        need_cmd sshpass
+    fi
+}
+
+if [ "${WINDOWS_LOCAL_ONLY:-0}" != 1 ]; then
+    validate_remote_configuration
+fi
+
+strict_scp() {
+    if [ -n "${WINDOWS_PASSWORD:-}" ]; then
+        if [ -n "$SSH_IDENTITY_FILE" ]; then
+            SSHPASS=$WINDOWS_PASSWORD sshpass -e scp -o StrictHostKeyChecking=yes \
+                -P "$SSH_PORT" -i "$SSH_IDENTITY_FILE" "$@"
+        else
+            SSHPASS=$WINDOWS_PASSWORD sshpass -e scp -o StrictHostKeyChecking=yes \
+                -P "$SSH_PORT" "$@"
+        fi
+    elif [ -n "$SSH_IDENTITY_FILE" ]; then
+        scp -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            -P "$SSH_PORT" -i "$SSH_IDENTITY_FILE" "$@"
+    else
+        scp -o StrictHostKeyChecking=yes -o BatchMode=yes -P "$SSH_PORT" "$@"
+    fi
+}
+
+strict_ssh() {
+    if [ -n "${WINDOWS_PASSWORD:-}" ]; then
+        if [ -n "$SSH_IDENTITY_FILE" ]; then
+            SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh -o StrictHostKeyChecking=yes \
+                -p "$SSH_PORT" -i "$SSH_IDENTITY_FILE" "$@"
+        else
+            SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh -o StrictHostKeyChecking=yes \
+                -p "$SSH_PORT" "$@"
+        fi
+    elif [ -n "$SSH_IDENTITY_FILE" ]; then
+        ssh -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            -p "$SSH_PORT" -i "$SSH_IDENTITY_FILE" "$@"
+    else
+        ssh -o StrictHostKeyChecking=yes -o BatchMode=yes -p "$SSH_PORT" "$@"
+    fi
+}
+
+preflight_windows_upload() {
+    preflight_host=$1
+    preflight_script=$(cat <<'PS1'
+$ErrorActionPreference = 'Stop'
+$StagingRoot = '__LUAI_STAGING_ROOT__'
+if ([string]::IsNullOrWhiteSpace($StagingRoot)) {
+    throw 'Windows upload staging root is required'
+}
+$StagingRoot = [IO.Path]::GetFullPath($StagingRoot)
+$driveRoot = [IO.Path]::GetPathRoot($StagingRoot)
+if ([string]::IsNullOrEmpty($driveRoot)) {
+    throw 'Windows upload staging root must be absolute'
+}
+$current = $driveRoot
+$paths = @($current)
+$relativeComponents = $StagingRoot.Substring($driveRoot.Length) -split '[\\/]'
+foreach ($component in $relativeComponents) {
+    if ($component -eq '') { continue }
+    $current = Join-Path $current $component
+    $paths += $current
+}
+foreach ($path in $paths) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if (-not ($item -is [IO.DirectoryInfo]) -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "unsafe Windows upload-path ancestor: $path"
+    }
+}
+foreach ($name in @('luainstaller-win-bundles.tar.gz',
+        'luainstaller-run-windows-bundles.ps1')) {
+    $target = Join-Path $StagingRoot $name
+    $targetItem = Get-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+    if ($null -eq $targetItem) { continue }
+    if (-not ($targetItem -is [IO.FileInfo]) -or
+        ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "unsafe Windows upload target: $target"
+    }
+    [IO.File]::Delete($target)
+    if (Test-Path -LiteralPath $target) {
+        throw "failed to clear Windows upload target: $target"
+    }
+}
+PS1
+)
+    preflight_script=$(printf '%s' "$preflight_script" \
+        | sed "s|__LUAI_STAGING_ROOT__|$REMOTE_TEMP|")
+    preflight_encoded=$(printf '%s' "$preflight_script" \
+        | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\r\n')
+    if [ -z "$preflight_encoded" ]; then
+        echo "failed to encode Windows upload preflight" >&2
+        exit 1
+    fi
+    strict_ssh "$preflight_host" \
+        "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand \"$preflight_encoded\""
 }
 
 stage_source() {
@@ -219,7 +373,7 @@ build_windows_deps() {
     cp "$WIN_PREFIX/bin/lua54.dll" "$WIN_TREE/"
     (
         cd "$WIN_TREE"
-        wine ./lua.exe -e 'package.path="Z:/tmp/luainstaller-win-rocks/share/lua/5.4/?.lua;Z:/tmp/luainstaller-win-rocks/share/lua/5.4/?/init.lua;"; package.cpath="Z:/tmp/luainstaller-win-rocks/lib/lua/5.4/?.dll;Z:/tmp/luainstaller-win-rocks/lib/lua/5.4/?/core.dll;"; require("cjson"); require("lfs"); require("lsqlite3"); require("socket.core"); require("pegasus"); print("windows deps ok")'
+        wine ./lua.exe -e 'package.path="share/lua/5.4/?.lua;share/lua/5.4/?/init.lua;"; package.cpath="lib/lua/5.4/?.dll;lib/lua/5.4/?/core.dll;"; require("cjson"); require("lfs"); require("lsqlite3"); require("socket.core"); require("pegasus"); print("windows deps ok")'
     )
 }
 
@@ -236,10 +390,14 @@ bundle_demo() {
 bundle_demo_onefile() {
     entry=$1
     out=$2
+    case "$entry" in
+        /*) entry_path=$entry ;;
+        *) entry_path=$PROJECT_ROOT/$entry ;;
+    esac
     lua_path="$PROJECT_ROOT/src/?.lua;$PROJECT_ROOT/src/?/init.lua;$WIN_TREE/share/lua/5.4/?.lua;$WIN_TREE/share/lua/5.4/?/init.lua;;"
     lua_cpath="$WIN_TREE/lib/lua/5.4/?.dll;$WIN_TREE/lib/lua/5.4/?/core.dll;$WIN_TREE/lib/lua/5.4/?/init.dll;;"
     LUA_PATH="$lua_path" LUA_CPATH="$lua_cpath" \
-        lua "$PROJECT_ROOT/src/cli.lua" -b --file "$PROJECT_ROOT/$entry" \
+        lua "$PROJECT_ROOT/src/cli.lua" -b --file "$entry_path" \
         -o "$out" --target-os windows --lua-prefix "$WIN_PREFIX" --max-deps 300
 }
 
@@ -250,6 +408,24 @@ build_bundles() {
     bundle_demo test/student_management_system/main.lua "$WIN_OUT/student"
     bundle_demo_onefile test/runtime_bundle/main.lua "$WIN_OUT/runtime-onefile"
     bundle_demo_onefile test/student_management_system/main.lua "$WIN_OUT/student-onefile"
+    cat >/tmp/luainstaller-onefile-hold.lua <<'LUA'
+local marker = assert(arg[1], "marker path is required")
+local release = assert(arg[2], "release path is required")
+local handle = assert(io.open(marker, "wb"))
+assert(handle:write(tostring(arg[0])))
+assert(handle:close())
+local deadline = os.time() + 30
+while os.time() <= deadline do
+    local released = io.open(release, "rb")
+    if released then
+        assert(released:close())
+        print("onefile pin probe released")
+        return
+    end
+end
+error("onefile pin probe timed out")
+LUA
+    bundle_demo_onefile /tmp/luainstaller-onefile-hold.lua "$WIN_OUT/pin-probe"
     bundle_demo test/savinglua/main.lua "$WIN_OUT/savinglua"
     bundle_demo test/ltokei/main.lua "$WIN_OUT/ltokei"
     bundle_demo test/firebird_web_sql/server.lua "$WIN_OUT/firebird"
@@ -288,6 +464,29 @@ int main(int argc, char **argv) {
 C
     x86_64-w64-mingw32-gcc /tmp/luainstaller-win-argv-driver.c \
         -o "$WIN_OUT/argv-driver.exe" -static-libgcc
+    mkdir -p "$WIN_OUT/fs-probe/luainstaller"
+    cp "$WIN_PREFIX/lua.exe" "$WIN_PREFIX/lua54.dll" "$WIN_OUT/fs-probe/"
+    cp "$PROJECT_ROOT/src/fs.lua" "$PROJECT_ROOT/src/logger.lua" \
+        "$PROJECT_ROOT/src/process.lua" \
+        "$WIN_OUT/fs-probe/luainstaller/"
+    cat >"$WIN_OUT/fs-probe/probe.lua" <<'LUA'
+local fs = require("luainstaller.fs")
+local logger = require("luainstaller.logger")
+local regular, directory, reparse, root, non_ascii = ...
+assert(fs.isRegularFile(regular), "empty regular file was rejected")
+assert(fs.isRegularFile(non_ascii), "ACP-representable non-ASCII regular file was rejected")
+assert(not fs.isRegularFile(directory), "directory was accepted as a regular file")
+assert(not fs.isRegularFile(reparse), "reparse point was accepted as a regular file")
+assert(not fs.isRegularFile("NUL"), "NUL device was accepted as a regular file")
+assert(not fs.isRegularFile(root .. "\\NUL.lua"), "qualified NUL device was accepted")
+assert(logger.clearLogs(), "logger clear failed with a clean Windows PATH")
+assert(logger.logInfo("windows-probe", "clean-path", "ok"),
+    "logger write failed with a clean Windows PATH")
+local logs = logger.getLogs({ source = "windows-probe" })
+assert(#logs == 1 and logs[1].message == "ok", "logger readback failed")
+assert(logger.clearLogs(), "logger final clear failed")
+print("windows filesystem and logger probe ok")
+LUA
 }
 
 verify_with_wine() {
@@ -346,13 +545,47 @@ verify_with_wine() {
 run_remote_windows() {
     runner=/tmp/luainstaller-run-windows-bundles.ps1
     archive=/tmp/luainstaller-win-bundles.tar.gz
+    win_out_parent=$(dirname "$WIN_OUT")
+    win_out_name=$(basename "$WIN_OUT")
     rm -f "$archive" "$runner"
-    tar -C /tmp -czf "$archive" "$(basename "$WIN_OUT")"
+    tar -C "$win_out_parent" -czf "$archive" -- "$win_out_name"
     cat >"$runner" <<'PS1'
+param([string]$StagingRoot, [string]$BundleDirectoryName)
 $ErrorActionPreference = 'Stop'
-$root = Join-Path $env:TEMP 'luainstaller-win-bundles'
-if (Test-Path $root) { Remove-Item -Recurse -Force $root }
-tar -xzf (Join-Path $env:TEMP 'luainstaller-win-bundles.tar.gz') -C $env:TEMP
+if ([string]::IsNullOrWhiteSpace($StagingRoot)) {
+    throw 'Windows staging root is required'
+}
+if ([string]::IsNullOrWhiteSpace($BundleDirectoryName) -or
+    $BundleDirectoryName -in @('.', '..') -or
+    $BundleDirectoryName.IndexOfAny([char[]]'\/') -ge 0 -or
+    $BundleDirectoryName.StartsWith('-') -or
+    $BundleDirectoryName.EndsWith('.') -or
+    $BundleDirectoryName -match '^(CON|PRN|AUX|NUL|CLOCK[$]|COM[1-9]|LPT[1-9])([.]|$)') {
+    throw 'Windows bundle directory name is invalid'
+}
+$StagingRoot = [IO.Path]::GetFullPath($StagingRoot)
+$driveRoot = [IO.Path]::GetPathRoot($StagingRoot)
+$current = $driveRoot
+$relativeComponents = $StagingRoot.Substring($driveRoot.Length) -split '[\\/]'
+foreach ($component in $relativeComponents) {
+    if ($component -eq '') { continue }
+    $current = Join-Path $current $component
+    $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not $item.PSIsContainer) {
+        throw "unsafe Windows staging-path ancestor: $current"
+    }
+}
+$root = Join-Path $StagingRoot $BundleDirectoryName
+if (Test-Path $root) {
+    $rootItem = Get-Item -LiteralPath $root -Force
+    if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        -not $rootItem.PSIsContainer) {
+        throw "unsafe Windows remote temporary root: $root"
+    }
+    Remove-Item -Recurse -Force -LiteralPath $root
+}
+tar -xzf (Join-Path $StagingRoot 'luainstaller-win-bundles.tar.gz') -C $StagingRoot
 $env:Path = 'C:\Windows\System32;C:\Windows'
 $env:LUA_PATH = $null
 $env:LUA_CPATH = $null
@@ -372,6 +605,48 @@ function Invoke-NativeChecked($Name, [scriptblock]$Command) {
     }
     return $text
 }
+
+$probeRoot = Join-Path $root 'fs-probe'
+$probeRegular = Join-Path $probeRoot 'empty.lua'
+$probeDirectory = Join-Path $probeRoot 'directory'
+$probeTarget = Join-Path $probeRoot 'junction-target'
+$probeReparse = Join-Path $probeRoot 'junction'
+$probeHome = Join-Path $probeRoot 'home'
+$probeSpecialHome = Join-Path $probeRoot 'home&A%caret^bang!'
+$probeNonAscii = $null
+foreach ($candidate in @([char]0x00E9, [char]0x6D4B, [char]0x0416, [char]0x3042)) {
+    $candidateText = [string]$candidate
+    $candidateBytes = [Text.Encoding]::Default.GetBytes($candidateText)
+    if ([Text.Encoding]::Default.GetString($candidateBytes) -eq $candidateText -and
+        -not ($candidateBytes.Length -eq 1 -and $candidateBytes[0] -eq 63)) {
+        $probeNonAscii = Join-Path $probeRoot ("non-ascii-$candidateText.lua")
+        break
+    }
+}
+if ($null -eq $probeNonAscii) {
+    throw 'active Windows ANSI code page has no representable non-ASCII probe candidate'
+}
+[IO.File]::WriteAllBytes($probeRegular, [byte[]]@())
+[IO.File]::WriteAllBytes($probeNonAscii, [byte[]]@())
+New-Item -ItemType Directory -Path $probeDirectory -Force | Out-Null
+New-Item -ItemType Directory -Path $probeTarget -Force | Out-Null
+New-Item -ItemType Junction -Path $probeReparse -Target $probeTarget | Out-Null
+New-Item -ItemType Directory -Path $probeHome -Force | Out-Null
+New-Item -ItemType Directory -Path $probeSpecialHome -Force | Out-Null
+$env:LUA_PATH = "$probeRoot\?.lua;$probeRoot\?\init.lua;;"
+$savedHome = $env:HOME
+$env:HOME = $probeHome
+$fileTypeProbe = Invoke-NativeChecked 'Windows filesystem and logger probe' {
+    & (Join-Path $probeRoot 'lua.exe') (Join-Path $probeRoot 'probe.lua') $probeRegular $probeDirectory $probeReparse $probeRoot $probeNonAscii
+}
+$env:HOME = $probeSpecialHome
+$specialHomeProbe = Invoke-NativeChecked 'Windows logger metacharacter HOME probe' {
+    & (Join-Path $probeRoot 'lua.exe') (Join-Path $probeRoot 'probe.lua') $probeRegular $probeDirectory $probeReparse $probeRoot $probeNonAscii
+}
+$env:HOME = $savedHome
+Require-Match $fileTypeProbe 'windows filesystem and logger probe ok' 'Windows filesystem and logger probe'
+Require-Match $specialHomeProbe 'windows filesystem and logger probe ok' 'Windows logger metacharacter HOME probe'
+$env:LUA_PATH = $null
 
 $runtimeExe = Join-Path $root 'runtime\runtime.exe'
 $runtime = Invoke-NativeChecked 'runtime' { & $runtimeExe 'windows-clean' }
@@ -402,6 +677,45 @@ foreach ($rule in $repairedAcl.Access) {
 if (-not $repairedAcl.AreAccessRulesProtected -or $hasEveryone) {
     throw "runtime onefile did not repair a legacy loose file ACL: $($repairedAcl.AccessToString)"
 }
+$pinMarker = Join-Path $env:TEMP 'luainstaller-onefile-pin.marker'
+$pinRelease = Join-Path $env:TEMP 'luainstaller-onefile-pin.release'
+Remove-Item -Force -ErrorAction SilentlyContinue $pinMarker, $pinRelease
+$pinProbeExe = Join-Path $root 'pin-probe.exe'
+$pinArguments = '"' + $pinMarker + '" "' + $pinRelease + '"'
+$pinProcess = Start-Process -FilePath $pinProbeExe -ArgumentList $pinArguments -PassThru
+for ($i = 0; $i -lt 100 -and -not (Test-Path $pinMarker); $i++) {
+    if ($pinProcess.HasExited) { break }
+    Start-Sleep -Milliseconds 100
+}
+if (-not (Test-Path $pinMarker) -or $pinProcess.HasExited) {
+    throw 'onefile cache pin probe did not enter the inner process'
+}
+$pinInner = Get-Content -LiteralPath $pinMarker -Raw
+$pinPayload = Split-Path -Parent $pinInner
+$pinTargets = @(
+    $pinPayload,
+    (Join-Path $pinPayload '.luai'),
+    (Join-Path $pinPayload '.luai\manifest.lua')
+)
+foreach ($pinTarget in $pinTargets) {
+    $pinMoved = "$pinTarget.luai-swap-test"
+    $moveSucceeded = $false
+    try {
+        Move-Item -LiteralPath $pinTarget -Destination $pinMoved -ErrorAction Stop
+        $moveSucceeded = $true
+    } catch {
+        # Expected: the extractor retains no-delete handles until its child exits.
+    }
+    if ($moveSucceeded) {
+        throw "onefile cache object was replaceable during execution: $pinTarget"
+    }
+}
+[IO.File]::WriteAllBytes($pinRelease, [byte[]]@())
+if (-not $pinProcess.WaitForExit(10000) -or $pinProcess.ExitCode -ne 0) {
+    if (-not $pinProcess.HasExited) { Stop-Process -Id $pinProcess.Id -Force }
+    throw 'onefile cache pin probe did not exit successfully'
+}
+Remove-Item -Force $pinMarker, $pinRelease
 $pathArg = 'C:\Alpha Beta\trail'
 $runtimeOnefilePath = Invoke-NativeChecked 'runtime onefile path' { & $runtimeOnefileExe $pathArg }
 if (-not $runtimeOnefilePath.Contains("hello $pathArg")) {
@@ -479,6 +793,7 @@ Write-Output 'windows remote bundles ok'
 PS1
     # Convert C:/Users/... style paths to Windows backslash form for powershell -File.
     remote_ps1=$(printf '%s' "$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" | sed 's|/|\\|g')
+    remote_temp_ps=$(printf '%s' "$REMOTE_TEMP" | sed 's|/|\\|g')
     for target in $WINDOWS_TARGETS; do
         label=${target%%=*}
         host=${target#*=}
@@ -489,32 +804,32 @@ PS1
                 ;;
         esac
         echo "windows remote target $label ($host)"
-        if [ -n "${WINDOWS_PASSWORD:-}" ]; then
-            # shellcheck disable=SC2086 # SSH_OPTS is a documented option-word list.
-            SSHPASS=$WINDOWS_PASSWORD sshpass -e scp -o StrictHostKeyChecking=yes $SSH_OPTS "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
-            # shellcheck disable=SC2086 # SSH_OPTS is a documented option-word list.
-            SSHPASS=$WINDOWS_PASSWORD sshpass -e scp -o StrictHostKeyChecking=yes $SSH_OPTS "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
-            # shellcheck disable=SC2086 # SSH_OPTS is a documented option-word list.
-            SSHPASS=$WINDOWS_PASSWORD sshpass -e ssh -o StrictHostKeyChecking=yes $SSH_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote_ps1"
-        else
-            # shellcheck disable=SC2086 # Both variables are documented option-word lists.
-            scp -o StrictHostKeyChecking=yes $SSH_OPTS $SSH_KEY_OPTS "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
-            # shellcheck disable=SC2086 # Both variables are documented option-word lists.
-            scp -o StrictHostKeyChecking=yes $SSH_OPTS $SSH_KEY_OPTS "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
-            # shellcheck disable=SC2086,SC2029 # Option words and the quoted remote path expand locally by design.
-            ssh -o StrictHostKeyChecking=yes $SSH_OPTS $SSH_KEY_OPTS "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File $remote_ps1"
-        fi
+        preflight_windows_upload "$host"
+        strict_scp "$archive" "$host:$REMOTE_TEMP/luainstaller-win-bundles.tar.gz" >/dev/null
+        strict_scp "$runner" "$host:$REMOTE_TEMP/luainstaller-run-windows-bundles.ps1" >/dev/null
+        strict_ssh "$host" "powershell -NoProfile -ExecutionPolicy Bypass -File \"$remote_ps1\" -StagingRoot \"$remote_temp_ps\" -BundleDirectoryName \"$win_out_name\""
     done
 }
 
 for safe_path in "$SOURCE_CACHE" "$WIN_PREFIX" "$WIN_TREE" "$WIN_OUT"; do
     require_safe_tmp_path "$safe_path"
 done
+WIN_OUT_NAME=$(basename "$WIN_OUT")
+case "$WIN_OUT_NAME" in
+    -*|*.)
+        echo "unsafe Windows bundle directory name: $WIN_OUT_NAME" >&2
+        exit 2
+        ;;
+esac
+win_out_stem=${WIN_OUT_NAME%%.*}
+win_out_stem_upper=$(printf '%s' "$win_out_stem" | tr '[:lower:]' '[:upper:]')
+case "$win_out_stem_upper" in
+    CON|PRN|AUX|NUL|CLOCK\$|COM[1-9]|LPT[1-9])
+        echo "unsafe Windows bundle directory name: $WIN_OUT_NAME" >&2
+        exit 2
+        ;;
+esac
 require_safe_windows_temp "$REMOTE_TEMP"
-if [ -z "$WINDOWS_TARGETS" ]; then
-    echo "WINDOWS_TARGETS must name at least one required lab" >&2
-    exit 2
-fi
 umask 077
 if [ -L "$SOURCE_CACHE" ] || { [ -e "$SOURCE_CACHE" ] && [ ! -d "$SOURCE_CACHE" ]; }; then
     echo "unsafe source-cache directory: $SOURCE_CACHE" >&2
@@ -530,15 +845,10 @@ need_cmd curl
 need_cmd lua
 need_cmd luarocks
 need_cmd wine
-need_cmd scp
-need_cmd ssh
 need_cmd sha256sum
 need_cmd x86_64-w64-mingw32-gcc
 need_cmd x86_64-w64-mingw32-ar
 need_cmd x86_64-w64-mingw32-ranlib
-if [ -n "${WINDOWS_PASSWORD:-}" ]; then
-    need_cmd sshpass
-fi
 
 stage_source "$LUA_TARBALL" "https://www.lua.org/ftp/$LUA_TARBALL" "$LUA_SHA256"
 stage_source "$LSQLITE3_ZIP" 'https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6' "$LSQLITE3_SHA256"

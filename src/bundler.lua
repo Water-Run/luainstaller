@@ -242,14 +242,21 @@ local function listTree(root)
     end
     local prefix = root == "/" and "/" or (root .. "/")
     local entries = {}
+    local seen = {}
     local position = root_terminator + 1
     while position <= #raw do
         local terminator = raw:find("\0", position, true)
         if not terminator then
             return nil, invalidOutputInventory(root, "Output tree listing is incomplete")
         end
-        local absolute = normalizePath(raw:sub(position, terminator - 1))
+        local listed_path = raw:sub(position, terminator - 1)
+        local absolute = normalizePath(listed_path)
         position = terminator + 1
+        if listed_path ~= absolute then
+            return nil, invalidOutputInventory(root, "Output tree contains a path with ambiguous spelling", {
+                unexpected_path = listed_path,
+            })
+        end
         if absolute:sub(1, #prefix) ~= prefix then
             return nil, invalidOutputInventory(root, "Output tree entry escapes its root", {
                 unexpected_path = absolute,
@@ -261,6 +268,12 @@ local function listTree(root)
                 unexpected_path = absolute,
             })
         end
+        if seen[relative] then
+            return nil, invalidOutputInventory(root, "Output tree contains duplicate normalized paths", {
+                unexpected_path = absolute,
+            })
+        end
+        seen[relative] = true
 
         local item = { path = relative }
         if isSymlink(absolute) then
@@ -702,18 +715,40 @@ end
 
 local function uniqueSiblingPath(final_path, label)
     local parent = dirname(final_path)
-    local name = basename(final_path)
+    local output_id = hash_mod.sha256(normalizePath(final_path)):sub(1, 24)
     for _ = 1, 20 do
         local suffix = tostring(os.time())
             .. tostring(os.clock()):gsub("%.", "")
             .. "-"
             .. tostring(math.random(100000, 999999))
-        local candidate = normalizePath(parent .. "/." .. name .. ".luai-" .. label .. "-" .. suffix)
+        local candidate = normalizePath(parent .. "/.luai-" .. label .. "-"
+            .. output_id .. "-" .. suffix)
         if not pathExists(candidate) then
             return candidate
         end
     end
     return nil
+end
+
+local function secureToken(context)
+    local handle, open_err = io.open("/dev/urandom", "rb")
+    if not handle then
+        return nil, tostring(open_err or "cannot open /dev/urandom")
+    end
+    local bytes, read_err = handle:read(32)
+    local closed, close_err = handle:close()
+    if type(bytes) ~= "string" or #bytes ~= 32 or not closed then
+        return nil, tostring(read_err or close_err or "short read from /dev/urandom")
+    end
+    return hash_mod.sha256(tostring(context or "") .. "\0" .. bytes)
+end
+
+local function removeDirectoryOnly(path_value)
+    local ok, output = commandOutput("rmdir " .. shellQuote(path_value))
+    if ok then
+        return true
+    end
+    return nil, output
 end
 
 local function createStagingDirectory(final_path)
@@ -747,7 +782,17 @@ local function acquireOutputLock(final_path)
     if parent_err then
         return nil, parent_err
     end
-    local lock_path = normalizePath(dirname(final_path) .. "/." .. basename(final_path) .. ".luai-lock")
+    local lock_id = hash_mod.sha256(normalizePath(final_path))
+    local lock_path = normalizePath(dirname(final_path) .. "/.luai-lock-" .. lock_id)
+    local token, token_err = secureToken(final_path)
+    local release_token, release_token_err = secureToken(final_path .. "\0release")
+    if not token or not release_token then
+        return nil, makeError("FilesystemError", "Cannot generate secure output lock ownership", {
+            path = final_path,
+            lock_path = lock_path,
+            output = token_err or release_token_err,
+        })
+    end
     local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(lock_path))
     if not ok then
         return nil, makeError("FilesystemError", "Another build is using this output path, or a stale build lock remains", {
@@ -756,14 +801,102 @@ local function acquireOutputLock(final_path)
             output = output,
         })
     end
-    return lock_path
+    local owner_path = normalizePath(lock_path .. "/owner." .. token)
+    local owner_content = "token=" .. token .. "\noutput=" .. normalizePath(final_path) .. "\n"
+    local wrote, write_err = fs.writeFile(owner_path, owner_content)
+    if not wrote then
+        return nil, makeError("FilesystemError", "Cannot record output lock ownership", {
+            path = final_path,
+            lock_path = lock_path,
+            owner_path = owner_path,
+            output = write_err,
+            cleanup_error = "lock retained because ownership could not be proven",
+        })
+    end
+    return {
+        path = lock_path,
+        owner_path = owner_path,
+        owner_content = owner_content,
+        token = token,
+        release_token = release_token,
+    }
 end
 
-local function releaseOutputLock(lock_path, failure)
-    local cleanup_err = lock_path and removeTree(lock_path) or nil
+local function restoreMovedOutputLock(release_path, lock_path)
+    if pathExists(lock_path) or isSymlink(lock_path) then
+        return false, "public lock path is already occupied"
+    end
+    local reserved, reserve_err = commandOutput("mkdir -m 700 " .. shellQuote(lock_path))
+    if not reserved then
+        return false, reserve_err
+    end
+    local restored, restore_err = os.rename(release_path, lock_path)
+    if not restored then
+        return false, restore_err
+    end
+    return true
+end
+
+local function releaseOutputLock(lock, failure)
+    local cleanup_err
+    if lock then
+        local release_path = normalizePath(dirname(lock.path)
+            .. "/.luai-lock-release-" .. lock.release_token)
+        if pathExists(release_path) or isSymlink(release_path) then
+            cleanup_err = makeError("FilesystemError", "Output lock release path already exists", {
+                lock_path = lock.path,
+                release_path = release_path,
+            })
+        else
+            local moved, move_err = os.rename(lock.path, release_path)
+            if not moved then
+                cleanup_err = makeError("FilesystemError", "Cannot bind output lock for release", {
+                    lock_path = lock.path,
+                    release_path = release_path,
+                    output = tostring(move_err),
+                })
+            end
+        end
+        local release_owner = normalizePath(release_path .. "/owner." .. lock.token)
+        local owner_content, read_err
+        if not cleanup_err then
+            owner_content, read_err = fs.readRegularFile(release_owner)
+        end
+        if not cleanup_err and owner_content ~= lock.owner_content then
+            local restored, restore_err
+            restored, restore_err = restoreMovedOutputLock(release_path, lock.path)
+            cleanup_err = makeError("FilesystemError", "Output lock ownership changed before release", {
+                lock_path = lock.path,
+                release_path = release_path,
+                owner_path = release_owner,
+                output = read_err,
+                restored = restored and true or false,
+                restore_error = restored and nil or tostring(restore_err),
+            })
+        elseif not cleanup_err then
+            local removed_owner, owner_err = os.remove(release_owner)
+            if not removed_owner then
+                cleanup_err = makeError("FilesystemError", "Cannot remove output lock owner record", {
+                    lock_path = lock.path,
+                    release_path = release_path,
+                    owner_path = release_owner,
+                    output = tostring(owner_err),
+                })
+            else
+                local removed_lock, lock_err = removeDirectoryOnly(release_path)
+                if not removed_lock then
+                    cleanup_err = makeError("FilesystemError", "Cannot remove non-empty or replaced output lock", {
+                        lock_path = lock.path,
+                        release_path = release_path,
+                        output = tostring(lock_err),
+                    })
+                end
+            end
+        end
+    end
     if cleanup_err and failure and failure.error then
         failure.error.cleanup_error = cleanup_err.error and cleanup_err.error.message or tostring(cleanup_err)
-        failure.error.cleanup_path = lock_path
+        failure.error.cleanup_path = lock and lock.path or nil
         return failure
     end
     return failure or cleanup_err
@@ -806,6 +939,152 @@ local function outputSnapshotMatches(path_value, allowed, snapshot, declared_out
         })
     end
     return true
+end
+
+local function removeGeneratedBackup(path_value, allowed, snapshot, declared_output_dir)
+    if snapshot.kind == "empty" then
+        local removed, remove_err = removeDirectoryOnly(path_value)
+        if not removed then
+            return makeError("FilesystemError", "Previous empty output backup is no longer empty", {
+                path = path_value,
+                output = tostring(remove_err),
+            })
+        end
+        return nil
+    end
+    if snapshot.kind ~= "generated" then
+        return makeError("InvalidOutputError", "Refusing to remove a backup with an unknown ownership state", {
+            path = path_value,
+            snapshot_kind = snapshot.kind,
+        })
+    end
+
+    local matches, marker_or_err = generatedMarkerMatches(path_value, allowed, declared_output_dir)
+    if not matches then return marker_or_err end
+    local marker = marker_or_err
+    local marker_path = normalizePath(path_value .. "/" .. GENERATED_MARKER_RELATIVE)
+    local marker_content, marker_read_err = fs.readRegularFile(marker_path)
+    if marker_content == nil or hash_mod.sha256(marker_content) ~= snapshot.marker_hash then
+        return invalidOutputInventory(path_value, "Generated output marker changed before backup cleanup", {
+            unexpected_path = marker_path,
+            cause = marker_read_err,
+        })
+    end
+
+    local cleanup_nonce, nonce_err = secureToken(path_value)
+    if not cleanup_nonce then
+        return makeError("FilesystemError", "Cannot generate a secure backup quarantine name", {
+            path = path_value,
+            output = nonce_err,
+        })
+    end
+    cleanup_nonce = cleanup_nonce:sub(1, 24)
+    local cleanup_index = 0
+    local function removeOwnedRegular(candidate, expected_hash)
+        local quarantine_path
+        for _ = 1, 20 do
+            cleanup_index = cleanup_index + 1
+            quarantine_path = normalizePath(dirname(candidate) .. "/.luai-remove-"
+                .. cleanup_nonce .. "-" .. tostring(cleanup_index))
+            if not pathExists(quarantine_path) and not isSymlink(quarantine_path) then
+                break
+            end
+            quarantine_path = nil
+        end
+        if not quarantine_path then
+            return makeError("FilesystemError", "Cannot allocate a backup-file quarantine path", {
+                path = candidate,
+            })
+        end
+        local moved, move_err = os.rename(candidate, quarantine_path)
+        if not moved then
+            return makeError("FilesystemError", "Cannot quarantine an owned backup file", {
+                path = candidate,
+                quarantine_path = quarantine_path,
+                output = tostring(move_err),
+            })
+        end
+        local content, read_err = fs.readRegularFile(quarantine_path)
+        if content == nil or hash_mod.sha256(content) ~= expected_hash then
+            return invalidOutputInventory(path_value, "Backup file changed while it was quarantined", {
+                unexpected_path = candidate,
+                preserved_path = quarantine_path,
+                cause = read_err,
+            })
+        end
+        local removed, remove_err = os.remove(quarantine_path)
+        if not removed then
+            return makeError("FilesystemError", "Cannot remove a verified quarantined backup file", {
+                path = candidate,
+                quarantine_path = quarantine_path,
+                output = tostring(remove_err),
+            })
+        end
+        return nil
+    end
+
+    local files = {}
+    local directories = {}
+    for _, item in pairs(marker.entries) do
+        if item.kind == "file" then
+            files[#files + 1] = item
+        else
+            directories[#directories + 1] = item
+        end
+    end
+    table.sort(files, function(left, right)
+        return left.path < right.path
+    end)
+    table.sort(directories, function(left, right)
+        local left_depth = select(2, left.path:gsub("/", ""))
+        local right_depth = select(2, right.path:gsub("/", ""))
+        if left_depth ~= right_depth then
+            return left_depth > right_depth
+        end
+        return left.path > right.path
+    end)
+
+    for _, item in ipairs(files) do
+        local candidate = normalizePath(path_value .. "/" .. item.path)
+        local content, read_err = fs.readRegularFile(candidate)
+        if content == nil or hash_mod.sha256(content) ~= item.hash then
+            return invalidOutputInventory(path_value, "Generated backup file changed during cleanup", {
+                unexpected_path = candidate,
+                cause = read_err,
+            })
+        end
+        local remove_err = removeOwnedRegular(candidate, item.hash)
+        if remove_err then return remove_err end
+    end
+
+    local current_marker, current_marker_err = fs.readRegularFile(marker_path)
+    if current_marker == nil or hash_mod.sha256(current_marker) ~= snapshot.marker_hash then
+        return invalidOutputInventory(path_value, "Generated output marker changed during backup cleanup", {
+            unexpected_path = marker_path,
+            cause = current_marker_err,
+        })
+    end
+    local marker_remove_err = removeOwnedRegular(marker_path, snapshot.marker_hash)
+    if marker_remove_err then return marker_remove_err end
+
+    for _, item in ipairs(directories) do
+        local candidate = normalizePath(path_value .. "/" .. item.path)
+        local removed, remove_err = removeDirectoryOnly(candidate)
+        if not removed then
+            return makeError("FilesystemError", "Cannot remove a non-empty or changed backup directory", {
+                path = candidate,
+                output = tostring(remove_err),
+            })
+        end
+    end
+    local removed_root, root_remove_err = removeDirectoryOnly(path_value)
+    if not removed_root then
+        return makeError("FilesystemError", "Cannot remove a non-empty or changed output backup", {
+            path = path_value,
+            output = tostring(root_remove_err),
+        })
+    end
+    return nil
 end
 
 local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
@@ -908,13 +1187,13 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
                 }
             )
         end
-        local cleanup_err = removeTree(backup_path)
+        local cleanup_err = removeGeneratedBackup(backup_path, allowed, snapshot, final_path)
         if cleanup_err then
-            return makeError("FilesystemError", "Output was installed but previous output backup could not be removed", {
-                path = final_path,
-                backup_path = backup_path,
-                committed = true,
-            })
+            cleanup_err.error = cleanup_err.error or {}
+            cleanup_err.error.path = final_path
+            cleanup_err.error.backup_path = backup_path
+            cleanup_err.error.committed = true
+            return cleanup_err
         end
     end
     return nil
@@ -1004,6 +1283,46 @@ local function traceModuleMaps(trace)
         end
     end
     return lua_names, native_names
+end
+
+local function validateModuleAliasOwners(lua_names, native_names)
+    local owners = {}
+    local function addAliases(kind, aliases_by_source)
+        local sources = {}
+        for source_path in pairs(aliases_by_source) do
+            sources[#sources + 1] = source_path
+        end
+        table.sort(sources)
+        for _, source_path in ipairs(sources) do
+            local aliases = {}
+            for module_name, enabled in pairs(aliases_by_source[source_path]) do
+                if enabled then aliases[#aliases + 1] = module_name end
+            end
+            table.sort(aliases)
+            for _, module_name in ipairs(aliases) do
+                local owner = owners[module_name]
+                if owner and (owner.source ~= source_path or owner.kind ~= kind) then
+                    return makeError(
+                        "DuplicateModuleError",
+                        "Module alias is owned by multiple sources: " .. module_name,
+                        {
+                            module_name = module_name,
+                            first_source = owner.source,
+                            first_kind = owner.kind,
+                            second_source = source_path,
+                            second_kind = kind,
+                        }
+                    )
+                end
+                owners[module_name] = {
+                    source = source_path,
+                    kind = kind,
+                }
+            end
+        end
+        return nil
+    end
+    return addAliases("lua", lua_names) or addAliases("native", native_names)
 end
 
 local function nativeDestinations(native_path, module_names, native_dir, target_os)
@@ -1113,6 +1432,11 @@ function M.bundleOnedir(opts)
     end
     if type(entry) ~= "string" or entry == "" then
         return makeError("InvalidOptionsError", "entry is required")
+    end
+    local lua_names, native_names = traceModuleMaps(opts.trace or manifest.trace or {})
+    local alias_err = validateModuleAliasOwners(lua_names, native_names)
+    if alias_err then
+        return alias_err
     end
 
     local final_out_dir = absolutePath(opts.out or defaultOut(entry))
@@ -1235,7 +1559,6 @@ function M.bundleOnedir(opts)
     if not source_hashes then
         return abandon(source_hash_err)
     end
-    local lua_names, native_names = traceModuleMaps(opts.trace or manifest.trace or {})
     local c_source
     local ok_generate, generated = pcall(launcher.generateSource, {
         entry = entry,

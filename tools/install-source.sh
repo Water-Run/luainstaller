@@ -71,6 +71,14 @@ module_dir="$lua_share/luainstaller"
 bin_dir="$prefix/bin"
 man_dir="$prefix/share/man/man1"
 
+shell_quote() {
+    printf "'"
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+    printf "'"
+}
+
+lua_path_literal=$(shell_quote "$lua_path")
+
 mkdir -p "$module_dir" "$bin_dir" "$man_dir"
 cp "$project_root/src/init.lua" "$lua_share/luainstaller.lua"
 for module in analyzer bundler cgen cli compat discovery fs hash launcher logger manifest onefile path platform process result runtime; do
@@ -85,7 +93,8 @@ write_wrapper() {
 #!/bin/sh
 set -eu
 
-lua_bin=\${LUAI_LUA:-"$lua_path"}
+default_lua=$lua_path_literal
+lua_bin=\${LUAI_LUA:-"\$default_lua"}
 if ! lua_abi=\$("\$lua_bin" -e 'io.write(_VERSION)' 2>/dev/null); then
     echo "$name: cannot query Lua interpreter: \$lua_bin" >&2
     exit 1

@@ -82,7 +82,8 @@ Runtime discovery generates and executes a temporary tracer.
 
 `src/manifest.lua`::
 Maps sources to bundle destinations, hashes inputs, and rejects duplicate
-destinations. One source record can carry every traced alias for that file.
+destinations. Traced aliases remain in trace records and are validated as one
+Lua/native ownership domain at the bundler boundary.
 
 `src/cgen.lua`, `src/runtime.lua`::
 Create and exercise the embedded Lua payload. They contain parallel runtime
@@ -113,6 +114,8 @@ directory lock serializes updates, a 120-second stale lock may be recovered,
 and checked temporary-file/backup switching preserves the previous generation.
 A successful clear publishes two empty generations so recovery cannot resurrect
 cleared entries. Windows path checks reject junctions and other reparse points.
+Those checks invoke PowerShell from a validated `SystemRoot`/`WINDIR` absolute
+path, so a reduced application `PATH` does not disable logging.
 
 [#implementation-static]
 == Static discovery
@@ -177,9 +180,10 @@ post-completion records are `DiscoveryError`, so a killed tracer cannot be
 mistaken for a complete dependency plan. The discovery interpreter must report
 exactly Lua 5.4.
 
-After execution, recorded names are resolved through the same `ModuleResolver`
-used by static mode. This produces a common dependency/trace shape for later
-stages.
+After execution, ordinary filesystem loader records are checked against
+`ModuleResolver`; custom loader-data paths are verified directly against the
+snapshotted file that the tracer observed. Both routes produce the common
+dependency/trace shape consumed by later stages.
 
 The mode cannot observe unexecuted branches or a `require` reference captured
 before the tracer patch. Manual includes are the escape hatch for both cases.
@@ -247,12 +251,20 @@ At commit time:
 . an existing generated output is renamed to a unique backup;
 . the moved backup is revalidated against the pre-build snapshot;
 . the complete staging directory is renamed to the final path;
-. the backup is revalidated once more and removed;
+. the backup is revalidated once more, then each declared file is atomically
+  quarantined and rehashed before nonrecursive removal;
 . if the second rename fails, the backup is restored.
 
 If either post-move validation detects concurrent content, publication is
 aborted and the previous directory is restored. Unrestorable data remains at a
 reported backup path instead of being deleted.
+
+This transaction protects directory-entry races. POSIX keeps an inode writable
+through a descriptor opened before its rename, so an unrelated process can
+still change a quarantined file after verification. The implementation cannot
+portably revoke that descriptor; callers must quiesce such writers or publish
+to a different output path. The output lock only coordinates luainstaller
+builders.
 
 The marker records the final path even though it is written in staging. This is
 required for later ownership validation.
@@ -267,15 +279,27 @@ duplicates, missing entries, and additional nested content are refused.
 [#implementation-onefile]
 == Onefile security boundary
 
-The extractor accepts only safe relative embedded paths. On POSIX it canonicalizes
-the configured temporary root, creates a UID-specific private cache, and checks
-owner/mode with `lstat`. On Windows it rejects reparse-point directories.
+The extractor accepts only safe relative embedded paths. On POSIX it
+canonicalizes the configured temporary root, opens every root component with
+`openat(..., O_NOFOLLOW)`, creates the UID-specific cache with `mkdirat`, and
+requires every ancestor to be owned by root or the effective user. It rejects
+group/other-writable ancestors unless the sticky bit protects their entries.
+It also checks each bound cache directory descriptor's owner and mode. On
+Windows it opens
+the absolute temporary-path chain and every payload parent without following
+reparse points, omits write and delete sharing, and retains those directory
+handles. It also retains verified files without write or delete sharing until
+the child process exits.
 
 Every existing directory component must be a real directory. A symlink at the
 final file is removed; a symlink in a parent path aborts extraction. Cached
 files are accepted only when their complete bytes equal the embedded bytes.
-POSIX final-file matching, temporary creation, mode repair, replacement, and
-cleanup are relative to an opened no-follow parent-directory descriptor.
+POSIX parent traversal, final-file matching, temporary creation, mode repair,
+replacement, and cleanup are all relative to descriptors opened component by
+component without following symlinks.
+Windows temporary creation uses a pinned parent, handle-based writes and flush,
+an atomic same-directory replacement, then a no-follow full-byte verification
+whose handle remains pinned across `CreateProcess` and child completion.
 The deterministic SHA-256 payload ID frames every sorted path, executable bit,
 size, and content. Build-only files and the onedir marker are not embedded.
 

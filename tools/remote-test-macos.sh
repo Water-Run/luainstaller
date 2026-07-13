@@ -24,6 +24,31 @@ LUAROCKS_SHA256=b0e0c85205841ddd7be485f53d6125766d18a81d226588d2366931e9a1484492
 LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
 
+require_no_symlink_ancestors() {
+    candidate=$1
+    remainder=${candidate#/tmp/}
+    current=/tmp
+    saved_ifs=$IFS
+    IFS=/
+    # shellcheck disable=SC2086 # The validated path is intentionally split on '/'.
+    set -- $remainder
+    IFS=$saved_ifs
+    for component do
+        current=$current/$component
+        if [ -L "$current" ]; then
+            echo "unsafe symlink ancestor in temporary path: $current" >&2
+            exit 2
+        fi
+        if [ -e "$current" ] && [ ! -d "$current" ]; then
+            echo "unsafe non-directory ancestor in temporary path: $current" >&2
+            exit 2
+        fi
+        if [ ! -e "$current" ]; then
+            break
+        fi
+    done
+}
+
 require_safe_tmp_path() {
     path=$1
     case "$path" in
@@ -45,6 +70,7 @@ require_safe_tmp_path() {
             exit 2
             ;;
     esac
+    require_no_symlink_ancestors "$path"
 }
 
 quote_remote() {
@@ -115,6 +141,30 @@ remote_sh() {
     ssh -p "$BASTION_PORT" "$BASTION" "ssh $mac_host 'sh -s'"
 }
 
+check_remote_macos_tmp_path() {
+    mac_host=$(quote_remote "$MAC_HOST")
+    checked_path=$(quote_remote "$1")
+    ssh -p "$BASTION_PORT" "$BASTION" \
+        "ssh $mac_host CHECK_PATH=$checked_path sh -s" <<'EOF'
+set -eu
+path=$CHECK_PATH
+remainder=${path#/tmp/}
+current=/tmp
+saved_ifs=$IFS
+IFS=/
+set -- $remainder
+IFS=$saved_ifs
+for component do
+    current=$current/$component
+    if [ -L "$current" ] || { [ -e "$current" ] && [ ! -d "$current" ]; }; then
+        echo "unsafe remote temporary-path ancestor: $current" >&2
+        exit 2
+    fi
+    [ -e "$current" ] || break
+done
+EOF
+}
+
 for safe_path in "$REMOTE_ROOT" "$LUA_PREFIX" "$LUAROCKS_PREFIX" "$ROCKTREE" \
     "$PREFIX" "$SOURCE_CACHE"; do
     require_safe_tmp_path "$safe_path"
@@ -133,6 +183,10 @@ test "$cache_owner" = "$(id -u)" || { echo "source cache is not owned by this us
 chmod 700 "$SOURCE_CACHE"
 
 stage_macos_sources
+
+for remote_path in "$REMOTE_ROOT" "$LUA_PREFIX" "$LUAROCKS_PREFIX" "$ROCKTREE" "$PREFIX"; do
+    check_remote_macos_tmp_path "$remote_path"
+done
 
 remote_sh <<EOF
 set -eu

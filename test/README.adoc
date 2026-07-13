@@ -99,7 +99,8 @@ Remote scripts accept destructive paths only below normalized
 `/tmp/luainstaller-*` roots, transfer Git-tracked files, and verify pinned source
 archives. Windows defaults to `StrictHostKeyChecking=yes`; provision and verify
 the host key before running it. `WINDOWS_LOCAL_ONLY=1` runs MinGW/Wine coverage
-but is not a substitute for the required Windows lab.
+without requiring remote targets or SSH tooling, but is not a substitute for
+the required Windows lab.
 
 == Adding coverage
 

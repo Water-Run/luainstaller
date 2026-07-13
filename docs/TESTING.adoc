@@ -23,7 +23,7 @@ luarocks lint luainstaller-1.0.0-1.rockspec
 
 lua test/cli_split_smoke.lua
 lua test/contract_docs.lua
-lua test/production_edges.lua
+LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 lua test/production_edges.lua
 lua test/smoke_all.lua
 ----
 
@@ -64,7 +64,8 @@ The suite is expected to exercise all of these areas:
 * an onedir bundle runs without host `LUA_PATH`/`LUA_CPATH`;
 * a native onedir still works when reached through `PATH` and a symlink;
 * onefile reuses matching cache files, repairs executable mode, rejects unsafe
-  cache permissions and parent symlinks, and accepts a canonicalizable TMPDIR;
+  cache permissions, parent symlinks, and non-sticky writable TMPDIR ancestors,
+  while accepting a canonicalizable private or sticky TMPDIR;
 * a toolchain failure during rebuild preserves the previous executable;
 * source-installed and LuaRocks-installed command layouts can build a bundle.
 
@@ -204,21 +205,35 @@ sh tools/remote-test-windows.sh
 WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
 ----
 
+The Windows gate also exercises an ACP-representable non-ASCII filesystem path,
+logger state below a home path containing legal shell metacharacters, and a
+onefile child kept alive while attempts to rename its payload root, module
+directory, and manifest must fail because the extractor retains
+no-delete/no-write handles.
+
 The script builds a Windows Lua 5.4.8 toolchain and native dependencies with
 MinGW. It first executes the bundle matrix under Wine, then uploads the same
 archive and PowerShell runner to each entry in `WINDOWS_TARGETS`.
+`REMOTE_TEMP` selects the same validated directory for upload and extraction;
+the runner refuses reparse-point or non-directory components in that staging
+path before recursive cleanup.
 
 Coverage includes runtime, student management, SQLite, filesystem statistics,
 and the Web service. Both onedir and onefile run with `LUA_PATH` and `LUA_CPATH`
 cleared on Windows. The onefile runtime also verifies that an argument
 containing Windows backslashes and a space survives child-process forwarding.
+The clean-environment probe also distinguishes regular files from directories,
+junctions, and device names, then performs a persistent logger write/read/clear
+cycle without relying on PowerShell being present in `PATH`.
 
-Every SSH and SCP invocation supplies `StrictHostKeyChecking=yes`; configurable
-SSH option lists are rejected if they attempt to override host-key or known-hosts
-policy. The script never accepts a new or changed host key automatically. With
-no `WINDOWS_PASSWORD`, SSH and SCP use direct key authentication plus batch
-mode. Password mode wraps only those commands with `sshpass -e`, keeping the
-secret out of command arguments.
+Every SSH and SCP invocation supplies `StrictHostKeyChecking=yes`. Arbitrary
+`SSH_OPTS` and `SSH_KEY_OPTS` lists are rejected completely so an SSH config,
+known-hosts command, or other trust-policy option cannot bypass that setting.
+Use the typed `SSH_PORT` and optional non-symlink `SSH_IDENTITY_FILE` variables
+when the defaults are unsuitable. The script never accepts a new or changed
+host key automatically. With no `WINDOWS_PASSWORD`, SSH and SCP use direct key
+authentication plus batch mode. Password mode wraps only those commands with
+`sshpass -e`, keeping the secret out of command arguments.
 
 To run the local MinGW/Wine half without claiming a remote pass:
 
@@ -227,9 +242,10 @@ To run the local MinGW/Wine half without claiming a remote pass:
 WINDOWS_LOCAL_ONLY=1 sh tools/remote-test-windows.sh
 ----
 
-The command prints `windows local Wine gate ok` and exits before SSH. A release
-still requires a second run without `WINDOWS_LOCAL_ONLY=1` against every entry
-in nonempty `WINDOWS_TARGETS`.
+The command prints `windows local Wine gate ok` and exits before SSH. It does
+not require `WINDOWS_TARGETS`, SSH/SCP tools, an identity, or `sshpass`. A
+release still requires a second run without `WINDOWS_LOCAL_ONLY=1` against
+every entry in nonempty `WINDOWS_TARGETS`.
 
 The default target is the lab Windows 10 VM. Start the VM and wait for SSH
 before running the script; restore its original power state afterward. Wine is

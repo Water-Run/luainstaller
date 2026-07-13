@@ -128,7 +128,7 @@ end
 local function make_temp_dir(name)
     local path = "/tmp/luainstaller-" .. name .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
     remove_tree(path)
-    run("mkdir -p " .. shell_quote(path))
+    run("mkdir -m 700 " .. shell_quote(path))
     return path
 end
 
@@ -1129,7 +1129,9 @@ print(result.executable)
     if windows_script:find("WINDOWS_PASSWORD=${WINDOWS_PASSWORD:-", 1, true) then
         error("remote Windows password must not have a default value", 2)
     end
-    assert_contains(windows_script, "SSH_OPTS=${SSH_OPTS:-")
+    assert_contains(windows_script, 'if [ -n "${SSH_OPTS:-}" ]')
+    assert_contains(windows_script, "SSH_PORT=${SSH_PORT:-22}")
+    assert_contains(windows_script, 'SSH_IDENTITY_FILE=${SSH_IDENTITY_FILE:-""}')
     assert_contains(windows_script, "StrictHostKeyChecking=yes")
     assert_not_contains(windows_script, "StrictHostKeyChecking=no")
     assert_contains(windows_script, 'if [ -n "${WINDOWS_PASSWORD:-}" ]')
@@ -1632,11 +1634,11 @@ assert_bundle({
     assert_contains(built, runtime_out)
     assert_contains(built, student_out)
     local cache_root = root .. "/onefile-cache"
-    run("mkdir -p " .. shell_quote(cache_root))
+    run("mkdir -m 700 " .. shell_quote(cache_root))
     assert_contains(run("TMPDIR=" .. shell_quote(cache_root) .. " " .. shell_quote(runtime_out) .. " onefile"), "hello onefile")
     local real_temp_root = root .. "/onefile-real-temp"
     local linked_temp_root = root .. "/onefile-linked-temp"
-    run("mkdir -p " .. shell_quote(real_temp_root)
+    run("mkdir -m 700 " .. shell_quote(real_temp_root)
         .. " && ln -s " .. shell_quote(real_temp_root) .. " " .. shell_quote(linked_temp_root))
     assert_contains(run("TMPDIR=" .. shell_quote(linked_temp_root) .. " "
         .. shell_quote(runtime_out) .. " onefile-linked-temp"), "hello onefile-linked-temp")

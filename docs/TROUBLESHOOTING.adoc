@@ -280,16 +280,23 @@ backing it up, perform a one-time explicit removal or select a new output path.
 Use a new output path when uncertain. A current failed rebuild should leave the
 previous generated directory runnable because compilation occurs in staging.
 
-Each onedir build holds a sibling lock named `.<output-name>.luai-lock`. If the
-builder is killed or the machine loses power, the hidden directory can remain.
-Before removing it, confirm that no `luainstaller`, `luai`, compiler, or matching
-build process is still running and inspect its timestamp:
+Each onedir build holds a fixed-length sibling lock named
+`.luai-lock-<sha256-of-normalized-output-path>`. Its `owner.*` record names the
+exact output. If the builder is killed or the machine loses power, the hidden
+directory can remain. Before removing it, confirm that no `luainstaller`,
+`luai`, compiler, or matching build process is still running, then inspect its
+timestamp and owner record:
 
 [source,sh]
 ----
-ls -ld build/.app.luai-lock
+for lock in build/.luai-lock-*; do
+  test -d "$lock" || continue
+  ls -ld "$lock"
+  sed -n '1,2p' "$lock"/owner.*
+done
 ps aux | grep -E '[l]uainstaller|[l]uai|[c]c|[g]cc|[c]lang'
-rm -rf build/.app.luai-lock
+# After matching the owner record, remove that one exact lock path:
+rm -rf 'build/.luai-lock-<full-hash>'
 ----
 
 Never remove a lock merely because a build is slow; native dependency builds
@@ -310,7 +317,10 @@ ls -ld "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)" 2>/dev/null
 On POSIX the cache must be a real directory owned by the effective user with no
 group/other permissions. Parent-directory symlinks inside the cache are
 rejected. The temporary root itself is canonicalized, so the standard macOS
-`/tmp -> /private/tmp` link is supported.
+`/tmp -> /private/tmp` link is supported. Any group/other-writable ancestor
+must have the sticky bit, and every ancestor must be owned by the effective
+user or root. If a custom `TMPDIR` fails this check, use an owner-only directory
+below trusted ancestors or the system sticky temporary directory.
 
 A cache hit requires an exact byte comparison with the executable's embedded
 payload; matching size is insufficient. The SHA-256 payload directory changes

@@ -166,6 +166,13 @@ local function validateOptionalBoolean(opts, key)
     return nil
 end
 
+local function validateNotDriveRelative(value, key)
+    if type(value) == "string" and path.isDriveRelative(value) then
+        return invalidOption(key, key .. " must not use a drive-relative path")
+    end
+    return nil
+end
+
 local function validateMaxDeps(opts)
     local value = opts.max_deps
     if value == nil then
@@ -247,6 +254,10 @@ local function normalizeOptions(opts)
     if opts.entry:find("\0", 1, true) then
         return nil, invalidOption("entry", "entry must not contain NUL bytes")
     end
+    local entry_path_err = validateNotDriveRelative(opts.entry, "entry")
+    if entry_path_err then
+        return nil, entry_path_err
+    end
     local include, include_err = normalizeSequenceOption(opts, "include")
     if not include then
         return nil, include_err
@@ -259,6 +270,12 @@ local function normalizeOptions(opts)
     if not run_args then
         return nil, run_args_err
     end
+    for _, item_value in ipairs(include) do
+        local include_path_err = validateNotDriveRelative(item_value, "include")
+        if include_path_err then
+            return nil, include_path_err
+        end
+    end
     local max_deps_err = validateMaxDeps(opts)
     if max_deps_err then
         return nil, max_deps_err
@@ -267,6 +284,24 @@ local function normalizeOptions(opts)
         local err = validateOptionalString(opts, key)
         if err then
             return nil, err
+        end
+    end
+    for _, key in ipairs({ "lua", "lua_prefix", "out" }) do
+        local err = validateNotDriveRelative(opts[key], key)
+        if err then
+            return nil, err
+        end
+    end
+    for _, binding in ipairs({
+        { "lua", "LUAI_LUA" },
+        { "lua_prefix", "LUAI_LUA_PREFIX" },
+    }) do
+        local key, environment_name = binding[1], binding[2]
+        if opts[key] == nil then
+            local err = validateNotDriveRelative(os.getenv(environment_name), key)
+            if err then
+                return nil, err
+            end
         end
     end
     if type(opts.out) == "string" and opts.out:find("%c") then

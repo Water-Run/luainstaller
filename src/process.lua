@@ -10,10 +10,25 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-06-27
+    2026-07-11
 ]]
 
 local M = {}
+
+function M.windowsPowerShellPath()
+    local root = os.getenv("SystemRoot")
+    if type(root) ~= "string" or root == "" then
+        root = os.getenv("WINDIR")
+    end
+    if type(root) ~= "string" or root == "" then
+        return nil
+    end
+    root = root:gsub("/", "\\"):gsub("\\+$", "")
+    if not root:match("^%a:\\") or root:find('[%c"%%!%^&|<>]') then
+        return nil
+    end
+    return root .. "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+end
 
 function M.output(command)
     if type(io.popen) ~= "function" then

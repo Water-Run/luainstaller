@@ -55,9 +55,20 @@ When replacing an existing generated bundle, the old directory is renamed to a
 backup immediately before the final switch. The moved backup is revalidated
 against the pre-build recursive snapshot before publication and again before
 deletion. Concurrent content aborts the switch and is restored or retained at a
-reported backup path. If the switch fails, the backup is restored. A compiler
-or copy failure therefore leaves the previous bundle available instead of
-replacing it with partial output.
+reported backup path. Cleanup never recursively removes the old tree: declared
+files are atomically moved to unpredictable quarantine names, rehashed there,
+and removed individually before empty directories are removed bottom-up. If the
+switch fails, the backup is restored. A compiler or copy failure therefore
+leaves the previous bundle available instead of replacing it with partial
+output.
+
+The pathname transaction cannot revoke a write-capable POSIX file descriptor
+that another process opened before the backup rename. Such a descriptor still
+refers to the quarantined inode and can modify it after the final rehash. No
+portable POSIX primitive can both revoke that descriptor and delete the inode.
+Stop arbitrary writers before rebuilding; the output lock serializes
+luainstaller builders, not unrelated processes holding pre-existing file
+descriptors. Build to a new output path when that condition cannot be ensured.
 
 [#bundling-launcher]
 == Launcher startup
@@ -214,7 +225,13 @@ returns `FilesystemError` for atomic publication.
 == Onefile extraction and cache
 
 On POSIX, the cache directory is named `luainstaller-onefile-<effective-uid>`
-under the canonical temporary root. Both the cache and payload directory must:
+under the canonical temporary root. The extractor opens the temporary-root
+chain component by component and retains bound directory descriptors through
+parent creation and file writes. Every ancestor must be owned by the effective
+user or root. A group- or other-writable ancestor is accepted only when it also
+has the sticky bit; this permits `/tmp` while rejecting a directory whose owner
+or another writer could rename the cache entry. Both the cache and payload
+directory must:
 
 * be owned by the effective user;
 * deny all group and other permissions;
@@ -223,8 +240,14 @@ under the canonical temporary root. Both the cache and payload directory must:
 Windows uses the current user's temporary directory, rejects reparse points,
 verifies that cache directories are owned by the current process token's user
 SID, and applies a protected DACL granting full access only to that user and
-`SYSTEM`. The extractor reapplies the same owner and protected DACL to both
-new and matching cached files.
+`SYSTEM`. It opens and retains every absolute temporary-path component and
+payload parent with `FILE_FLAG_OPEN_REPARSE_POINT` while denying delete sharing.
+Directory pins also deny write sharing so they cannot be converted into reparse
+points in place. Every verified payload file is retained without write or
+delete sharing until the inner process exits. The extractor reapplies the same
+owner and protected DACL to both new and matching cached files. These pins
+prevent a checked cache
+directory, DLL, or executable from being replaced between extraction and use.
 
 Before writing any file, the extractor rejects absolute paths, drive-qualified
 paths, empty segments, `.` segments, and `..` segments. Existing final-file

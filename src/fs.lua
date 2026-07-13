@@ -16,6 +16,48 @@ local process = require("luainstaller.process")
 local M = {}
 
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
+local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+local function base64Encode(value)
+    local output = {}
+    for index = 1, #value, 3 do
+        local first = value:byte(index)
+        local second = value:byte(index + 1)
+        local third = value:byte(index + 2)
+        local packed = (first << 16) | ((second or 0) << 8) | (third or 0)
+        output[#output + 1] = BASE64_ALPHABET:sub(((packed >> 18) & 63) + 1, ((packed >> 18) & 63) + 1)
+        output[#output + 1] = BASE64_ALPHABET:sub(((packed >> 12) & 63) + 1, ((packed >> 12) & 63) + 1)
+        output[#output + 1] = second
+            and BASE64_ALPHABET:sub(((packed >> 6) & 63) + 1, ((packed >> 6) & 63) + 1)
+            or "="
+        output[#output + 1] = third
+            and BASE64_ALPHABET:sub((packed & 63) + 1, (packed & 63) + 1)
+            or "="
+    end
+    return table.concat(output)
+end
+
+local function windowsIsRegularFile(path)
+    local powershell = process.windowsPowerShellPath()
+    if not powershell then
+        return false
+    end
+    local encoded_path = base64Encode(path)
+    local script = table.concat({
+        "$p=[Text.Encoding]::Default.GetString([Convert]::FromBase64String('",
+        encoded_path,
+        "'));$i=Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue;",
+        "if ($null -eq $i) { exit 1 };",
+        "if (-not ($i -is [IO.FileInfo])) { exit 1 };",
+        "if (($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 1 };",
+        "if (($i.Attributes -band [IO.FileAttributes]::Device) -ne 0) { exit 1 };",
+        "exit 0",
+    })
+    local ok = process.output(
+        'call "' .. powershell .. '" -NoProfile -NonInteractive -Command "' .. script .. '"'
+    )
+    return ok == true
+end
 
 local function operationError(operation, path, detail)
     return string.format(
@@ -57,8 +99,7 @@ function M.isRegularFile(path)
         return false
     end
     if IS_WINDOWS then
-        local content = M.readFile(path)
-        return content ~= nil
+        return windowsIsRegularFile(path)
     end
     local ok = process.output("test -f " .. process.shellQuote(path))
     return ok == true

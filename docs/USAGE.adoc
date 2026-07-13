@@ -330,9 +330,10 @@ assert(built.ok, built.error and built.error.message)
 print(built.executable)
 ----
 
-Public operations return `{ ok = true, ... }` or
-`{ ok = false, error = { type = ..., message = ... } }`. Invalid or unknown
-option keys return `InvalidOptionsError` rather than being ignored.
+`analyze`, `trace`, `compatibility`, and `bundle` return `{ ok = true, ... }`
+or `{ ok = false, error = { type = ..., message = ... } }`. `getLogs` returns a
+list and `clearLogs` returns a boolean. Invalid or unknown operation-option keys
+return `InvalidOptionsError` rather than being ignored.
 
 Available operations are `analyze`, `trace`, `compatibility`, `bundle`,
 `getLogs`, and `clearLogs`.

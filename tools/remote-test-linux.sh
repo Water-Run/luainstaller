@@ -20,6 +20,31 @@ LUAROCKS_SHA256=b0e0c85205841ddd7be485f53d6125766d18a81d226588d2366931e9a1484492
 LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
 
+require_no_symlink_ancestors() {
+    candidate=$1
+    remainder=${candidate#/tmp/}
+    current=/tmp
+    saved_ifs=$IFS
+    IFS=/
+    # shellcheck disable=SC2086 # The validated path is intentionally split on '/'.
+    set -- $remainder
+    IFS=$saved_ifs
+    for component do
+        current=$current/$component
+        if [ -L "$current" ]; then
+            echo "unsafe symlink ancestor in temporary path: $current" >&2
+            exit 2
+        fi
+        if [ -e "$current" ] && [ ! -d "$current" ]; then
+            echo "unsafe non-directory ancestor in temporary path: $current" >&2
+            exit 2
+        fi
+        if [ ! -e "$current" ]; then
+            break
+        fi
+    done
+}
+
 require_safe_tmp_path() {
     path=$1
     case "$path" in
@@ -41,6 +66,7 @@ require_safe_tmp_path() {
             exit 2
             ;;
     esac
+    require_no_symlink_ancestors "$path"
 }
 
 stage_source() {
@@ -103,6 +129,53 @@ copy_tree_default_ssh() {
         <"$TRACKED_ARCHIVE"
 }
 
+check_remote_tmp_path() {
+    target=$1
+    port=$2
+    checked_path=$3
+    quoted_path=$(quote_remote "$checked_path")
+    if [ -n "$port" ]; then
+        ssh -p "$port" "$target" "CHECK_PATH=$quoted_path sh -s" <<'EOF'
+set -eu
+path=$CHECK_PATH
+remainder=${path#/tmp/}
+current=/tmp
+saved_ifs=$IFS
+IFS=/
+set -- $remainder
+IFS=$saved_ifs
+for component do
+    current=$current/$component
+    if [ -L "$current" ] || { [ -e "$current" ] && [ ! -d "$current" ]; }; then
+        echo "unsafe remote temporary-path ancestor: $current" >&2
+        exit 2
+    fi
+    [ -e "$current" ] || break
+done
+EOF
+    else
+        # shellcheck disable=SC2029 # quoted_path is validated and shell-quoted locally.
+        ssh "$target" "CHECK_PATH=$quoted_path sh -s" <<'EOF'
+set -eu
+path=$CHECK_PATH
+remainder=${path#/tmp/}
+current=/tmp
+saved_ifs=$IFS
+IFS=/
+set -- $remainder
+IFS=$saved_ifs
+for component do
+    current=$current/$component
+    if [ -L "$current" ] || { [ -e "$current" ] && [ ! -d "$current" ]; }; then
+        echo "unsafe remote temporary-path ancestor: $current" >&2
+        exit 2
+    fi
+    [ -e "$current" ] || break
+done
+EOF
+    fi
+}
+
 for safe_path in "$REMOTE_ROOT" "$SOURCE_CACHE" "$ARM_LUA_PREFIX" \
     "$ARM_LUAROCKS_PREFIX" "$ARM_ROCKTREE"; do
     require_safe_tmp_path "$safe_path"
@@ -127,6 +200,7 @@ stage_source "$SQLITE_ZIP" 'https://www.sqlite.org/2026/sqlite-amalgamation-3530
 create_tracked_tree_archive
 trap 'rm -f "$TRACKED_LIST" "$TRACKED_ARCHIVE"' EXIT HUP INT TERM
 
+check_remote_tmp_path "$LINUX_X64" "$LINUX_X64_PORT" "$REMOTE_ROOT"
 copy_tree_ssh "$LINUX_X64" "$LINUX_X64_PORT" "$REMOTE_ROOT"
 
 ssh -p "$LINUX_X64_PORT" "$LINUX_X64" "REMOTE_ROOT=$(quote_remote "$REMOTE_ROOT") sh -s" <<'EOF'
@@ -137,7 +211,7 @@ find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
 sh -n tools/install-source.sh
 lua test/cli_split_smoke.lua
 lua test/contract_docs.lua
-lua test/production_edges.lua
+LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 lua test/production_edges.lua
 smoke_output=$(lua test/smoke_all.lua)
 printf '%s\n' "$smoke_output"
 if printf '%s\n' "$smoke_output" | grep -i 'skipped' >/dev/null; then
@@ -153,6 +227,9 @@ printf '%s\n' "$output" | grep "hello linux-clean"
 echo "linux x64 remote ok"
 EOF
 
+for remote_path in "$REMOTE_ROOT" "$ARM_LUA_PREFIX" "$ARM_LUAROCKS_PREFIX" "$ARM_ROCKTREE"; do
+    check_remote_tmp_path "$LINUX_ARM64" "" "$remote_path"
+done
 copy_tree_default_ssh "$LINUX_ARM64" "$REMOTE_ROOT"
 scp "$SOURCE_CACHE/$LUA_TARBALL" "$SOURCE_CACHE/$LUAROCKS_TARBALL" \
     "$SOURCE_CACHE/$LSQLITE3_ZIP" "$SOURCE_CACHE/$SQLITE_ZIP" \

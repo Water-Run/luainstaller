@@ -823,15 +823,6 @@ function ModuleResolver:buildSearchTemplates()
         end
     end
 
-    if package.cpath then
-        for raw_tpl in package.cpath:gmatch("[^;]+") do
-            local tpl = raw_tpl:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
-            if tpl ~= "" and tpl:find("%?") then
-                addNative(tpl)
-            end
-        end
-    end
-
     if IS_WINDOWS then
         addNative(base .. "/?.dll")
         addNative(base .. "/?/init.dll")
@@ -844,6 +835,15 @@ function ModuleResolver:buildSearchTemplates()
         addNative(base .. "/lib/?/init.so")
         addNative(base .. "/?.dylib")
         addNative(base .. "/?/init.dylib")
+    end
+
+    if package.cpath then
+        for raw_tpl in package.cpath:gmatch("[^;]+") do
+            local tpl = raw_tpl:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
+            if tpl ~= "" and tpl:find("%?") then
+                addNative(tpl)
+            end
+        end
     end
 end
 

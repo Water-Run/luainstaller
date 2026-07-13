@@ -42,6 +42,35 @@ local function assertEqual(actual, expected, label)
     ))
 end
 
+test("full edge-coverage prerequisites are available", function()
+    if os.getenv("LUAI_REQUIRE_FULL_EDGE_COVERAGE") ~= "1" then return end
+    assert(package.config:sub(1, 1) == "/", "full edge coverage requires a POSIX host")
+    assertEqual(commandOutputTrimmed("uname -s"), "Linux", "full edge coverage host")
+    for _, command in ipairs({
+        "cc", "clang", "luajit", "pkg-config", "sha256sum",
+        "x86_64-w64-mingw32-gcc",
+    }) do
+        local available = os.execute("command -v " .. command .. " >/dev/null 2>&1")
+        assert(available == true or available == 0,
+            "full edge coverage is missing command: " .. command)
+    end
+    local full = io.open("/dev/full", "wb")
+    assert(full, "full edge coverage requires /dev/full")
+    full:close()
+    local lua_binary = commandOutputTrimmed("command -v lua")
+    assert(runCommand("ldd " .. shellQuote(lua_binary)):find("liblua", 1, true),
+        "full edge coverage could not identify the linked Lua runtime")
+    local root = makeTempDir("coverage-prerequisites")
+    local unreadable = root .. "/unreadable"
+    makeDirectory(unreadable)
+    runCommand("chmod 000 " .. shellQuote(unreadable))
+    local inaccessible = os.execute("test ! -r " .. shellQuote(unreadable))
+    runCommand("chmod 700 " .. shellQuote(unreadable))
+    removeTree(root)
+    assert(inaccessible == true or inaccessible == 0,
+        "full edge coverage must run as a user affected by permission bits")
+end)
+
 local function fnv1a32Collision(content)
     assert(#content >= 5, "collision fixture must be at least five bytes")
     local mask = 0xffffffff
@@ -147,21 +176,178 @@ test("checked write reports flush or close failure", function()
     assert(type(err) == "string" and err ~= "")
 end)
 
+test("Windows regular-file checks use a non-follow type query", function()
+    local process = require("luainstaller.process")
+    local original_output = process.output
+    local original_config = package.config
+    local original_getenv = os.getenv
+    local calls = 0
+    process.output = function(command)
+        calls = calls + 1
+        assert(command:find(
+            'call "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
+            1,
+            true
+        ), "Windows type query depended on PATH for PowerShell")
+        assert(command:find("FromBase64String", 1, true), "Windows path was not encoded")
+        assert(command:find("[Text.Encoding]::Default.GetString", 1, true),
+            "Windows narrow-path bytes were not decoded with the active ANSI code page")
+        assert(not command:find("NUL&echo unsafe", 1, true), "raw Windows path reached the shell")
+        return calls == 2, "simulated Windows file type"
+    end
+    rawset(package, "config", "\\\n;\n?\n!\n-")
+    rawset(os, "getenv", function(name)
+        if name == "SystemRoot" then return "C:\\Windows" end
+        return original_getenv(name)
+    end)
+    local loaded, windows_fs = pcall(dofile, "src/fs.lua")
+    rawset(package, "config", original_config)
+    if not loaded then
+        process.output = original_output
+        rawset(os, "getenv", original_getenv)
+        error(windows_fs)
+    end
+    local device = windows_fs.isRegularFile("NUL&echo unsafe")
+    local regular = windows_fs.isRegularFile("C:\\safe\\empty.lua")
+    process.output = original_output
+    rawset(os, "getenv", original_getenv)
+
+    assert(not device, "Windows device was accepted as a regular file")
+    assert(regular, "Windows regular-file type result was ignored")
+    assertEqual(calls, 2, "Windows type query count")
+end)
+
+test("Windows PowerShell helper is absolute and rejects shell metacharacters", function()
+    local process = require("luainstaller.process")
+    local original_getenv = os.getenv
+    rawset(os, "getenv", function(name)
+        if name == "SystemRoot" then return "D:\\Windows Root" end
+        return original_getenv(name)
+    end)
+    local ok, resolved = pcall(process.windowsPowerShellPath)
+    rawset(os, "getenv", function(name)
+        if name == "SystemRoot" then return "" end
+        if name == "WINDIR" then return "E:\\WinNT" end
+        return original_getenv(name)
+    end)
+    local fallback_ok, fallback = pcall(process.windowsPowerShellPath)
+    rawset(os, "getenv", function(name)
+        if name == "SystemRoot" then return "C:\\Windows&echo unsafe" end
+        return original_getenv(name)
+    end)
+    local unsafe_ok, unsafe = pcall(process.windowsPowerShellPath)
+    rawset(os, "getenv", original_getenv)
+
+    assert(ok, "Windows PowerShell path helper is unavailable")
+    assertEqual(
+        resolved,
+        "D:\\Windows Root\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "absolute Windows PowerShell path"
+    )
+    assert(fallback_ok, "WINDIR fallback raised an error")
+    assertEqual(
+        fallback,
+        "E:\\WinNT\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "WINDIR fallback path"
+    )
+    assert(unsafe_ok and unsafe == nil, "unsafe SystemRoot reached a shell command")
+end)
+
+test("Windows logger encodes legal metacharacters in filesystem paths", function()
+    local source = readFile("src/logger.lua")
+    assert(source:find("FromBase64String", 1, true),
+        "Windows logger does not encode filesystem paths")
+    assert(source:find("[Text.Encoding]::Default.GetString", 1, true),
+        "Windows logger does not decode narrow paths with the active ANSI code page")
+    assert(not source:find("windowsCommandPathIsSafe", 1, true),
+        "Windows logger rejects legal filesystem metacharacters")
+end)
+
 test("path roots and safe relatives", function()
     local path = require("luainstaller.path")
     assertEqual(path.dirname("/main.lua"), "/", "POSIX root parent")
     assertEqual(path.dirname("C:/main.lua"), "C:/", "drive root parent")
-    assertEqual(path.dirname("//server/share.lua"), "//server", "UNC parent")
+    assertEqual(path.dirname("//server/share.lua"), "//server/share.lua", "UNC share root parent")
+    assertEqual(path.normalize("//server/share/.."), "//server/share", "UNC share traversal")
+    assertEqual(path.dirname("//server/share"), "//server/share", "UNC share root parent")
+    assertEqual(path.dirname("//server/share/main.lua"), "//server/share", "UNC share child parent")
+    assert(path.isAbsolute("\\\\server\\share\\main.lua"), "backslash UNC path must be absolute")
     assertEqual(path.join("/", "main.lua"), "/main.lua", "POSIX root join")
     assertEqual(path.join("C:/", "main.lua"), "C:/main.lua", "drive root join")
+    assertEqual(path.join("//server/share", "main.lua"), "//server/share/main.lua", "UNC root join")
+    assertEqual(path.join("/tmp/base", "\\\\server\\share\\main.lua"),
+        "//server/share/main.lua", "backslash UNC right operand")
     assert(path.isWithin("foo/bar", "."))
     assert(path.isWithin("/foo", "/"))
     assert(path.isWithin("C:/foo", "C:/"))
+    assert(path.isWithin("//server/share/foo", "//server/share"))
+    assert(not path.isWithin("//server/other/foo", "//server/share"))
     assert(not path.isWithin("../foo", "."))
     assert(not path.isSafeRelative("C:relative"))
     assert(not path.isSafeRelative("trailing/"))
     assert(not path.isSafeRelative("a//b"))
     assert(path.isSafeRelative("a/b.lua"))
+    assert(path.isDriveRelative("C:relative"))
+    assert(path.isDriveRelative("C:"))
+    assert(not path.isDriveRelative("C:/absolute"))
+    assertEqual(path.absolute("C:relative"), "C:relative", "drive-relative absolute conversion")
+    assertEqual(path.join("/tmp", "C:relative"), "C:relative", "drive-relative join")
+end)
+
+test("public path options reject drive-relative names", function()
+    local luainstaller = require("luainstaller")
+    local entry = "test/single_file/01_hello_luainstaller.lua"
+    local cases = {
+        { option = "entry", opts = { entry = "C:main.lua" } },
+        { option = "include", opts = { entry = entry, include = { "D:module.lua" } } },
+        { option = "out", opts = { entry = entry, out = "E:bundle" } },
+        { option = "lua_prefix", opts = { entry = entry, lua_prefix = "F:lua54" } },
+        { option = "lua", opts = { entry = entry, lua = "G:lua.exe" } },
+    }
+    for _, case in ipairs(cases) do
+        local result = luainstaller.analyze(case.opts)
+        assert(not result.ok, case.option .. " drive-relative name was accepted")
+        assertEqual(result.error.type, "InvalidOptionsError", case.option .. " drive-relative type")
+        assertEqual(result.error.option, case.option, case.option .. " drive-relative option")
+    end
+    local child = harness.loader_prelude() .. [[
+local result = require("luainstaller").analyze({
+    entry = "test/single_file/01_hello_luainstaller.lua",
+})
+assert(not result.ok and result.error.type == "InvalidOptionsError")
+assert(result.error.option == "lua_prefix")
+print("drive-relative environment rejected")
+]]
+    local output = runCommand("LUAI_LUA_PREFIX=" .. shellQuote("H:lua54")
+        .. " lua -e " .. shellQuote(child))
+    assert(output:find("drive-relative environment rejected", 1, true))
+end)
+
+test("static native resolution prefers entry-rooted templates", function()
+    local root = makeTempDir("entry-native-priority")
+    local entry_dir = root .. "/entry"
+    local host_dir = root .. "/host"
+    makeDirectory(entry_dir)
+    makeDirectory(host_dir)
+    local entry = entry_dir .. "/main.lua"
+    local entry_native = entry_dir .. "/priority.so"
+    local host_native = host_dir .. "/priority.so"
+    writeFile(entry, "return require('priority')\n")
+    writeFile(entry_native, "entry native bytes\n")
+    writeFile(host_native, "host native bytes\n")
+
+    local original_cpath = package.cpath
+    package.cpath = host_dir .. "/?.so"
+    local call_ok, inspected = pcall(function()
+        local resolver = require("luainstaller.analyzer").ModuleResolver.new(entry_dir)
+        return resolver:inspect("priority", entry)
+    end)
+    package.cpath = original_cpath
+
+    assert(call_ok, inspected)
+    assert(inspected.ok and inspected.type == "native", "native fixture did not resolve")
+    assertEqual(inspected.path, require("luainstaller.path").absolute(entry_native), "native resolution priority")
+    removeTree(root)
 end)
 
 test("API rejects non-file and non-finite inputs", function()
@@ -1028,6 +1214,31 @@ assert(first.value == 19 and second.value == 19)
     end
 end)
 
+test("Lua and native sources cannot own the same module alias", function()
+    local root = makeTempDir("cross-kind-module-alias")
+    local entry_dir = root .. "/entry"
+    local manual_dir = root .. "/manual"
+    makeDirectory(entry_dir)
+    makeDirectory(manual_dir)
+    local entry = entry_dir .. "/main.lua"
+    local native = entry_dir .. "/collision.so"
+    local lua_module = manual_dir .. "/collision.lua"
+    writeFile(entry, "return require('collision')\n")
+    writeFile(native, "not a real native module\n")
+    writeFile(lua_module, "return 42\n")
+
+    local result = require("luainstaller").bundle({
+        entry = entry,
+        include = { lua_module },
+        out = root .. "/out",
+    })
+    assert(not result.ok, "cross-kind module alias was accepted")
+    assertEqual(result.error.type, "DuplicateModuleError", "cross-kind alias")
+    assertEqual(result.error.module_name, "collision", "cross-kind alias name")
+    assert(not fileExists(root .. "/out"), "cross-kind alias published an output")
+    removeTree(root)
+end)
+
 test("static discovery preserves every alias for one native source", function()
     if package.config:sub(1, 1) ~= "/" then return end
     local root = makeTempDir("native-alias")
@@ -1324,6 +1535,26 @@ test("output ownership is recursive and exact", function()
     removeTree(root)
 end)
 
+test("POSIX output ownership rejects backslash path aliases", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-backslash-alias")
+    local out = root .. "/out"
+    local opts = {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    }
+    local first = require("luainstaller").bundle(opts)
+    assert(first.ok, first.error and first.error.message)
+
+    local user_path = out .. "/.luai\\manifest.lua"
+    writeFile(user_path, "user data must survive\n")
+    local rebuilt = require("luainstaller").bundle(opts)
+    assert(not rebuilt.ok, "backslash alias bypassed the exact output inventory")
+    assertEqual(rebuilt.error.type, "InvalidOutputError", "backslash alias output")
+    assertEqual(readFile(user_path), "user data must survive\n", "backslash alias user data")
+    removeTree(root)
+end)
+
 test("output changed during the final rename window is restored", function()
     local root = makeTempDir("output-final-rename-race")
     local out = root .. "/out"
@@ -1400,6 +1631,382 @@ test("output changed after publication is restored before backup deletion", func
         "backup cleanup race user data"
     )
     runCommand(shellQuote(first.executable))
+    removeTree(root)
+end)
+
+test("backup cleanup never recursively removes late user content", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-backup-late-content")
+    local out = root .. "/out"
+    local opts = {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    }
+    local luainstaller = require("luainstaller")
+    local first = luainstaller.bundle(opts)
+    assert(first.ok, first.error and first.error.message)
+
+    local original_popen = io.popen
+    local original_remove = os.remove
+    local backup_path
+    local injected = false
+    local user_content = "late user content must survive\n"
+    local function inject(candidate)
+        if injected then return end
+        injected = true
+        backup_path = candidate:match("^(.*%.luai%-backup%-[^/]+)") or candidate
+        writeFile(backup_path .. "/USER-DATA.txt", user_content)
+    end
+    rawset(io, "popen", function(command, mode)
+        local candidate = command:match("^rm %-rf '([^']+%.luai%-backup%-[^']+)' 2>&1$")
+        if candidate then inject(candidate) end
+        return original_popen(command, mode)
+    end)
+    rawset(os, "remove", function(candidate)
+        if type(candidate) == "string" and candidate:find("%.luai%-backup%-") then
+            inject(candidate)
+        end
+        return original_remove(candidate)
+    end)
+
+    local call_ok, rebuilt = pcall(luainstaller.bundle, opts)
+    rawset(io, "popen", original_popen)
+    rawset(os, "remove", original_remove)
+
+    assert(call_ok, rebuilt)
+    assert(injected, "backup cleanup hook did not run")
+    assert(not rebuilt.ok, "late backup content was recursively discarded")
+    assertEqual(rebuilt.error.type, "FilesystemError", "late backup cleanup")
+    assertEqual(readFile(backup_path .. "/USER-DATA.txt"), user_content, "late backup user data")
+    runCommand(shellQuote(rebuilt.executable or out .. "/out"))
+    removeTree(root)
+end)
+
+test("backup cleanup preserves a late replacement at an owned name", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-backup-owned-replacement")
+    local out = root .. "/out"
+    local opts = {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    }
+    local luainstaller = require("luainstaller")
+    local first = luainstaller.bundle(opts)
+    assert(first.ok, first.error and first.error.message)
+
+    local original_remove = os.remove
+    local original_rename = os.rename
+    local injected = false
+    local replaced_path
+    local user_content = "replacement bytes must survive\n"
+    local function isOwnedBackupName(candidate)
+        return type(candidate) == "string"
+            and candidate:find("%.luai%-backup%-")
+            and not candidate:find("%.luai%-remove%-")
+    end
+    rawset(os, "remove", function(candidate)
+        if not injected and isOwnedBackupName(candidate) and fileExists(candidate) then
+            injected = true
+            replaced_path = candidate
+            assert(original_rename(candidate, candidate .. ".old-generated"))
+            writeFile(candidate, user_content)
+        end
+        return original_remove(candidate)
+    end)
+    rawset(os, "rename", function(from, to)
+        if not injected and isOwnedBackupName(from)
+            and type(to) == "string" and to:find("%.luai%-remove%-") then
+            local values = table.pack(original_rename(from, to))
+            if values[1] then
+                injected = true
+                replaced_path = from
+                writeFile(from, user_content)
+            end
+            return table.unpack(values, 1, values.n)
+        end
+        return original_rename(from, to)
+    end)
+
+    local call_ok, rebuilt = pcall(luainstaller.bundle, opts)
+    rawset(os, "remove", original_remove)
+    rawset(os, "rename", original_rename)
+
+    assert(call_ok, rebuilt)
+    assert(injected, "owned-name replacement hook did not run")
+    assert(not rebuilt.ok, "build ignored a replacement inside its backup")
+    assertEqual(readFile(replaced_path), user_content, "owned-name replacement bytes")
+    removeTree(root)
+end)
+
+test("backup cleanup never unlinks a directory-name file replacement", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-backup-directory-replacement")
+    local out = root .. "/out"
+    local opts = {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    }
+    local luainstaller = require("luainstaller")
+    local first = luainstaller.bundle(opts)
+    assert(first.ok, first.error and first.error.message)
+
+    local original_remove = os.remove
+    local original_rename = os.rename
+    local original_popen = io.popen
+    local injected = false
+    local replaced_path
+    local user_content = "directory-name replacement must survive\n"
+    local function isTarget(candidate)
+        return type(candidate) == "string"
+            and candidate:find("%.luai%-backup%-")
+            and candidate:match("/%.luai/native$") ~= nil
+    end
+    local function replaceDirectory(candidate)
+        if injected then return end
+        injected = true
+        replaced_path = candidate
+        assert(original_rename(candidate, candidate .. ".old-generated-directory"))
+        writeFile(candidate, user_content)
+    end
+    rawset(os, "remove", function(candidate)
+        if isTarget(candidate) then replaceDirectory(candidate) end
+        return original_remove(candidate)
+    end)
+    rawset(io, "popen", function(command, mode)
+        local candidate = command:match("^rmdir '([^']+)' 2>&1$")
+        if isTarget(candidate) then replaceDirectory(candidate) end
+        return original_popen(command, mode)
+    end)
+
+    local call_ok, rebuilt = pcall(luainstaller.bundle, opts)
+    rawset(os, "remove", original_remove)
+    rawset(io, "popen", original_popen)
+    rawset(os, "rename", original_rename)
+
+    assert(call_ok, rebuilt)
+    assert(injected, "backup directory replacement hook did not run")
+    assert(not rebuilt.ok, "build ignored a file replacement at a directory name")
+    assertEqual(readFile(replaced_path), user_content, "backup directory-name replacement")
+    removeTree(root)
+end)
+
+test("empty backup cleanup never unlinks a regular-file replacement", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-empty-backup-replacement")
+    local out = root .. "/out"
+    makeDirectory(out)
+    local original_remove = os.remove
+    local original_rename = os.rename
+    local original_popen = io.popen
+    local injected = false
+    local backup_path
+    local user_content = "empty-backup replacement must survive\n"
+    local function isTarget(candidate)
+        return type(candidate) == "string"
+            and candidate:find("%.luai%-backup%-") ~= nil
+            and not candidate:find("/", #root + 2, true)
+    end
+    local function replaceDirectory(candidate)
+        if injected then return end
+        injected = true
+        backup_path = candidate
+        assert(original_rename(candidate, candidate .. ".old-empty-directory"))
+        writeFile(candidate, user_content)
+    end
+    rawset(os, "remove", function(candidate)
+        if isTarget(candidate) then replaceDirectory(candidate) end
+        return original_remove(candidate)
+    end)
+    rawset(io, "popen", function(command, mode)
+        local candidate = command:match("^rmdir '([^']+)' 2>&1$")
+        if isTarget(candidate) then replaceDirectory(candidate) end
+        return original_popen(command, mode)
+    end)
+
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    rawset(os, "remove", original_remove)
+    rawset(io, "popen", original_popen)
+    rawset(os, "rename", original_rename)
+
+    assert(call_ok, result)
+    assert(injected, "empty backup replacement hook did not run")
+    assert(not result.ok, "build unlinked a replacement at the empty-backup path")
+    assert(result.error and result.error.committed == true, "committed cleanup failure was not reported")
+    assertEqual(readFile(backup_path), user_content, "empty backup replacement")
+    removeTree(root)
+end)
+
+test("output lock release never removes a replacement lock", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-replacement")
+    local out = root .. "/out"
+    local replacement_content = "another build owns this lock\n"
+    local original_rename = os.rename
+    local replacement_lock
+    local injected = false
+
+    local function replaceLock(lock_path)
+        assert(not injected, "lock replacement hook ran twice")
+        injected = true
+        replacement_lock = lock_path
+        assert(original_rename(lock_path, lock_path .. ".original"))
+        local made = os.execute("mkdir -m 700 " .. shellQuote(lock_path))
+        assert(made == true or made == 0)
+        writeFile(lock_path .. "/OTHER-OWNER", replacement_content)
+    end
+
+    rawset(os, "rename", function(from, to)
+        if not injected and type(from) == "string" and from:match("/%.luai%-lock%-%x+$")
+            and type(to) == "string" and to:match("/%.luai%-lock%-release%-%x+$") then
+            replaceLock(from)
+        end
+        return original_rename(from, to)
+    end)
+
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    rawset(os, "rename", original_rename)
+
+    assert(call_ok, result)
+    assert(injected, "lock release hook did not run")
+    assert(not result.ok, "builder claimed success after its output lock was replaced")
+    assertEqual(readFile(replacement_lock .. "/OTHER-OWNER"), replacement_content, "replacement lock owner")
+    removeTree(root)
+end)
+
+test("internal bundle siblings support a near-NAME_MAX output basename", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-name-max")
+    local out = root .. "/" .. string.rep("n", 240)
+    local options = {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    }
+    local luainstaller = require("luainstaller")
+    local first = luainstaller.bundle(options)
+    assert(first.ok, first.error and first.error.message)
+    local second = luainstaller.bundle(options)
+    assert(second.ok, second.error and second.error.message)
+    assert(fileExists(out .. "/" .. string.rep("n", 240)),
+        "near-NAME_MAX bundle executable is missing")
+    removeTree(root)
+end)
+
+test("output lock release never unlinks a regular-file replacement", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-file-replacement")
+    local out = root .. "/out"
+    local original_remove = os.remove
+    local original_rename = os.rename
+    local injected = false
+    local replacement_lock
+    local user_content = "replacement lock file must survive\n"
+
+    rawset(os, "remove", function(candidate)
+        if not injected and type(candidate) == "string"
+            and candidate:find("%.luai%-lock") and candidate:find("/owner%.") then
+            local values = table.pack(original_remove(candidate))
+            if values[1] then
+                injected = true
+                replacement_lock = candidate:match("^(.*)/owner%.")
+                assert(original_rename(replacement_lock, replacement_lock .. ".original"))
+                writeFile(replacement_lock, user_content)
+            end
+            return table.unpack(values, 1, values.n)
+        end
+        return original_remove(candidate)
+    end)
+
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    rawset(os, "remove", original_remove)
+    rawset(os, "rename", original_rename)
+
+    assert(call_ok, result)
+    assert(injected, "lock-file replacement hook did not run")
+    assert(not result.ok, "builder claimed success after unlinking a replacement lock file")
+    assertEqual(readFile(replacement_lock), user_content, "replacement lock file")
+    removeTree(root)
+end)
+
+test("output lock entropy failure occurs before lock publication", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-acquire-file-replacement")
+    local out = root .. "/out"
+    local original_open = io.open
+    local lock_path = root .. "/.luai-lock-"
+        .. require("luainstaller.hash").sha256(out)
+    rawset(io, "open", function(path_value, mode)
+        if path_value == "/dev/urandom" then
+            return nil, "forced entropy failure"
+        end
+        return original_open(path_value, mode)
+    end)
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    rawset(io, "open", original_open)
+
+    assert(call_ok, result)
+    assert(not result.ok, "entropy failure was not reported")
+    local absent = os.execute("test ! -e " .. shellQuote(lock_path)
+        .. " && test ! -L " .. shellQuote(lock_path))
+    assert(absent == true or absent == 0, "entropy failure published a lock without ownership")
+    removeTree(root)
+end)
+
+test("output lock release leaves a newly acquired empty lock untouched", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-new-owner-window")
+    local out = root .. "/out"
+    local original_remove = os.remove
+    local original_rename = os.rename
+    local injected = false
+    local replacement_lock
+
+    rawset(os, "rename", function(from, to)
+        if type(from) == "string" and from:match("/%.luai%-lock%-%x+$")
+            and type(to) == "string" and to:match("/%.luai%-lock%-release%-%x+$") then
+            replacement_lock = from
+        end
+        return original_rename(from, to)
+    end)
+
+    rawset(os, "remove", function(candidate)
+        if not injected and type(candidate) == "string"
+            and candidate:find("%.luai%-lock")
+            and candidate:find("/owner%.") then
+            local values = table.pack(original_remove(candidate))
+            if values[1] then
+                injected = true
+                assert(replacement_lock, "active lock path was not observed")
+                local made = os.execute("mkdir -m 700 " .. shellQuote(replacement_lock))
+                assert(made == true or made == 0)
+            end
+            return table.unpack(values, 1, values.n)
+        end
+        return original_remove(candidate)
+    end)
+
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    rawset(os, "remove", original_remove)
+    rawset(os, "rename", original_rename)
+
+    assert(call_ok, result)
+    assert(injected, "post-owner lock acquisition hook did not run")
+    assert(result.ok, result.error and result.error.message)
+    runCommand("test -d " .. shellQuote(replacement_lock))
     removeTree(root)
 end)
 
@@ -1852,6 +2459,21 @@ test("onefile repeated builds are byte identical", function()
     removeTree(root)
 end)
 
+test("onefile publication supports a near-NAME_MAX output basename", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("onefile-name-max")
+    local out = root .. "/" .. string.rep("o", 240)
+    local result = require("luainstaller").bundle({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        mode = "onefile",
+        out = out,
+    })
+    assert(result.ok, result.error and result.error.message)
+    assert(fileExists(out), "near-NAME_MAX onefile output is missing")
+    runCommand(shellQuote(out) .. " name-max")
+    removeTree(root)
+end)
+
 test("onefile cache repairs an equal-size FNV collision and mode", function()
     if package.config:sub(1, 1) ~= "/" then return end
     local root = makeTempDir("onefile-cache-exact")
@@ -1985,13 +2607,21 @@ local bundler = require("luainstaller.bundler")
 local onefile = require("luainstaller.onefile")
 local original = bundler.bundleOnedir
 bundler.bundleOnedir = function(opts)
-    assert(os.execute("mkdir -p " .. require("luainstaller.process").shellQuote(opts.out .. "/utf8-雪")))
+    assert(os.execute("mkdir -p " .. require("luainstaller.process").shellQuote(opts.out .. "/utf8-雪")
+        .. " " .. require("luainstaller.process").shellQuote(opts.out .. "/.luai")))
     local inner = assert(io.open(opts.out .. "/inner", "wb"))
     assert(inner:write("#!/bin/sh\nexit 0\n"))
     assert(inner:close())
     assert(os.execute("chmod 700 " .. require("luainstaller.process").shellQuote(opts.out .. "/inner")))
     local empty = assert(io.open(opts.out .. "/utf8-雪/empty.bin", "wb"))
     assert(empty:close())
+    local long_name = string.rep("n", 240)
+    local long_file = assert(io.open(opts.out .. "/" .. long_name, "wb"))
+    assert(long_file:write("near-NAME_MAX payload component\n"))
+    assert(long_file:close())
+    local manifest = assert(io.open(opts.out .. "/.luai/manifest.lua", "wb"))
+    assert(manifest:write("generated manifest bytes\n"))
+    assert(manifest:close())
     return { ok = true, executable = opts.out .. "/inner", manifest = opts.manifest }
 end
 local result = onefile.bundleOnefile({
@@ -2015,7 +2645,101 @@ assert(result.ok, result.error and result.error.message)
     assert(source:find('#define LUAI_INNER_EXE "\\', 1, true))
     assert(source:find("CreateProcessA(NULL, cmd, NULL, NULL, FALSE", 1, true))
     assert(source:find("else if (!backslash) pos = slash", 1, true))
+    assert(source:find("luai_pin_absolute_chain", 1, true),
+        "Windows extractor does not pin the temporary-path ancestor chain")
+    assert(source:find("luai_pin_relative_parents", 1, true),
+        "Windows extractor does not pin payload parent directories")
+    assert(source:find("FILE_FLAG_OPEN_REPARSE_POINT", 1, true),
+        "Windows extractor follows reparse points while pinning cache objects")
+    assert(source:find("CreateFileA(path, access, FILE_SHARE_READ,", 1, true),
+        "Windows extractor permits write handles on pinned cache directories")
+    assert(source:find("luai_close_pins", 1, true),
+        "Windows extractor does not retain and close cache pins around execution")
+    assert(source:find("luai_directory_entry_is_stable", 1, true),
+        "POSIX extractor does not validate temporary-path directory stability")
+    assert(source:find("S_IWGRP | S_IWOTH", 1, true)
+            and source:find("S_ISVTX", 1, true),
+        "POSIX extractor accepts a replaceable shared temporary-path ancestor")
+    local ancestor_owner_check = source:find(
+        "if (st.st_uid != 0 && st.st_uid != geteuid()) return 0;", 1, true)
+    local ancestor_write_check = source:find(
+        "shared_write = st.st_mode & (S_IWGRP | S_IWOTH);", 1, true)
+    assert(ancestor_owner_check and ancestor_write_check
+            and ancestor_owner_check < ancestor_write_check,
+        "POSIX extractor trusts a non-writable ancestor owned by another user")
     assert(source:match("luai_file_%d+, 0, 0 }"), "empty file record missing")
+
+    local hooked = source
+    local function_body = [[
+static void luai_test_swap_parent(const char *parent) {
+    static int done = 0;
+    const char *victim = getenv("LUAI_TEST_VICTIM");
+    const char *slash;
+    char payload[4096];
+    char moved[4096];
+    size_t length;
+    if (done || !victim || !*victim) return;
+    slash = strrchr(parent, '/');
+    if (!slash) return;
+    length = (size_t)(slash - parent);
+    if (length == 0 || length >= sizeof(payload)) _exit(90);
+    memcpy(payload, parent, length);
+    payload[length] = '\0';
+    if (snprintf(moved, sizeof(moved), "%s.old", payload) < 0) _exit(91);
+    if (rename(payload, moved) != 0) _exit(92);
+    if (symlink(victim, payload) != 0) _exit(93);
+    done = 1;
+}
+
+]]
+    local insertion = assert(hooked:find("#ifdef _WIN32\nstatic int luai_mkdir_one", 1, true))
+    hooked = hooked:sub(1, insertion - 1) .. function_body .. hooked:sub(insertion)
+    local fixed_hook_point = "    parent[parent_length] = '\\0';\n"
+        .. "    write_result = luai_write_file_at"
+    local hook_point, hook_end = hooked:find(fixed_hook_point, 1, true)
+    if hook_point then
+        local replacement = "    parent[parent_length] = '\\0';\n"
+            .. "    luai_test_swap_parent(parent);\n"
+            .. "    write_result = luai_write_file_at"
+        hooked = hooked:sub(1, hook_point - 1) .. replacement .. hooked:sub(hook_end + 1)
+    else
+        local legacy_hook_point = "    if (luai_ensure_private_dir(parent) != 0) return -1;\n"
+        hook_point, hook_end = hooked:find(legacy_hook_point, 1, true)
+        assert(hook_point, "extractor parent validation hook point missing")
+        local replacement = legacy_hook_point .. "    luai_test_swap_parent(parent);\n"
+        hooked = hooked:sub(1, hook_point - 1) .. replacement .. hooked:sub(hook_end + 1)
+    end
+    local hooked_c = root .. "/extractor-parent-race.c"
+    local hooked_exe = root .. "/extractor-parent-race"
+    writeFile(hooked_c, hooked)
+    runCommand("cc -std=c11 -Wall -Wextra -Werror -pedantic "
+        .. shellQuote(hooked_c) .. " -o " .. shellQuote(hooked_exe))
+    local race_cache = root .. "/race-cache"
+    local victim = root .. "/victim"
+    makeDirectory(race_cache)
+    makeDirectory(victim .. "/.luai")
+    runCommand("chmod 700 " .. shellQuote(race_cache) .. " "
+        .. shellQuote(victim) .. " " .. shellQuote(victim .. "/.luai"))
+    local victim_manifest = victim .. "/.luai/manifest.lua"
+    writeFile(victim_manifest, "victim manifest must survive\n")
+    runCommand("chmod 700 " .. shellQuote(victim_manifest))
+    local hook_ok = os.execute("TMPDIR=" .. shellQuote(race_cache)
+        .. " LUAI_TEST_VICTIM=" .. shellQuote(victim)
+        .. " " .. shellQuote(hooked_exe) .. " >/dev/null 2>&1")
+    assert(hook_ok ~= true and hook_ok ~= 0,
+        "swapped string path unexpectedly executed through the victim")
+    local swapped_parent = commandOutputTrimmed(
+        "find " .. shellQuote(race_cache) .. " -type l -print"
+    )
+    assert(swapped_parent ~= "" and not swapped_parent:find("\n", 1, true),
+        "onefile parent replacement hook did not create exactly one symlink")
+    assertEqual(commandOutputTrimmed("readlink " .. shellQuote(swapped_parent)), victim,
+        "onefile parent replacement target")
+    runCommand("test -d " .. shellQuote(swapped_parent .. ".old"))
+    assertEqual(readFile(victim_manifest), "victim manifest must survive\n", "onefile parent race bytes")
+    local victim_executable = os.execute("test -x " .. shellQuote(victim_manifest))
+    assert(victim_executable == true or victim_executable == 0,
+        "onefile parent race changed victim mode")
 
     local gcc_exe = root .. "/extractor-gcc"
     runCommand(table.concat({
@@ -2027,6 +2751,18 @@ assert(result.ok, result.error and result.error.message)
     local gcc_cache = root .. "/gcc-cache"
     makeDirectory(gcc_cache)
     runCommand("TMPDIR=" .. shellQuote(gcc_cache) .. " " .. shellQuote(gcc_exe))
+
+    local shared_parent = root .. "/shared-parent"
+    local shared_cache = shared_parent .. "/cache"
+    makeDirectory(shared_cache)
+    runCommand("chmod 0777 " .. shellQuote(shared_parent)
+        .. " && chmod 0700 " .. shellQuote(shared_cache))
+    local shared_ok = os.execute("TMPDIR=" .. shellQuote(shared_cache)
+        .. " " .. shellQuote(gcc_exe) .. " >/dev/null 2>&1")
+    assert(shared_ok ~= true and shared_ok ~= 0,
+        "onefile accepted a non-sticky writable TMPDIR ancestor")
+    runCommand("chmod 1777 " .. shellQuote(shared_parent))
+    runCommand("TMPDIR=" .. shellQuote(shared_cache) .. " " .. shellQuote(gcc_exe))
 
     local mingw = os.execute("command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1")
     if mingw == true or mingw == 0 then
@@ -2225,6 +2961,137 @@ print("logger owned-lock timeout ok")
     removeTree(root)
 end)
 
+test("logger release preserves a replacement owner record", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-release-replacement")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local fs = require("luainstaller.fs")
+local logger = require("luainstaller.logger")
+local process = require("luainstaller.process")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+local replacement
+local replacement_token
+local original_rename = os.rename
+local injected = false
+
+rawset(os, "rename", function(from, to)
+    if not injected and from == lock and tostring(to):find(".release.", 1, true) then
+        injected = true
+        local owner_name = process.firstLine("cd " .. process.shellQuote(lock)
+            .. " && for item in owner.*; do test -f \"$item\" && printf '%s\\n' \"$item\"; done")
+        replacement_token = assert(owner_name and owner_name:match("^owner%.([%w_.-]+)$"),
+            "active logger token was not found")
+        replacement = "created=1\ntoken=" .. replacement_token .. "\n"
+        assert(original_rename(lock, lock .. ".original"))
+        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        assert(fs.writeFile(lock .. "/owner", replacement))
+        assert(fs.writeFile(lock .. "/owner." .. replacement_token, replacement))
+        assert(fs.writeFile(lock .. "/SENTINEL", "replacement lock must survive\n"))
+    end
+    return original_rename(from, to)
+end)
+
+local cleared = logger.clearLogs()
+rawset(os, "rename", original_rename)
+assert(cleared == false, "release of a replaced lock must fail closed")
+assert(injected, "logger replacement hook did not run")
+assert(fs.readFile(lock .. "/owner") == replacement, "replacement generic owner was changed")
+assert(fs.readFile(lock .. "/owner." .. replacement_token) == replacement,
+    "replacement token owner was changed")
+assert(fs.readFile(lock .. "/SENTINEL") == "replacement lock must survive\n",
+    "replacement sentinel was changed")
+print("logger replacement release ok")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    assert(output:find("logger replacement release ok", 1, true))
+    removeTree(root)
+end)
+
+test("logger release leaves a newly acquired empty lock untouched", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-new-owner-window")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local process = require("luainstaller.process")
+local logger = require("luainstaller.logger")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+local original_remove = os.remove
+local original_rename = os.rename
+local injected = false
+
+rawset(os, "remove", function(candidate)
+    if not injected and type(candidate) == "string"
+        and candidate:find("logs%.lua%.lock") and candidate:find("/owner%.") then
+        local values = table.pack(original_remove(candidate))
+        if values[1] then
+            injected = true
+            local cleanup_lock = candidate:match("^(.*)/owner%.")
+            local active_lock = cleanup_lock:gsub("%.release%.[%w_.-]+$", "")
+            if cleanup_lock == active_lock then
+                assert(original_rename(cleanup_lock, cleanup_lock .. ".previous-owner"))
+            end
+            assert(os.execute("mkdir -m 700 " .. process.shellQuote(active_lock)))
+        end
+        return table.unpack(values, 1, values.n)
+    end
+    return original_remove(candidate)
+end)
+
+assert(logger.clearLogs() == true)
+rawset(os, "remove", original_remove)
+assert(injected, "post-sentinel logger acquisition hook did not run")
+assert(os.execute("test -d " .. process.shellQuote(lock)))
+print("logger new owner window ok")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    assert(output:find("logger new owner window ok", 1, true))
+    removeTree(root)
+end)
+
+test("logger stale recovery preserves a lock replaced after observation", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-stale-observation-replacement")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local fs = require("luainstaller.fs")
+local logger = require("luainstaller.logger")
+local process = require("luainstaller.process")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+local replacement = "created=" .. tostring(os.time()) .. "\ntoken=new-active\n"
+assert(logger.clearLogs() == true)
+assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(fs.writeFile(lock .. "/owner",
+    "created=" .. tostring(os.time() - 1000) .. "\ntoken=observed-stale\n"))
+
+local original_rename = os.rename
+local injected = false
+rawset(os, "rename", function(from, to)
+    if not injected and from == lock and tostring(to):find(".stale.", 1, true) then
+        injected = true
+        assert(original_rename(lock, lock .. ".observed-stale"))
+        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        assert(fs.writeFile(lock .. "/owner.new-active", replacement))
+    end
+    return original_rename(from, to)
+end)
+
+local cleared = logger.clearLogs()
+rawset(os, "rename", original_rename)
+assert(injected, "stale-lock replacement hook did not run")
+assert(cleared == false, "logger stole a newly active replacement lock")
+assert(fs.readFile(lock .. "/owner.new-active") == replacement,
+    "newly active replacement lock was changed")
+print("logger stale observation replacement ok")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    assert(output:find("logger stale observation replacement ok", 1, true))
+    removeTree(root)
+end)
+
 test("logger recovers a backup and a stale owned lock", function()
     if package.config:sub(1, 1) ~= "/" then
         return
@@ -2261,6 +3128,67 @@ print("logger stale recovery ok")
     removeTree(root)
 end)
 
+test("logger recovers an empty stale lock left before owner publication", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-empty-stale-lock")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local logger = require("luainstaller.logger")
+local process = require("luainstaller.process")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+assert(logger.clearLogs() == true)
+assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(os.execute("touch -t 200001010000 " .. process.shellQuote(lock)))
+assert(logger.clearLogs() == true, "empty abandoned lock was not recovered")
+assert(os.execute("test ! -e " .. process.shellQuote(lock)))
+print("logger empty stale lock recovery ok")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    assert(output:find("logger empty stale lock recovery ok", 1, true))
+    removeTree(root)
+end)
+
+test("logger stale recovery preserves an empty lock replaced after observation", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-empty-stale-replacement")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local logger = require("luainstaller.logger")
+local process = require("luainstaller.process")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+assert(logger.clearLogs() == true)
+assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(os.execute("touch -t 200001010000 " .. process.shellQuote(lock)))
+
+local original_rename = os.rename
+local injected = false
+local replacement_identity
+rawset(os, "rename", function(from, to)
+    if not injected and from == lock and tostring(to):find(".stale.", 1, true) then
+        injected = true
+        assert(original_rename(lock, lock .. ".observed-stale"))
+        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        replacement_identity = assert(process.firstLine("stat -c '%d:%i' "
+            .. process.shellQuote(lock)))
+    end
+    return original_rename(from, to)
+end)
+
+local cleared = logger.clearLogs()
+rawset(os, "rename", original_rename)
+assert(injected, "empty stale-lock replacement hook did not run")
+assert(cleared == false, "logger treated a newly created empty lock as stale")
+assert(process.firstLine("stat -c '%d:%i' " .. process.shellQuote(lock))
+    == replacement_identity, "new empty lock identity was not preserved")
+print("logger empty stale replacement ok")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    assert(output:find("logger empty stale replacement ok", 1, true))
+    removeTree(root)
+end)
+
 test("source installer rejects incompatible Lua before writing", function()
     if package.config:sub(1, 1) ~= "/" then
         return
@@ -2293,6 +3221,24 @@ printf '%s\n' 'Lua 5.3'
     }, " "))
     assert(wrapper_ok ~= true and wrapper_ok ~= 0, "installed wrapper accepted incompatible Lua")
     assert(readFile(wrapper_log):find("Lua 5.4", 1, true), "wrapper ABI error was not actionable")
+    removeTree(root)
+end)
+
+test("source installer shell-quotes the default Lua path", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("installer-lua-path-quoting")
+    local lua_path = root .. "/lua$LUAI_INSTALLER_UNSET'\" with-space"
+    local prefix = root .. "/prefix"
+    runCommand("ln -s " .. shellQuote(commandOutputTrimmed("command -v lua"))
+        .. " " .. shellQuote(lua_path))
+    runCommand("sh tools/install-source.sh --lua " .. shellQuote(lua_path)
+        .. " --prefix " .. shellQuote(prefix))
+
+    local log = root .. "/wrapper.log"
+    local ok = os.execute("env -u LUAI_INSTALLER_UNSET "
+        .. shellQuote(prefix .. "/bin/luai") .. " -v >" .. shellQuote(log) .. " 2>&1")
+    assert(ok == true or ok == 0, "installed wrapper corrupted a special-character Lua path")
+    assertEqual(readFile(log), "luai 1.0.0\n", "special-character Lua wrapper")
     removeTree(root)
 end)
 
@@ -2351,6 +3297,11 @@ test("remote scripts are pinned and non-destructive", function()
     local linux = contents[scripts[1]]
     assert(linux:find("linux x64 smoke suite reported a skipped probe", 1, true))
     assert(linux:find("ARM64 smoke suite reported a skipped probe", 1, true))
+    assert(linux:find(
+        "LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 lua test/production_edges.lua",
+        1,
+        true
+    ), "Linux release gate does not force every edge prerequisite")
 
     local macos = contents[scripts[2]]
     assert(macos:find("test/cli_split_smoke.lua", 1, true), "macOS omits the portable CLI suite")
@@ -2377,15 +3328,53 @@ test("remote scripts are pinned and non-destructive", function()
     assert(not windows:find("StrictHostKeyChecking=no", 1, true))
     assert(windows:find("StrictHostKeyChecking=yes", 1, true))
     assert(windows:find("SSH_OPTS must not override host-key policy", 1, true))
-    assert(windows:find('SSH_OPTS=${SSH_OPTS:-""}', 1, true))
+    assert(windows:find('SSH_PORT=${SSH_PORT:-22}', 1, true))
+    assert(windows:find('SSH_IDENTITY_FILE=${SSH_IDENTITY_FILE:-""}', 1, true))
     assert(windows:find('if [ -n "${WINDOWS_PASSWORD:-}" ]', 1, true))
     assert(not windows:find("require_env WINDOWS_PASSWORD", 1, true))
     assert(windows:find('if [ "${WINDOWS_LOCAL_ONLY:-0}" = 1 ]', 1, true))
+    assert(windows:find("validate_remote_configuration()", 1, true),
+        "Windows script does not isolate remote-only requirements")
+    assert(windows:find('if [ "${WINDOWS_LOCAL_ONLY:-0}" != 1 ]; then\n'
+            .. "    validate_remote_configuration\nfi", 1, true),
+        "Windows local-only gate still evaluates remote SSH requirements")
+    assert(windows:find('win_out_parent=$(dirname "$WIN_OUT")', 1, true),
+        "Windows runner archives a hard-coded WIN_OUT parent")
+    assert(windows:find('tar -C "$win_out_parent" -czf "$archive" -- "$win_out_name"', 1, true),
+        "Windows runner does not archive the configured WIN_OUT")
+    assert(windows:find("param([string]$StagingRoot, [string]$BundleDirectoryName)", 1, true),
+        "Windows runner does not accept the configured staging root")
+    assert(windows:find("$root = Join-Path $StagingRoot $BundleDirectoryName", 1, true),
+        "Windows runner ignores REMOTE_TEMP or WIN_OUT")
+    assert(windows:find([[-BundleDirectoryName \"$win_out_name\"]], 1, true),
+        "Windows runner does not pass the configured WIN_OUT basename")
+    assert(windows:find("unsafe Windows bundle directory name", 1, true),
+        "Windows runner does not reject ambiguous or reserved WIN_OUT basenames")
+    assert(not windows:find("Z:/tmp/luainstaller-win-rocks", 1, true),
+        "Windows dependency probe ignores the configured WIN_TREE")
+    assert(windows:find('package.path="share/lua/5.4/?.lua;', 1, true),
+        "Windows dependency probe does not resolve from its configured tree")
+    assert(not windows:find("$root = Join-Path $env:TEMP 'luainstaller-win-bundles'", 1, true),
+        "Windows runner silently falls back to a different staging root")
+    local windows_preflight = windows:find('preflight_windows_upload "$host"', 1, true)
+    local windows_first_scp = windows:find('strict_scp "$archive"', 1, true)
+    assert(windows_preflight and windows_first_scp and windows_preflight < windows_first_scp,
+        "Windows remote upload occurs before its reparse-point preflight")
+    assert(windows:find("unsafe Windows upload%-path ancestor"),
+        "Windows upload preflight does not reject reparse-point ancestors")
+    assert(windows:find("unsafe Windows upload target", 1, true),
+        "Windows upload preflight does not reject unsafe existing targets")
 
     local root = makeTempDir("remote-path-guards")
     local victim = root .. "/victim"
     makeDirectory(victim)
     writeFile(victim .. "/sentinel", "preserve\n")
+    local ssh_guard_log = root .. "/ssh-policy.log"
+    local ssh_guard_ok = os.execute("SSH_OPTS='-F /tmp/unsafe-config' WIN_OUT=/ "
+        .. "sh tools/remote-test-windows.sh >" .. shellQuote(ssh_guard_log) .. " 2>&1")
+    assert(ssh_guard_ok ~= true and ssh_guard_ok ~= 0, "unsafe SSH config option was accepted")
+    assert(readFile(ssh_guard_log):find("host-key policy", 1, true),
+        "unsafe SSH config was not rejected by the trust-policy guard")
     local cases = {
         "REMOTE_ROOT=/ sh tools/remote-test-linux.sh",
         "REMOTE_ROOT=/ sh tools/remote-test-macos.sh",
@@ -2398,7 +3387,35 @@ test("remote scripts are pinned and non-destructive", function()
         assert(ok ~= true and ok ~= 0, "unsafe remote path was accepted: " .. command)
         assert(readFile(log):find("temporary path", 1, true), "path rejection was not actionable")
     end
+    for index, unsafe_name in ipairs({ "-C", "NUL.txt", "trailing." }) do
+        local log = root .. "/windows-name-guard-" .. index .. ".log"
+        local command = "WINDOWS_LOCAL_ONLY=1 WIN_OUT="
+            .. shellQuote("/tmp/luainstaller-safe/" .. unsafe_name)
+            .. " sh tools/remote-test-windows.sh >" .. shellQuote(log) .. " 2>&1"
+        local ok = os.execute(command)
+        assert(ok ~= true and ok ~= 0, "unsafe Windows bundle name was accepted: " .. unsafe_name)
+        assert(readFile(log):find("bundle directory name", 1, true),
+            "unsafe Windows bundle name rejection was not actionable")
+    end
     assert(readFile(victim .. "/sentinel") == "preserve\n", "unsafe override deleted user data")
+
+    local ancestor = "/tmp/luainstaller-ancestor-" .. require("luainstaller.path").basename(root)
+    local ancestor_victim = root .. "/ancestor-victim"
+    makeDirectory(ancestor_victim .. "/cache/lua-5.4.8.tar.gz")
+    writeFile(ancestor_victim .. "/sentinel", "ancestor data survives\n")
+    runCommand("ln -s " .. shellQuote(ancestor_victim) .. " " .. shellQuote(ancestor))
+    for index, script in ipairs(scripts) do
+        local log = root .. "/ancestor-guard-" .. index .. ".log"
+        local command = "SOURCE_CACHE=" .. shellQuote(ancestor .. "/cache")
+            .. " sh " .. shellQuote(script) .. " >" .. shellQuote(log) .. " 2>&1"
+        local ok = os.execute(command)
+        assert(ok ~= true and ok ~= 0, "symlink ancestor was accepted by " .. script)
+        assert(readFile(log):find("symlink ancestor", 1, true),
+            script .. " did not reject the symlink ancestor before use")
+    end
+    assertEqual(readFile(ancestor_victim .. "/sentinel"), "ancestor data survives\n",
+        "ancestor symlink sentinel")
+    assert(os.remove(ancestor))
     removeTree(root)
 end)
 
