@@ -2408,26 +2408,71 @@ test("linked ABI probe cannot collide with the output executable", function()
     removeTree(root)
 end)
 
-test("target launcher enforces Lua 5.4 headers", function()
+test("target launcher enforces the selected Lua ABI", function()
     if package.config:sub(1, 1) ~= "/" then return end
     local root = makeTempDir("launcher-abi-guard")
     local include_dir = root .. "/include"
     local c_path = root .. "/launcher.c"
     local log_path = root .. "/compiler.log"
     makeDirectory(include_dir)
-    writeFile(include_dir .. "/lua.h", [[
+    local lua_info = require("luainstaller.compat").luaVersion()
+    local mismatched_num = lua_info.num == 501 and 502 or 501
+    writeFile(include_dir .. "/lua.h", string.format([[
 #include_next <lua.h>
 #undef LUA_VERSION_NUM
-#define LUA_VERSION_NUM 503
-]])
-    local generated = require("luainstaller.launcher").generateSource({
+#define LUA_VERSION_NUM %d
+]], mismatched_num))
+    local launcher = require("luainstaller.launcher")
+    local generated = launcher.generateSource({
         entry = "test/single_file/01_hello_luainstaller.lua",
         dependencies = { scripts = {}, libraries = {} },
+        lua_version = lua_info,
     })
-    assert(generated:find("LUA_VERSION_NUM != 504", 1, true))
-    assert(generated:find("luai_runtime_is_54", 1, true))
-    assert(readFile("src/launcher/luai_launcher.c"):find("LUA_VERSION_NUM != 504", 1, true))
-    assert(readFile("src/launcher/luai_launcher.c"):find("luai_runtime_is_54", 1, true))
+    local source51 = launcher.generateSource({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        dependencies = { scripts = {}, libraries = {} },
+        lua_version = { version = "Lua 5.1", major = 5, minor = 1, num = 501, abi = "lua5.1" },
+    })
+    local source55 = launcher.generateSource({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        dependencies = { scripts = {}, libraries = {} },
+        lua_version = { version = "Lua 5.5", major = 5, minor = 5, num = 505, abi = "lua5.5" },
+    })
+    assert(generated:find("LUA_VERSION_NUM != " .. tostring(lua_info.num), 1, true))
+    assert(source51:find("LUA_VERSION_NUM != 501", 1, true))
+    assert(source51:find("Lua 5.1", 1, true))
+    assert(source51:find("luaL_loadbuffer", 1, true))
+    assert(source55:find("LUA_VERSION_NUM != 505", 1, true))
+    assert(source55:find("Lua 5.5", 1, true))
+    assert(not source55:find("Lua 5.4", 1, true))
+    assert(source51 ~= source55, "different Lua ABIs produced identical launchers")
+    local template = readFile("src/launcher/luai_launcher.c")
+    assert(template:find("@LUA_VERSION_NUM@", 1, true))
+    assert(template:find("@LUA_VERSION@", 1, true))
+
+    local cgen = require("luainstaller.cgen")
+    local payload_opts = {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        dependencies = { scripts = {}, libraries = {} },
+    }
+    payload_opts.lua_version = { abi = "lua5.1" }
+    local payload51 = cgen.generateBootstrap(payload_opts)
+    payload_opts.lua_version = { abi = "lua5.5" }
+    local payload55 = cgen.generateBootstrap(payload_opts)
+    assert(payload51 ~= payload55, "Lua ABI did not change the generated payload")
+
+    local manifest = require("luainstaller.manifest")
+    local manifest51 = manifest.build({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        lua_version = { version = "Lua 5.1", major = 5, minor = 1, num = 501, abi = "lua5.1" },
+    })
+    local manifest55 = manifest.build({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        lua_version = { version = "Lua 5.5", major = 5, minor = 5, num = 505, abi = "lua5.5" },
+    })
+    assert(manifest51.ok and manifest55.ok)
+    assert(manifest51.manifest.lua.major == 5 and manifest51.manifest.lua.minor == 1)
+    assert(manifest55.manifest.lua.abi == "lua5.5")
     writeFile(c_path, generated)
     local compiled = os.execute(table.concat({
         "cc -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only",
@@ -2436,8 +2481,8 @@ test("target launcher enforces Lua 5.4 headers", function()
         "$(pkg-config --cflags lua)",
         ">" .. shellQuote(log_path) .. " 2>&1",
     }, " "))
-    assert(compiled ~= true and compiled ~= 0, "Lua 5.3 headers passed the launcher guard")
-    assert(readFile(log_path):find("luainstaller requires Lua 5.4 headers", 1, true))
+    assert(compiled ~= true and compiled ~= 0, "mismatched Lua headers passed the launcher guard")
+    assert(readFile(log_path):find("generated for a different Lua ABI", 1, true))
     removeTree(root)
 end)
 

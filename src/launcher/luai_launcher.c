@@ -24,8 +24,12 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
-#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM != 504
-#error "luainstaller requires Lua 5.4 headers"
+#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM != @LUA_VERSION_NUM@
+#error "luainstaller was generated for a different Lua ABI"
+#endif
+
+#ifndef LUA_OK
+#define LUA_OK 0
 #endif
 
 static int luai_traceback(lua_State *L)
@@ -39,7 +43,27 @@ static int luai_traceback(lua_State *L)
         }
         message = "(error object is not a string)";
     }
+#if LUA_VERSION_NUM == 501
+    lua_getglobal(L, "debug");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_pushstring(L, message);
+        return 1;
+    }
+    lua_getfield(L, -1, "traceback");
+    if (!lua_isfunction(L, -1))
+    {
+        lua_pop(L, 2);
+        lua_pushstring(L, message);
+        return 1;
+    }
+    lua_pushstring(L, message);
+    lua_pushinteger(L, 2);
+    lua_call(L, 2, 1);
+#else
     luaL_traceback(L, L, message, 1);
+#endif
     return 1;
 }
 
@@ -96,20 +120,21 @@ static void luai_push_arg(lua_State *L, int argc, char **argv)
 
 static int luai_load_bootstrap(lua_State *L)
 {
-#if LUA_VERSION_NUM >= 502
-    return luaL_loadbufferx(L, (const char *)luai_bootstrap, luai_bootstrap_size, "@luainstaller-bootstrap", "t");
-#else
+#if LUA_VERSION_NUM == 501
+    if (luai_bootstrap_size > 0 && luai_bootstrap[0] == 0x1b) return LUA_ERRSYNTAX;
     return luaL_loadbuffer(L, (const char *)luai_bootstrap, luai_bootstrap_size, "@luainstaller-bootstrap");
+#else
+    return luaL_loadbufferx(L, (const char *)luai_bootstrap, luai_bootstrap_size, "@luainstaller-bootstrap", "t");
 #endif
 }
 
-static int luai_runtime_is_54(lua_State *L)
+static int luai_runtime_matches(lua_State *L)
 {
     const char *version;
     int matches;
     lua_getglobal(L, "_VERSION");
     version = lua_tostring(L, -1);
-    matches = version != NULL && strcmp(version, "Lua 5.4") == 0;
+    matches = version != NULL && strcmp(version, "@LUA_VERSION@") == 0;
     lua_pop(L, 1);
     return matches;
 }
@@ -128,9 +153,9 @@ int main(int argc, char **argv)
     }
 
     luaL_openlibs(L);
-    if (!luai_runtime_is_54(L))
+    if (!luai_runtime_matches(L))
     {
-        fputs("luainstaller: linked Lua runtime is not Lua 5.4\n", stderr);
+        fputs("luainstaller: linked Lua runtime is not @LUA_VERSION@\n", stderr);
         lua_close(L);
         return 70;
     }

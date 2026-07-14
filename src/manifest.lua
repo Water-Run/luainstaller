@@ -15,6 +15,7 @@ local fs = require("luainstaller.fs")
 local hash = require("luainstaller.hash")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
+local compat = require("luainstaller.compat")
 
 local M = {}
 
@@ -67,12 +68,19 @@ local function safeExternalPath(path)
     return normalizePath("external/" .. table.concat(parts, "/"))
 end
 
-local function luaInfo()
-    local version = _VERSION or "Lua"
-    local major, minor = version:match("Lua%s+(%d+)%.(%d+)")
+local function luaInfo(configured)
+    local current = configured or compat.luaVersion()
+    local major = tonumber(current.major)
+    local minor = tonumber(current.minor)
+    local number = tonumber(current.num) or (major and minor and (major * 100 + minor))
     return {
-        version = version,
-        abi = major and minor and ("lua" .. major .. "." .. minor) or "unknown",
+        version = current.version or (major and minor
+            and string.format("Lua %d.%d", major, minor) or "Lua"),
+        major = major,
+        minor = minor,
+        num = number,
+        abi = current.abi or (major and minor
+            and ("lua" .. major .. "." .. minor) or "unknown"),
     }
 end
 
@@ -256,7 +264,7 @@ function M.build(opts)
             mode = opts.mode or "onedir",
             path = opts.out,
         },
-        lua = luaInfo(),
+        lua = luaInfo(opts.lua_version),
         platform = platformInfo(host, profile),
         launcher = {
             profile = launcherProfile(profile),

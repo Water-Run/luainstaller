@@ -369,6 +369,17 @@ function M.generateBootstrap(opts)
     local payload = M.buildPayload(opts)
     local source = {}
     source[#source + 1] = "-- luainstaller generated bootstrap"
+    if opts.lua_version and opts.lua_version.abi then
+        local abi = tostring(opts.lua_version.abi)
+        if not abi:match("^lua5%.[1-9][0-9]*$") then
+            error({
+                type = "InvalidOptionsError",
+                message = "Invalid Lua ABI for generated bootstrap: " .. abi,
+                lua_abi = abi,
+            })
+        end
+        source[#source + 1] = "-- Lua ABI: " .. abi
+    end
     source[#source + 1] = emitPayload(payload)
     source[#source + 1] = RUNTIME_SOURCE
     source[#source + 1] = "local launcher_path = arg and arg[0] or \"\""
