@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 
@@ -80,6 +80,7 @@ Values:
     INVALID_OUTPUT: Unsafe or unsupported output path
     TOOLCHAIN: Missing compiler, headers, runtime, or target profile dependency
     UNSUPPORTED_PLATFORM: Target profile is not supported from this host
+    UNSUPPORTED_LUA_VERSION: Interpreter is not a supported official Lua 5.x
     FILESYSTEM: Required file operation failed
     DISCOVERY: Runtime dependency discovery failed
     LAUNCHER_GENERATION: Launcher source generation failed unexpectedly
@@ -100,6 +101,7 @@ M.ErrorTypes = {
     INVALID_OUTPUT        = "InvalidOutputError",
     TOOLCHAIN             = "ToolchainError",
     UNSUPPORTED_PLATFORM  = "UnsupportedPlatformError",
+    UNSUPPORTED_LUA_VERSION = "UnsupportedLuaVersionError",
     FILESYSTEM            = "FilesystemError",
     DISCOVERY             = "DiscoveryError",
     LAUNCHER_GENERATION   = "LauncherGenerationError",
@@ -358,6 +360,18 @@ end
 
 local function analyzeContext(opts, config)
     config = config or {}
+    local lua_version = compat.luaVersion()
+    if lua_version.major ~= 5 or not lua_version.minor
+        or lua_version.minor < 1 or not lua_version.official then
+        return nil, makeError(
+            "UnsupportedLuaVersionError",
+            "luainstaller requires an official Lua 5.1 or newer interpreter",
+            {
+                version = lua_version.version,
+                abi = lua_version.abi,
+            }
+        )
+    end
     local normalized, err = normalizeOptions(opts)
     if not normalized then
         return nil, err

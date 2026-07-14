@@ -144,6 +144,22 @@ local function legacyPosixInvocation(command)
     return invocation, token
 end
 
+local function legacyWindowsInvocation(command)
+    output_counter = output_counter + 1
+    local identity = tostring({}):gsub("[^%w]", "")
+    local token = string.format(
+        "LUAINSTALLER_EXIT_%s_%d_%d",
+        identity,
+        os.time(),
+        output_counter
+    )
+    local invocation = command .. " 2>&1"
+        .. "&call set LUAI_STATUS=^%errorlevel^%"
+        .. "&echo."
+        .. "&call echo " .. token .. ":^%LUAI_STATUS^%"
+    return invocation, token
+end
+
 function M.windowsPowerShellPath()
     local root = os.getenv("SystemRoot")
     if type(root) ~= "string" or root == "" then
@@ -165,8 +181,12 @@ function M.output(command)
     end
     local invocation = command .. " 2>&1"
     local legacy_token
-    if _VERSION == "Lua 5.1" and package.config:sub(1, 1) ~= "\\" then
-        invocation, legacy_token = legacyPosixInvocation(command)
+    if _VERSION == "Lua 5.1" then
+        if IS_WINDOWS then
+            invocation, legacy_token = legacyWindowsInvocation(command)
+        else
+            invocation, legacy_token = legacyPosixInvocation(command)
+        end
     end
     local ok, pipe = pcall(io.popen, invocation, "r")
     if not ok or not pipe then

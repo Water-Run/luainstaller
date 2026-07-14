@@ -19,6 +19,7 @@ local info = compat.luaVersion()
 
 assert(info.major == 5, "Lua 5.x is required")
 assert(info.minor >= 1, "Lua 5.1 or newer is required")
+assert(info.official == true, "the matrix must run an official Lua interpreter")
 assert(info.abi == string.format("lua%d.%d", info.major, info.minor))
 assert(info.num == info.major * 100 + info.minor)
 
@@ -32,6 +33,12 @@ assert(output == _VERSION, string.format(
 ))
 
 local process = require("luainstaller.process")
+local output_succeeded, direct_output = process.output(harness.command(interpreter, {
+    "-e",
+    "io.write('process-output-ok')",
+}))
+assert(output_succeeded and direct_output == "process-output-ok",
+    "child process success and output must be observable")
 local child_succeeded = process.output(harness.command(interpreter, {
     "-e",
     "os.exit(7)",
@@ -63,6 +70,11 @@ if info.minor >= 3 then
     hash.sha256(string.rep("a", 1024 * 1024))
     local elapsed = os.clock() - started
     assert(elapsed < 3, string.format("native SHA-256 backend is too slow: %.2fs", elapsed))
+else
+    local started = os.clock()
+    hash.sha256(string.rep("a", 128 * 1024))
+    local elapsed = os.clock() - started
+    assert(elapsed < 15, string.format("portable SHA-256 backend is too slow: %.2fs", elapsed))
 end
 
 local product_files = {
@@ -97,6 +109,15 @@ local analyzed = require("luainstaller").analyze({
 })
 assert(analyzed.ok, analyzed.error and analyzed.error.message)
 assert(#analyzed.dependencies.scripts == 1)
+
+local original_jit = rawget(_G, "jit")
+rawset(_G, "jit", { version = "simulated LuaJIT", status = function() return true end })
+local jit_result = require("luainstaller").analyze({
+    entry = "test/runtime_bundle/main.lua",
+})
+rawset(_G, "jit", original_jit)
+assert(not jit_result.ok and jit_result.error.type == "UnsupportedLuaVersionError",
+    "LuaJIT-compatible runtimes must be rejected")
 
 local runtime = require("luainstaller.runtime")
 local returned = compat.pack(runtime.run({

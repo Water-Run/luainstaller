@@ -22,10 +22,7 @@ assert(fs.pathType("tools/install-source.sh") == "missing",
     "LuaRocks must be the only supported installation path")
 
 local available = process.outputCommand("luarocks", { "--version" })
-if not available then
-    print("isolated LuaRocks install skipped: luarocks unavailable")
-    return
-end
+assert(available, "LuaRocks is required for the installation contract")
 
 local root = assert(fs.makePrivateDirectory("luarocks-install"))
 local tree = path.join(root, "tree")
@@ -46,24 +43,39 @@ local installed, install_output = process.outputCommand("luarocks", {
 })
 assert(installed, install_output)
 
-local suffix = package.config:sub(1, 1) == "\\" and ".exe" or ""
+local windows = package.config:sub(1, 1) == "\\"
+local command_suffix = windows and ".bat" or ""
 local bin = path.join(tree, "bin")
-local luai = path.join(bin, "luai" .. suffix)
-local full = path.join(bin, "luainstaller" .. suffix)
+local luai = path.join(bin, "luai" .. command_suffix)
+local full = path.join(bin, "luainstaller" .. command_suffix)
 assert(fs.pathType(luai) == "file", "LuaRocks did not install luai")
 assert(fs.pathType(full) == "file", "LuaRocks did not install luainstaller")
 
-local version_ok, version_output = process.outputCommand(luai, { "-v" })
+local function installedCommand(command, arguments, environment)
+    if not windows then
+        return process.outputCommand(command, arguments, environment)
+    end
+    local command_line = { process.quote(command) }
+    for _, value in ipairs(arguments or {}) do
+        command_line[#command_line + 1] = process.quote(value)
+    end
+    local comspec = assert(os.getenv("ComSpec") or os.getenv("COMSPEC"))
+    return process.outputCommand(comspec, {
+        "/d", "/s", "/c", table.concat(command_line, " "),
+    }, environment)
+end
+
+local version_ok, version_output = installedCommand(luai, { "-v" })
 assert(version_ok and version_output == "luai 1.0.0\n", version_output)
-local built, build_output = process.outputCommand(full, {
+local built, build_output = installedCommand(full, {
     "build", "--dir", path.join(project, "main.lua"),
     "-o", out, "--max-deps", "20",
 })
 assert(built, build_output)
 
-local executable = path.join(out, path.basename(out) .. suffix)
+local executable = path.join(out, path.basename(out) .. (windows and ".exe" or ""))
 local ran, run_output = process.outputCommand(executable, { "outside" }, {
-    PATH = package.config:sub(1, 1) == "\\"
+    PATH = windows
         and "C:\\Windows\\System32;C:\\Windows"
         or "/usr/bin:/bin",
     LUA_PATH = "",

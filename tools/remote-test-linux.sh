@@ -3,8 +3,11 @@ set -eu
 
 LINUX_X64=${LINUX_X64:-"waterrun@192.168.10.40"}
 LINUX_X64_PORT=${LINUX_X64_PORT:-"22222"}
+LINUX_DEBIAN=${LINUX_DEBIAN:-"yynicepc@192.168.10.57"}
+LINUX_DEBIAN_PORT=${LINUX_DEBIAN_PORT:-"26022"}
 LINUX_ARM64=${LINUX_ARM64:-"lyf@192.168.5.19"}
 REMOTE_ROOT=${REMOTE_ROOT:-"/tmp/luainstaller-linux-current"}
+DEBIAN_ROOT=${DEBIAN_ROOT:-"/tmp/luainstaller-debian-current"}
 SOURCE_CACHE=${SOURCE_CACHE:-"/tmp/luainstaller-source-cache"}
 ARM_LUA_PREFIX=${ARM_LUA_PREFIX:-"/tmp/luainstaller-linux-arm64-lua"}
 ARM_LUAROCKS_PREFIX=${ARM_LUAROCKS_PREFIX:-"/tmp/luainstaller-linux-arm64-luarocks"}
@@ -94,12 +97,9 @@ stage_source() {
 }
 
 create_tracked_tree_archive() {
-    TRACKED_LIST=$SOURCE_CACHE/tracked-files.$$.list
     TRACKED_ARCHIVE=$SOURCE_CACHE/tracked-tree.$$.tar
-    rm -f "$TRACKED_LIST" "$TRACKED_ARCHIVE"
-    (cd "$PROJECT_ROOT" && git ls-files -z) >"$TRACKED_LIST"
-    (cd "$PROJECT_ROOT" && tar --null -T "$TRACKED_LIST" -cf "$TRACKED_ARCHIVE")
-    rm -f "$TRACKED_LIST"
+    rm -f "$TRACKED_ARCHIVE"
+    (cd "$PROJECT_ROOT" && git archive --format=tar HEAD) >"$TRACKED_ARCHIVE"
 }
 
 quote_remote() {
@@ -176,7 +176,7 @@ EOF
     fi
 }
 
-for safe_path in "$REMOTE_ROOT" "$SOURCE_CACHE" "$ARM_LUA_PREFIX" \
+for safe_path in "$REMOTE_ROOT" "$DEBIAN_ROOT" "$SOURCE_CACHE" "$ARM_LUA_PREFIX" \
     "$ARM_LUAROCKS_PREFIX" "$ARM_ROCKTREE"; do
     require_safe_tmp_path "$safe_path"
 done
@@ -198,7 +198,7 @@ stage_source "$LUAROCKS_TARBALL" "https://luarocks.org/releases/$LUAROCKS_TARBAL
 stage_source "$LSQLITE3_ZIP" 'https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6' "$LSQLITE3_SHA256"
 stage_source "$SQLITE_ZIP" 'https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip' "$SQLITE_SHA256"
 create_tracked_tree_archive
-trap 'rm -f "$TRACKED_LIST" "$TRACKED_ARCHIVE"' EXIT HUP INT TERM
+trap 'rm -f "$TRACKED_ARCHIVE"' EXIT HUP INT TERM
 
 check_remote_tmp_path "$LINUX_X64" "$LINUX_X64_PORT" "$REMOTE_ROOT"
 copy_tree_ssh "$LINUX_X64" "$LINUX_X64_PORT" "$REMOTE_ROOT"
@@ -206,12 +206,14 @@ copy_tree_ssh "$LINUX_X64" "$LINUX_X64_PORT" "$REMOTE_ROOT"
 ssh -p "$LINUX_X64_PORT" "$LINUX_X64" "REMOTE_ROOT=$(quote_remote "$REMOTE_ROOT") sh -s" <<'EOF'
 set -eu
 cd "$REMOTE_ROOT"
-test "$(lua -e 'io.write(_VERSION)')" = "Lua 5.4"
+HOST_LABEL=rocky-x86_64 sh tools/test-lua-versions.sh
+TEST_LUA=$(command -v lua)
+test "$("$TEST_LUA" -e 'io.write(_VERSION)')" = "Lua 5.4"
 find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-lua test/cli_split_smoke.lua
-lua test/contract_docs.lua
-LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 lua test/production_edges.lua
-smoke_output=$(lua test/smoke_all.lua)
+"$TEST_LUA" test/cli_split_smoke.lua
+"$TEST_LUA" test/contract_docs.lua
+LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 "$TEST_LUA" test/production_edges.lua
+smoke_output=$("$TEST_LUA" test/smoke_all.lua)
 printf '%s\n' "$smoke_output"
 if printf '%s\n' "$smoke_output" | grep -i 'skipped' >/dev/null; then
     echo "linux x64 smoke suite reported a skipped probe" >&2
@@ -225,6 +227,11 @@ output=$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-linux-runtime/luainstaller-
 printf '%s\n' "$output" | grep "hello linux-clean"
 echo "linux x64 remote ok"
 EOF
+
+check_remote_tmp_path "$LINUX_DEBIAN" "$LINUX_DEBIAN_PORT" "$DEBIAN_ROOT"
+copy_tree_ssh "$LINUX_DEBIAN" "$LINUX_DEBIAN_PORT" "$DEBIAN_ROOT"
+ssh -p "$LINUX_DEBIAN_PORT" "$LINUX_DEBIAN" \
+    "cd $(quote_remote "$DEBIAN_ROOT") && HOST_LABEL=debian-x86_64 sh tools/test-lua-versions.sh"
 
 for remote_path in "$REMOTE_ROOT" "$ARM_LUA_PREFIX" "$ARM_LUAROCKS_PREFIX" "$ARM_ROCKTREE"; do
     check_remote_tmp_path "$LINUX_ARM64" "" "$remote_path"
@@ -247,8 +254,10 @@ verify_source "$LUAROCKS_SHA256" "/tmp/$LUAROCKS_TARBALL"
 verify_source "$LSQLITE3_SHA256" "/tmp/$LSQLITE3_ZIP"
 verify_source "$SQLITE_SHA256" "/tmp/$SQLITE_ZIP"
 cd "$REMOTE_ROOT"
+HOST_LABEL=dgx-spark-arm64 sh tools/test-lua-versions.sh
+SYSTEM_LUA=$(command -v lua)
 find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-lua test/cli_split_smoke.lua
+"$SYSTEM_LUA" test/cli_split_smoke.lua
 
 if [ ! -f "$ARM_LUA_PREFIX/lib/liblua.so.5.4" ] \
     || [ ! -x "$ARM_LUA_PREFIX/bin/lua" ] \
@@ -351,10 +360,10 @@ LUA_PATH="$DEPS_LUA_PATH" LUA_CPATH="$DEPS_LUA_CPATH" "$ARM_LUA_PREFIX/bin/lua" 
     -e 'require("cjson"); require("lfs"); require("socket.core"); require("pegasus"); require("lsqlite3"); print("arm64 native deps ok")'
 
 PATH="$ARM_LUAROCKS_PREFIX/bin:$ARM_LUA_PREFIX/bin:$PATH" LUA_PATH="$DEPS_LUA_PATH" LUA_CPATH="$DEPS_LUA_CPATH" \
-    PKG_CONFIG_PATH="$ARM_LUA_PREFIX/lib/pkgconfig" lua test/contract_docs.lua
+    PKG_CONFIG_PATH="$ARM_LUA_PREFIX/lib/pkgconfig" "$ARM_LUA_PREFIX/bin/lua" test/contract_docs.lua
 smoke_output=$(PATH="$ARM_LUAROCKS_PREFIX/bin:$ARM_LUA_PREFIX/bin:$PATH" \
     LUA_PATH="$DEPS_LUA_PATH" LUA_CPATH="$DEPS_LUA_CPATH" \
-    PKG_CONFIG_PATH="$ARM_LUA_PREFIX/lib/pkgconfig" lua test/smoke_all.lua)
+    PKG_CONFIG_PATH="$ARM_LUA_PREFIX/lib/pkgconfig" "$ARM_LUA_PREFIX/bin/lua" test/smoke_all.lua)
 printf '%s\n' "$smoke_output"
 if printf '%s\n' "$smoke_output" | grep -i 'skipped' >/dev/null; then
     echo "ARM64 smoke suite reported a skipped probe" >&2

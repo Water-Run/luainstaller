@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-22
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 local platform = require("luainstaller.platform")
@@ -28,20 +28,70 @@ end
 
 M.uint32 = uint32
 
+local NIBBLE_BITS = { band = {}, bor = {}, bxor = {} }
+local BYTE_BITS = { band = {}, bor = {}, bxor = {} }
+local function initializePortableBits()
+    for left = 0, 15 do
+        for right = 0, 15 do
+            local left_value = left
+            local right_value = right
+            local values = { band = 0, bor = 0, bxor = 0 }
+            local place = 1
+            for _ = 1, 4 do
+                local left_bit = left_value % 2
+                local right_bit = right_value % 2
+                if left_bit == 1 and right_bit == 1 then
+                    values.band = values.band + place
+                end
+                if left_bit == 1 or right_bit == 1 then
+                    values.bor = values.bor + place
+                end
+                if left_bit ~= right_bit then
+                    values.bxor = values.bxor + place
+                end
+                left_value = (left_value - left_bit) / 2
+                right_value = (right_value - right_bit) / 2
+                place = place * 2
+            end
+            local index = left * 16 + right + 1
+            NIBBLE_BITS.band[index] = values.band
+            NIBBLE_BITS.bor[index] = values.bor
+            NIBBLE_BITS.bxor[index] = values.bxor
+        end
+    end
+
+    local operations = { "band", "bor", "bxor" }
+    for left = 0, 255 do
+        for right = 0, 255 do
+            local low_index = (left % 16) * 16 + (right % 16) + 1
+            local high_index = math.floor(left / 16) * 16 + math.floor(right / 16) + 1
+            local index = left * 256 + right + 1
+            for _, operation in ipairs(operations) do
+                BYTE_BITS[operation][index] = NIBBLE_BITS[operation][low_index]
+                    + NIBBLE_BITS[operation][high_index] * 16
+            end
+        end
+    end
+end
+
+if _VERSION == "Lua 5.1"
+    or (_VERSION == "Lua 5.2" and type(bit32) ~= "table") then
+    initializePortableBits()
+end
+
 local function arithmeticBitOp(left, right, operation)
     left = uint32(left)
     right = uint32(right)
     local result = 0
     local bit_value = 1
-    for _ = 1, 32 do
-        local left_bit = left % 2
-        local right_bit = right % 2
-        if operation(left_bit, right_bit) then
-            result = result + bit_value
-        end
-        left = (left - left_bit) / 2
-        right = (right - right_bit) / 2
-        bit_value = bit_value * 2
+    local lookup = BYTE_BITS[operation]
+    for _ = 1, 4 do
+        local left_byte = left % 256
+        local right_byte = right % 256
+        result = result + lookup[left_byte * 256 + right_byte + 1] * bit_value
+        left = (left - left_byte) / 256
+        right = (right - right_byte) / 256
+        bit_value = bit_value * 256
     end
     return result
 end
@@ -66,38 +116,35 @@ elseif type(bit32) == "table" then
     native_bits = bit32
 end
 
-local function foldBitOperation(name, fallback, first, second, ...)
+local function foldBitOperation(name, first, second, ...)
     local operation = native_bits and native_bits[name]
     local result
     if operation then
         result = operation(first, second)
     else
-        result = arithmeticBitOp(first, second, fallback)
+        result = arithmeticBitOp(first, second, name)
     end
     for index = 1, select("#", ...) do
         local value = select(index, ...)
         if operation then
             result = operation(result, value)
         else
-            result = arithmeticBitOp(result, value, fallback)
+            result = arithmeticBitOp(result, value, name)
         end
     end
     return uint32(result)
 end
 
 function M.band(first, second, ...)
-    return foldBitOperation("band", function(a, b) return a == 1 and b == 1 end,
-        first, second, ...)
+    return foldBitOperation("band", first, second, ...)
 end
 
 function M.bor(first, second, ...)
-    return foldBitOperation("bor", function(a, b) return a == 1 or b == 1 end,
-        first, second, ...)
+    return foldBitOperation("bor", first, second, ...)
 end
 
 function M.bxor(first, second, ...)
-    return foldBitOperation("bxor", function(a, b) return a ~= b end,
-        first, second, ...)
+    return foldBitOperation("bxor", first, second, ...)
 end
 
 function M.bnot(value)
@@ -193,6 +240,10 @@ end
 function M.luaVersion()
     local version = _VERSION or "Lua"
     local major, minor = version:match("Lua%s+(%d+)%.(%d+)")
+    local jit_runtime = rawget(_G, "jit")
+    local official = not (type(jit_runtime) == "table"
+        and type(jit_runtime.version) == "string"
+        and type(jit_runtime.status) == "function")
     major = tonumber(major)
     minor = tonumber(minor)
     return {
@@ -201,6 +252,7 @@ function M.luaVersion()
         major = major,
         minor = minor,
         num = major and minor and (major * 100 + minor) or nil,
+        official = official,
     }
 end
 

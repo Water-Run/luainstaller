@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -26,8 +26,6 @@ local normalizePath = path.normalize
 local absolutePath = path.absolute
 local dirname = path.dirname
 local basename = path.basename
-local commandOutput = process.output
-local shellQuote = process.shellQuote
 local makeError = result.error
 
 local function fromThrownError(err)
@@ -68,7 +66,7 @@ local function writeFile(path, content)
 end
 
 local function removeTree(path)
-    local ok, output = commandOutput("rm -rf " .. shellQuote(path))
+    local ok, output = fs.removeTree(path)
     if not ok then
         return makeError("FilesystemError", "Cannot remove runtime trace directory", {
             path = path,
@@ -108,12 +106,14 @@ local function validateLuaInterpreter(interpreter)
     local probe = table.concat({
         "local major, minor = tostring(_VERSION):match('Lua%s+(%d+)%.(%d+)')",
         "major, minor = tonumber(major), tonumber(minor)",
-        "if major ~= 5 or not minor or minor < 1 or type(rawget(_G, 'jit')) == 'table' then "
+        "local j = rawget(_G, 'jit')",
+        "if major ~= 5 or not minor or minor < 1 or "
+            .. "(type(j) == 'table' and type(j.version) == 'string' and type(j.status) == 'function') then "
             .. "io.stderr:write('expected official Lua 5.1+, got ', tostring(_VERSION), '\\n'); "
             .. "os.exit(42) end",
         "io.write(_VERSION)",
     }, ";")
-    local ok, output = commandOutput(shellQuote(interpreter) .. " -e " .. shellQuote(probe))
+    local ok, output = process.outputCommand(interpreter, { "-e", probe })
     local major, minor = tostring(output):match("^Lua%s+(%d+)%.(%d+)%s*$")
     major, minor = tonumber(major), tonumber(minor)
     if not ok or major ~= 5 or not minor or minor < 1 then
@@ -172,29 +172,11 @@ local function decodeHex(encoded)
 end
 
 local function makePrivateWorkDir(prefix)
-    local root = os.getenv("TMPDIR") or "/tmp"
-    local max_attempts = 10
-    for _ = 1, max_attempts do
-        local stamp = tostring(os.time())
-            .. tostring(os.clock()):gsub("%.", "")
-            .. "-"
-            .. tostring(math.random(100000, 999999))
-        local dir = normalizePath(root .. "/luainstaller-" .. prefix .. "-" .. stamp)
-        local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(dir))
-        if ok then
-            return dir
-        end
-        -- Retry only when the path already exists (collision); other failures are fatal.
-        local exists_ok = commandOutput("test -d " .. shellQuote(dir))
-        if not exists_ok then
-            return nil, makeError("FilesystemError", "Cannot create private temp directory", {
-                path = dir,
-                output = output,
-            })
-        end
-    end
-    return nil, makeError("FilesystemError", "Cannot create unique private temp directory after retries", {
+    local dir, output = fs.makePrivateDirectory(prefix)
+    if dir then return normalizePath(dir) end
+    return nil, makeError("FilesystemError", "Cannot create private temp directory", {
         prefix = prefix,
+        output = output,
     })
 end
 
@@ -667,17 +649,13 @@ local function runtimePlan(opts)
         return nil, cleanupWorkDir(work_dir, err)
     end
 
-    local args = {}
+    local args = { script_path }
     for _, value in ipairs(opts.run_args or {}) do
-        args[#args + 1] = shellQuote(value)
+        args[#args + 1] = value
     end
-    local command = table.concat({
-        shellQuote(interpreter),
-        shellQuote(script_path),
-        table.concat(args, " "),
-    }, " ")
+    local command = process.command(interpreter, args) or interpreter
 
-    local ok, output = commandOutput(command)
+    local ok, output = process.outputCommand(interpreter, args)
     if not ok then
         local message = "Runtime require tracing failed"
         if tostring(output):find(

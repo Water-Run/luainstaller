@@ -21,6 +21,17 @@ local path = require("luainstaller.path")
 local process = require("luainstaller.process")
 
 local lua = harness.lua_command()
+local runtime_analysis = require("luainstaller").analyze({
+    entry = "test/runtime_bundle/main.lua",
+    discovery_mode = "runtime",
+    lua = lua,
+})
+assert(runtime_analysis.ok,
+    runtime_analysis.error and runtime_analysis.error.message or
+        "runtime discovery failed on Windows")
+assert(#runtime_analysis.dependencies.scripts == 1,
+    "Windows runtime discovery omitted the required Lua module")
+
 local argument = "say \"hello\"\\trail\\ & percent% caret^ bang! 测试"
 local shell_ok, shell_output = process.outputPowerShell(
     "[Console]::Write([Text.Encoding]::UTF8.GetString(" ..

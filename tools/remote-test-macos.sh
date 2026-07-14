@@ -128,12 +128,9 @@ copy_tree_macos() {
 }
 
 create_tracked_tree_archive() {
-    TRACKED_LIST=$SOURCE_CACHE/tracked-files.$$.list
     TRACKED_ARCHIVE=$SOURCE_CACHE/tracked-tree.$$.tar
-    rm -f "$TRACKED_LIST" "$TRACKED_ARCHIVE"
-    (cd "$PROJECT_ROOT" && git ls-files -z) >"$TRACKED_LIST"
-    (cd "$PROJECT_ROOT" && tar --null -T "$TRACKED_LIST" -cf "$TRACKED_ARCHIVE")
-    rm -f "$TRACKED_LIST"
+    rm -f "$TRACKED_ARCHIVE"
+    (cd "$PROJECT_ROOT" && git archive --format=tar HEAD) >"$TRACKED_ARCHIVE"
 }
 
 remote_sh() {
@@ -289,7 +286,7 @@ LUA_PATH="\$DEPS_LUA_PATH" LUA_CPATH="\$DEPS_LUA_CPATH" "\$LUA_PREFIX/bin/lua" -
 EOF
 
 create_tracked_tree_archive
-trap 'rm -f "$TRACKED_LIST" "$TRACKED_ARCHIVE"' EXIT HUP INT TERM
+trap 'rm -f "$TRACKED_ARCHIVE"' EXIT HUP INT TERM
 copy_tree_macos
 rm -f "$TRACKED_ARCHIVE"
 trap - EXIT HUP INT TERM
@@ -301,6 +298,7 @@ LUA_PREFIX=$(quote_remote "$LUA_PREFIX")
 LUAROCKS_PREFIX=$(quote_remote "$LUAROCKS_PREFIX")
 ROCKTREE=$(quote_remote "$ROCKTREE")
 PREFIX=$(quote_remote "$PREFIX")
+MATRIX_HOST_LABEL=$(quote_remote "$MAC_HOST")
 DEPS_LUA_PATH="\$ROCKTREE/share/lua/5.4/?.lua;\$ROCKTREE/share/lua/5.4/?/init.lua;;"
 DEPS_LUA_CPATH="\$ROCKTREE/lib/lua/5.4/?.so;\$ROCKTREE/lib/lua/5.4/?/init.so;;"
 
@@ -322,6 +320,7 @@ exe_path() {
 }
 
 cd "\$REMOTE_ROOT"
+HOST_LABEL="\$MATRIX_HOST_LABEL" sh tools/test-lua-versions.sh
 PATH="\$LUAROCKS_PREFIX/bin:\$LUA_PREFIX/bin:\$PATH" \
     "\$LUAROCKS_PREFIX/bin/luarocks" make --force --tree "\$PREFIX" \
     luainstaller-1.0.0-1.rockspec

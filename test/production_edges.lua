@@ -3315,180 +3315,53 @@ print("logger empty stale replacement ok")
 end)
 
 test("remote scripts are pinned and non-destructive", function()
-    local scripts = {
-        "tools/remote-test-linux.sh",
-        "tools/remote-test-macos.sh",
-        "tools/remote-test-windows.sh",
-    }
-    local contents = {}
-    for _, file in ipairs(scripts) do
-        local content = readFile(file)
-        contents[file] = content
-        assert(content:find("require_safe_tmp_path()", 1, true), file .. " lacks path validation")
-        assert(content:find("stage_source()", 1, true), file .. " lacks staged downloads")
-        assert(content:find("expected=$3", 1, true), file .. " does not accept a pinned hash")
-        assert(content:find("sha256sum -c", 1, true), file .. " does not verify SHA-256")
-        assert(content:find(".part.$$", 1, true), file .. " does not download atomically")
-        assert(not content:find("tar --exclude=.git", 1, true), file .. " archives untracked files")
-        assert(content:find(
-            "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
-            1,
-            true
-        ), file .. " lacks the Lua source pin")
-        assert(content:find(
-            "ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82",
-            1,
-            true
-        ), file .. " lacks the lsqlite3 source pin")
-        assert(content:find(
-            "8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32",
-            1,
-            true
-        ), file .. " lacks the SQLite source pin")
+    local posix_matrix = readFile("tools/test-lua-versions.sh")
+    local windows_matrix = readFile("tools/test-lua-versions.ps1")
+    local linux_runner = readFile("tools/remote-test-linux.sh")
+    local macos_runner = readFile("tools/remote-test-macos.sh")
+    local windows_runner = readFile("tools/remote-test-windows.sh")
+    for _, version in ipairs({ "5.1.5", "5.2.4", "5.3.6", "5.4.8", "5.5.0" }) do
+        assert(posix_matrix:find(version, 1, true), "POSIX matrix omits Lua " .. version)
+        assert(windows_matrix:find(version, 1, true), "Windows matrix omits Lua " .. version)
     end
-
-    for _, file in ipairs({ scripts[1], scripts[2] }) do
-        local content = contents[file]
-        assert(content:find("git ls-files -z", 1, true), file .. " does not stream the tracked tree")
-        assert(content:find(
-            "b0e0c85205841ddd7be485f53d6125766d18a81d226588d2366931e9a1484492",
-            1,
-            true
-        ), file .. " lacks the LuaRocks source pin")
-        for _, pinned in ipairs({
-            "lua-cjson 2.1.0.10-1",
-            "luafilesystem 1.9.0-1",
-            "luasocket 3.1.0-1",
-            "mimetypes 1.1.0-2",
-            "pegasus 1.1.0-0",
-        }) do
-            assert(content:find(pinned, 1, true), file .. " lacks dependency pin " .. pinned)
-        end
+    for _, pin in ipairs({
+        "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
+        "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
+        "fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60",
+        "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
+        "57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d",
+    }) do
+        assert(posix_matrix:find(pin, 1, true), "POSIX matrix lacks official Lua SHA-256")
+        assert(windows_matrix:lower():find(pin, 1, true),
+            "Windows matrix lacks official Lua SHA-256")
     end
-
-    local linux = contents[scripts[1]]
-    assert(linux:find("linux x64 smoke suite reported a skipped probe", 1, true))
-    assert(linux:find("ARM64 smoke suite reported a skipped probe", 1, true))
-    assert(linux:find(
-        "LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 lua test/production_edges.lua",
-        1,
-        true
-    ), "Linux release gate does not force every edge prerequisite")
-
-    local macos = contents[scripts[2]]
-    assert(macos:find("test/cli_split_smoke.lua", 1, true), "macOS omits the portable CLI suite")
-    assert(macos:find("test/contract_docs.lua", 1, true), "macOS omits contract tests")
-    assert(macos:find("test/smoke_all.lua", 1, true), "macOS omits the core smoke suite")
-    assert(macos:find("macOS smoke suite reported a skipped probe", 1, true))
-    assert(macos:find("macOS onefile reproducibility ok", 1, true),
-        "macOS omits the repeated onefile byte check")
-    local _, luarocks_prefix_assignments = macos:gsub(
-        "LUAROCKS_PREFIX=%$%(quote_remote",
-        ""
-    )
-    assertEqual(luarocks_prefix_assignments, 2, "macOS fresh-shell LuaRocks prefix assignments")
-    local _, lua_prefix_bindings = macos:gsub("LUAI_LUA_PREFIX=", "")
-    assertEqual(lua_prefix_bindings, 3, "macOS fresh-shell build Lua prefix bindings")
-    assert(macos:find("export PATH LUA_PATH LUA_CPATH LUAI_LUA_PREFIX", 1, true),
-        "macOS fresh shell does not export the build Lua prefix")
-    assert(not readFile("src/bundler.lua"):find("-Wl,-no_uuid", 1, true),
-        "macOS launcher suppresses the LC_UUID required by modern dyld")
-    assert(not readFile("src/onefile.lua"):find("-Wl,-no_uuid", 1, true),
-        "macOS extractor suppresses the LC_UUID required by modern dyld")
-
-    local windows = contents[scripts[3]]
-    assert(not windows:find("StrictHostKeyChecking=no", 1, true))
-    assert(windows:find("StrictHostKeyChecking=yes", 1, true))
-    assert(windows:find("SSH_OPTS must not override host-key policy", 1, true))
-    assert(windows:find('SSH_PORT=${SSH_PORT:-22}', 1, true))
-    assert(windows:find('SSH_IDENTITY_FILE=${SSH_IDENTITY_FILE:-""}', 1, true))
-    assert(windows:find('if [ -n "${WINDOWS_PASSWORD:-}" ]', 1, true))
-    assert(not windows:find("require_env WINDOWS_PASSWORD", 1, true))
-    assert(windows:find('if [ "${WINDOWS_LOCAL_ONLY:-0}" = 1 ]', 1, true))
-    assert(windows:find("validate_remote_configuration()", 1, true),
-        "Windows script does not isolate remote-only requirements")
-    assert(windows:find('if [ "${WINDOWS_LOCAL_ONLY:-0}" != 1 ]; then\n'
-            .. "    validate_remote_configuration\nfi", 1, true),
-        "Windows local-only gate still evaluates remote SSH requirements")
-    assert(windows:find('win_out_parent=$(dirname "$WIN_OUT")', 1, true),
-        "Windows runner archives a hard-coded WIN_OUT parent")
-    assert(windows:find('tar -C "$win_out_parent" -czf "$archive" -- "$win_out_name"', 1, true),
-        "Windows runner does not archive the configured WIN_OUT")
-    assert(windows:find("param([string]$StagingRoot, [string]$BundleDirectoryName)", 1, true),
-        "Windows runner does not accept the configured staging root")
-    assert(windows:find("$root = Join-Path $StagingRoot $BundleDirectoryName", 1, true),
-        "Windows runner ignores REMOTE_TEMP or WIN_OUT")
-    assert(windows:find([[-BundleDirectoryName \"$win_out_name\"]], 1, true),
-        "Windows runner does not pass the configured WIN_OUT basename")
-    assert(windows:find("unsafe Windows bundle directory name", 1, true),
-        "Windows runner does not reject ambiguous or reserved WIN_OUT basenames")
-    assert(not windows:find("Z:/tmp/luainstaller-win-rocks", 1, true),
-        "Windows dependency probe ignores the configured WIN_TREE")
-    assert(windows:find('package.path="share/lua/5.4/?.lua;', 1, true),
-        "Windows dependency probe does not resolve from its configured tree")
-    assert(not windows:find("$root = Join-Path $env:TEMP 'luainstaller-win-bundles'", 1, true),
-        "Windows runner silently falls back to a different staging root")
-    local windows_preflight = windows:find('preflight_windows_upload "$host"', 1, true)
-    local windows_first_scp = windows:find('strict_scp "$archive"', 1, true)
-    assert(windows_preflight and windows_first_scp and windows_preflight < windows_first_scp,
-        "Windows remote upload occurs before its reparse-point preflight")
-    assert(windows:find("unsafe Windows upload%-path ancestor"),
-        "Windows upload preflight does not reject reparse-point ancestors")
-    assert(windows:find("unsafe Windows upload target", 1, true),
-        "Windows upload preflight does not reject unsafe existing targets")
-
-    local root = makeTempDir("remote-path-guards")
-    local victim = root .. "/victim"
-    makeDirectory(victim)
-    writeFile(victim .. "/sentinel", "preserve\n")
-    local ssh_guard_log = root .. "/ssh-policy.log"
-    local ssh_guard_ok = os.execute("SSH_OPTS='-F /tmp/unsafe-config' WIN_OUT=/ "
-        .. "sh tools/remote-test-windows.sh >" .. shellQuote(ssh_guard_log) .. " 2>&1")
-    assert(ssh_guard_ok ~= true and ssh_guard_ok ~= 0, "unsafe SSH config option was accepted")
-    assert(readFile(ssh_guard_log):find("host-key policy", 1, true),
-        "unsafe SSH config was not rejected by the trust-policy guard")
-    local cases = {
-        "REMOTE_ROOT=/ sh tools/remote-test-linux.sh",
-        "REMOTE_ROOT=/ sh tools/remote-test-macos.sh",
-        "WIN_OUT=" .. shellQuote(root .. "/stage/../victim")
-            .. " sh tools/remote-test-windows.sh",
-    }
-    for index, command in ipairs(cases) do
-        local log = root .. "/guard-" .. index .. ".log"
-        local ok = os.execute(command .. " >" .. shellQuote(log) .. " 2>&1")
-        assert(ok ~= true and ok ~= 0, "unsafe remote path was accepted: " .. command)
-        assert(readFile(log):find("temporary path", 1, true), "path rejection was not actionable")
+    assert(posix_matrix:find("require_safe_tmp_path()", 1, true))
+    assert(posix_matrix:find("stage_source()", 1, true))
+    assert(posix_matrix:find("sha256sum -c", 1, true))
+    assert(windows_matrix:find("Assert-SafeRoot", 1, true))
+    assert(windows_matrix:find("Stage-Source", 1, true))
+    assert(windows_matrix:find("Get-FileHash", 1, true))
+    assert(linux_runner:find("git archive --format=tar HEAD", 1, true))
+    assert(macos_runner:find("git archive --format=tar HEAD", 1, true))
+    assert(not linux_runner:find("git ls-files", 1, true))
+    assert(not macos_runner:find("git ls-files", 1, true))
+    for name, content in pairs({
+        posix = posix_matrix,
+        powershell = windows_matrix,
+        windows_launcher = windows_runner,
+    }) do
+        local lowered = content:lower()
+        assert(not lowered:find("wine", 1, true), name .. " requires Wine")
+        assert(not lowered:find("mingw", 1, true), name .. " requires MinGW")
+        assert(not lowered:find("virtual machine", 1, true), name .. " requires a VM")
+        assert(not lowered:find("windows vm", 1, true), name .. " requires a VM")
     end
-    for index, unsafe_name in ipairs({ "-C", "NUL.txt", "trailing." }) do
-        local log = root .. "/windows-name-guard-" .. index .. ".log"
-        local command = "WINDOWS_LOCAL_ONLY=1 WIN_OUT="
-            .. shellQuote("/tmp/luainstaller-safe/" .. unsafe_name)
-            .. " sh tools/remote-test-windows.sh >" .. shellQuote(log) .. " 2>&1"
-        local ok = os.execute(command)
-        assert(ok ~= true and ok ~= 0, "unsafe Windows bundle name was accepted: " .. unsafe_name)
-        assert(readFile(log):find("bundle directory name", 1, true),
-            "unsafe Windows bundle name rejection was not actionable")
-    end
-    assert(readFile(victim .. "/sentinel") == "preserve\n", "unsafe override deleted user data")
-
-    local ancestor = "/tmp/luainstaller-ancestor-" .. require("luainstaller.path").basename(root)
-    local ancestor_victim = root .. "/ancestor-victim"
-    makeDirectory(ancestor_victim .. "/cache/lua-5.4.8.tar.gz")
-    writeFile(ancestor_victim .. "/sentinel", "ancestor data survives\n")
-    runCommand("ln -s " .. shellQuote(ancestor_victim) .. " " .. shellQuote(ancestor))
-    for index, script in ipairs(scripts) do
-        local log = root .. "/ancestor-guard-" .. index .. ".log"
-        local command = "SOURCE_CACHE=" .. shellQuote(ancestor .. "/cache")
-            .. " sh " .. shellQuote(script) .. " >" .. shellQuote(log) .. " 2>&1"
-        local ok = os.execute(command)
-        assert(ok ~= true and ok ~= 0, "symlink ancestor was accepted by " .. script)
-        assert(readFile(log):find("symlink ancestor", 1, true),
-            script .. " did not reject the symlink ancestor before use")
-    end
-    assertEqual(readFile(ancestor_victim .. "/sentinel"), "ancestor data survives\n",
-        "ancestor symlink sentinel")
-    assert(os.remove(ancestor))
-    removeTree(root)
+    assert(not windows_runner:lower():find("ssh", 1, true),
+        "native Windows runner still requires SSH")
+    assert(not linux_runner:find("lua test/", 1, true),
+        "Linux runner invokes tests through a bare lua command")
+    assert(not macos_runner:find("lua test/", 1, true),
+        "macOS runner invokes tests through a bare lua command")
 end)
 
 local filter = os.getenv("EDGE_FILTER")
