@@ -448,9 +448,15 @@ function M.listTree(root)
     else
         local ok, output = process.output("find " .. process.quote(root) .. " -mindepth 1 -print0")
         if not ok then return nil, output end
-        for absolute in tostring(output):gmatch("([^\0]+)\0") do
+        output = tostring(output)
+        local position = 1
+        while position <= #output do
+            local terminator = output:find("\0", position, true)
+            if not terminator then return nil, "incomplete POSIX tree inventory" end
+            local absolute = output:sub(position, terminator - 1)
             local relative = absolute:sub(#root + 1):gsub("^/", "")
             entries[#entries + 1] = { path = relative, type = M.pathType(absolute) }
+            position = terminator + 1
         end
     end
     table.sort(entries, function(left, right) return left.path < right.path end)

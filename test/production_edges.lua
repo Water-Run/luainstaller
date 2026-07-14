@@ -2440,6 +2440,10 @@ int lua_pcallk(lua_State *state, int arguments, int results, int error_function,
         shellQuote(fake_lib .. "/liblua-fake.so"),
     }, " "))
     writeFile(fake_bin .. "/pkg-config", string.format([[#!/bin/sh
+if [ "$1" = "--version" ]; then
+    printf '%%s\n' '1.9.5'
+    exit 0
+fi
 if [ "$1" = "--modversion" ]; then
     printf '%%s\n' '5.4.99'
     exit 0
@@ -2450,7 +2454,9 @@ if [ "$1" = "--cflags" ]; then
 fi
 exit 2
 ]], commandOutputTrimmed("pkg-config --variable=includedir lua"), fake_lib, fake_lib))
-    runCommand("chmod 700 " .. shellQuote(fake_bin .. "/pkg-config"))
+    writeFile(fake_bin .. "/luarocks", "#!/bin/sh\nexit 2\n")
+    runCommand("chmod 700 " .. shellQuote(fake_bin .. "/pkg-config")
+        .. " " .. shellQuote(fake_bin .. "/luarocks"))
 
     local child = harness.loader_prelude() .. string.format([[
 local result = require("luainstaller").bundle({

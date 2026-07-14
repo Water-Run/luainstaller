@@ -15,6 +15,7 @@ Updated:
 
 local M = {}
 local output_counter = 0
+local powershell_counter = 0
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
 local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
@@ -237,6 +238,45 @@ function M.outputPowerShell(script)
     end
     local invocation, invocation_err = powershellInvocation(script, "Text")
     if not invocation then return false, invocation_err end
+    if #invocation > 6000 then
+        powershell_counter = powershell_counter + 1
+        local parent = os.getenv("TEMP") or os.getenv("TMP")
+        if type(parent) ~= "string" or parent == "" or parent:find("\0", 1, true) then
+            return false, "a safe Windows temporary directory is unavailable"
+        end
+        parent = parent:gsub("/", "\\"):gsub("\\+$", "")
+        local temporary = parent .. "\\luainstaller-ps-" .. tostring(os.time())
+            .. "-" .. tostring(math.floor(os.clock() * 1000000000))
+            .. "-" .. tostring(powershell_counter) .. ".ps1"
+        local function decodeExpression(value)
+            return "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
+                .. base64Encode(value) .. "'))"
+        end
+        local write_script = table.concat({
+            "$ErrorActionPreference='Stop';$p=", decodeExpression(temporary), ";",
+            "$i=[Console]::OpenStandardInput();",
+            "$s=New-Object IO.FileStream($p,[IO.FileMode]::CreateNew,",
+            "[IO.FileAccess]::Write,[IO.FileShare]::None);",
+            "try{$i.CopyTo($s);$s.Flush($true)}finally{$s.Dispose()}",
+        })
+        local wrote, write_err = M.inputPowerShell(write_script, script)
+        if not wrote then return false, write_err end
+        local run_script = table.concat({
+            "$ErrorActionPreference='Stop';$p=", decodeExpression(temporary), ";",
+            "$s=[IO.File]::ReadAllText($p,[Text.Encoding]::ASCII);",
+            "& ([ScriptBlock]::Create($s))",
+        })
+        local run_invocation, run_err = powershellInvocation(run_script, "Text")
+        if not run_invocation then return false, run_err end
+        local ok, output = M.output(run_invocation)
+        local remove_script = "$p=" .. decodeExpression(temporary)
+            .. ";if([IO.File]::Exists($p)){[IO.File]::Delete($p)}"
+        local removed, remove_err = M.outputPowerShell(remove_script)
+        if not removed then
+            return false, cleanWindowsOutput(output) .. "\n" .. tostring(remove_err)
+        end
+        return ok, cleanWindowsOutput(output)
+    end
     local ok, output = M.output(invocation)
     return ok, cleanWindowsOutput(output)
 end

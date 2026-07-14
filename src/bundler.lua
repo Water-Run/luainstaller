@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -36,8 +36,6 @@ local isWithin = path.isWithin
 local isSafeRelative = path.isSafeRelative
 local validateTargetRelative = path.validateTargetRelative
 local targetKey = path.targetKey
-local commandOutput = process.output
-local shellQuote = process.shellQuote
 local makeError = result.error
 local GENERATED_MARKER = "luainstaller-generated-output-v2"
 local GENERATED_MARKER_RELATIVE = ".luai/generated-output.txt"
@@ -49,7 +47,7 @@ local function fromThrownError(err)
 end
 
 local function ensureDirectory(path)
-    local ok, output = commandOutput("mkdir -p " .. shellQuote(path))
+    local ok, output = fs.makeDirectory(path)
     if not ok then
         return makeError("FilesystemError", "Cannot create directory: " .. tostring(path), {
             output = output,
@@ -60,7 +58,8 @@ local function ensureDirectory(path)
 end
 
 local function removeTree(path)
-    local ok, output = commandOutput("rm -rf " .. shellQuote(path))
+    if fs.pathType(path) == "missing" then return nil end
+    local ok, output = fs.removeTree(path)
     if not ok then
         return makeError("FilesystemError", "Cannot remove directory: " .. tostring(path), {
             output = output,
@@ -68,15 +67,6 @@ local function removeTree(path)
         })
     end
     return nil
-end
-
-local function fileExists(path)
-    local file = io.open(path, "rb")
-    if not file then
-        return false
-    end
-    file:close()
-    return true
 end
 
 local function contentHash(content, algorithm)
@@ -176,18 +166,15 @@ local function verifyManifestSources(manifest)
 end
 
 local function pathExists(path)
-    local ok = commandOutput("test -e " .. shellQuote(path))
-    return ok == true
+    return fs.pathType(path) ~= "missing"
 end
 
 local function directoryExists(path)
-    local ok = commandOutput("test -d " .. shellQuote(path))
-    return ok == true
+    return fs.pathType(path) == "directory"
 end
 
 local function isSymlink(path)
-    local ok = commandOutput("test -L " .. shellQuote(path))
-    return ok == true
+    return fs.pathType(path) == "reparse"
 end
 
 local function invalidOutputInventory(path, message, details)
@@ -201,45 +188,23 @@ local function validInventoryPath(value)
         and value ~= ""
         and value == normalizePath(value)
         and isSafeRelative(value)
-        and not value:find("[\0\t\r\n]")
+        and not value:find("\0", 1, true)
+        and not value:find("[\t\r\n]")
 end
 
 local function listTree(root)
     root = normalizePath(root)
-    local ok, raw = commandOutput("find " .. shellQuote(root) .. " -print0")
-    if not ok then
+    local listed, list_err = fs.listTree(root)
+    if not listed then
         return nil, invalidOutputInventory(root, "Cannot inspect output tree safely", {
-            output = raw,
+            output = list_err,
         })
     end
-    local root_terminator = raw:find("\0", 1, true)
-    if not root_terminator
-        or normalizePath(raw:sub(1, root_terminator - 1)) ~= root then
-        return nil, invalidOutputInventory(root, "Output tree listing omitted its root")
-    end
-    local prefix = root == "/" and "/" or (root .. "/")
     local entries = {}
     local seen = {}
-    local position = root_terminator + 1
-    while position <= #raw do
-        local terminator = raw:find("\0", position, true)
-        if not terminator then
-            return nil, invalidOutputInventory(root, "Output tree listing is incomplete")
-        end
-        local listed_path = raw:sub(position, terminator - 1)
-        local absolute = normalizePath(listed_path)
-        position = terminator + 1
-        if listed_path ~= absolute then
-            return nil, invalidOutputInventory(root, "Output tree contains a path with ambiguous spelling", {
-                unexpected_path = listed_path,
-            })
-        end
-        if absolute:sub(1, #prefix) ~= prefix then
-            return nil, invalidOutputInventory(root, "Output tree entry escapes its root", {
-                unexpected_path = absolute,
-            })
-        end
-        local relative = absolute:sub(#prefix + 1)
+    for _, listed_item in ipairs(listed) do
+        local relative = normalizePath(listed_item.path)
+        local absolute = normalizePath(root .. "/" .. relative)
         if not validInventoryPath(relative) then
             return nil, invalidOutputInventory(root, "Output tree contains an unsafe path", {
                 unexpected_path = absolute,
@@ -253,13 +218,13 @@ local function listTree(root)
         seen[relative] = true
 
         local item = { path = relative }
-        if isSymlink(absolute) then
+        if listed_item.type == "reparse" then
             return nil, invalidOutputInventory(root, "Output tree contains a symbolic link", {
                 unexpected_path = absolute,
             })
-        elseif directoryExists(absolute) then
+        elseif listed_item.type == "directory" then
             item.kind = "dir"
-        elseif fs.isRegularFile(absolute) then
+        elseif listed_item.type == "file" then
             local content, read_err = fs.readRegularFile(absolute)
             if content == nil then
                 return nil, invalidOutputInventory(root, "Cannot read generated output file", {
@@ -438,55 +403,6 @@ local function writeGeneratedMarker(path, declared_output_dir)
     return writeFile(marker_path, table.concat(lines, "\n") .. "\n")
 end
 
-local function validateLuaPrefix(prefix)
-    if type(prefix) ~= "string" or prefix == "" then
-        return makeError("ToolchainError", "Lua prefix is required for this onedir target")
-    end
-    local include = normalizePath(prefix .. "/include/lua.h")
-    local liblua = normalizePath(prefix .. "/lib/liblua.a")
-    if not fileExists(include) or not fileExists(liblua) then
-        return makeError("ToolchainError", "Lua prefix must contain include/lua.h and lib/liblua.a", {
-            lua_prefix = prefix,
-        })
-    end
-    return nil
-end
-
-local function validateWindowsLuaPrefix(prefix, lua_version)
-    if type(prefix) ~= "string" or prefix == "" then
-        return makeError("ToolchainError", "Lua prefix is required for windows onedir target")
-    end
-    local include = normalizePath(prefix .. "/include/lua.h")
-    if not fileExists(include) then
-        return makeError("ToolchainError", "Windows Lua prefix must contain include/lua.h", {
-            lua_prefix = prefix,
-        })
-    end
-    local compact_abi = string.format("lua%d%d.dll", lua_version.major, lua_version.minor)
-    local dotted_abi = string.format("lua%d.%d.dll", lua_version.major, lua_version.minor)
-    local candidates = {}
-    for _, name in ipairs({ compact_abi, dotted_abi }) do
-        candidates[#candidates + 1] = normalizePath(prefix .. "/bin/" .. name)
-        candidates[#candidates + 1] = normalizePath(prefix .. "/" .. name)
-    end
-    for _, candidate in ipairs(candidates) do
-        if fileExists(candidate) then
-            return nil, {
-                include_dir = normalizePath(prefix .. "/include"),
-                dll_path = candidate,
-                dll_dir = dirname(candidate),
-                dll_name = basename(candidate),
-                library_name = (basename(candidate):gsub("%.dll$", "")),
-            }
-        end
-    end
-    return makeError("ToolchainError", "Windows Lua prefix does not contain the selected Lua ABI DLL", {
-        lua_prefix = prefix,
-        lua_abi = lua_version.abi,
-        candidates = candidates,
-    })
-end
-
 writeFile = function(path, content)
     local ok, write_err = fs.writeFile(path, content or "")
     if ok then return nil end
@@ -501,7 +417,7 @@ local function copyFile(source, destination, expected_hash, hash_algorithm)
     if dir_err then
         return dir_err
     end
-    local ok, output = commandOutput("cp " .. shellQuote(source) .. " " .. shellQuote(destination))
+    local ok, output = fs.copyFile(source, destination)
     if not ok then
         return makeError("FilesystemError", "Cannot copy file: " .. tostring(source), {
             source = source,
@@ -528,32 +444,13 @@ local function copyFile(source, destination, expected_hash, hash_algorithm)
     return nil
 end
 
-local function findLinkedLuaRuntime(exe_path)
-    local ok, output = commandOutput("ldd " .. shellQuote(exe_path))
-    if not ok then
-        return nil, output
-    end
-    for line in output:gmatch("[^\n]+") do
-        local name, path = line:match("^%s*(liblua[^%s]*)%s+=>%s+([^%s]+)")
-        if name and path and path ~= "not" then
-            return path, name
-        end
-        path = line:match("^%s*(/[^%s]*liblua[^%s]*)")
-        if path then
-            return path, basename(path)
-        end
-    end
-    return nil, output
-end
-
-local function copyLuaRuntime(exe_path, native_dir)
-    local lua_path, lua_name = findLinkedLuaRuntime(exe_path)
+local function copyLuaRuntime(lua_path, native_dir)
     if not lua_path then
         return makeError("LuaRuntimeNotFoundError", "Cannot locate linked Lua shared library", {
-            executable = exe_path,
-            output = lua_name,
+            output = "verified toolchain did not report a runtime path",
         })
     end
+    local lua_name = basename(lua_path)
     local destination = normalizePath(native_dir .. "/" .. lua_name)
     if pathExists(destination) or isSymlink(destination) then
         return makeError("DuplicateModuleError", "Lua runtime destination collides with a native module", {
@@ -712,10 +609,6 @@ local function executableName(out_path, entry, profile)
     return name
 end
 
-local function windowsCompiler()
-    return os.getenv("LUAI_WINDOWS_CC") or os.getenv("LUAI_CC") or os.getenv("CC") or "cc"
-end
-
 local function defaultOut(entry)
     return normalizePath("build/" .. stem(entry))
 end
@@ -738,6 +631,18 @@ local function uniqueSiblingPath(final_path, label)
 end
 
 local function secureToken(context)
+    if IS_WINDOWS then
+        local ok, output = process.outputPowerShell(table.concat({
+            "$Bytes=New-Object byte[] 32;",
+            "$Rng=[Security.Cryptography.RandomNumberGenerator]::Create();",
+            "try{$Rng.GetBytes($Bytes)}finally{$Rng.Dispose()};",
+            "[Console]::Write([Convert]::ToBase64String($Bytes))",
+        }))
+        if not ok or not tostring(output):match("^[A-Za-z0-9+/]+=?=?$") then
+            return nil, tostring(output or "cannot acquire Windows cryptographic randomness")
+        end
+        return hash_mod.sha256(tostring(context or "") .. "\0" .. output)
+    end
     local handle, open_err = io.open("/dev/urandom", "rb")
     if not handle then
         return nil, tostring(open_err or "cannot open /dev/urandom")
@@ -750,8 +655,17 @@ local function secureToken(context)
     return hash_mod.sha256(tostring(context or "") .. "\0" .. bytes)
 end
 
+local function renamePath(source, destination)
+    if IS_WINDOWS then return fs.rename(source, destination) end
+    return os.rename(source, destination)
+end
+
+local function removeFile(path_value)
+    return fs.removeFile(path_value)
+end
+
 local function removeDirectoryOnly(path_value)
-    local ok, output = commandOutput("rmdir " .. shellQuote(path_value))
+    local ok, output = fs.removeDirectory(path_value)
     if ok then
         return true
     end
@@ -768,7 +682,7 @@ local function createStagingDirectory(final_path)
         if not candidate then
             break
         end
-        local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(candidate))
+        local ok, output = fs.createDirectory(candidate)
         if ok then
             return candidate
         end
@@ -800,7 +714,7 @@ local function acquireOutputLock(final_path)
             output = token_err or release_token_err,
         })
     end
-    local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(lock_path))
+    local ok, output = fs.createDirectory(lock_path)
     if not ok then
         return nil, makeError("FilesystemError", "Another build is using this output path, or a stale build lock remains", {
             path = final_path,
@@ -833,10 +747,9 @@ local function restoreMovedOutputLock(release_path, lock_path)
     if pathExists(lock_path) or isSymlink(lock_path) then
         return false, "public lock path is already occupied"
     end
-    local reserved, reserve_err = commandOutput("mkdir -m 700 " .. shellQuote(lock_path))
-    if not reserved then
-        return false, reserve_err
-    end
+    if IS_WINDOWS then return renamePath(release_path, lock_path) end
+    local reserved, reserve_err = fs.createDirectory(lock_path)
+    if not reserved then return false, reserve_err end
     local restored, restore_err = os.rename(release_path, lock_path)
     if not restored then
         return false, restore_err
@@ -855,7 +768,7 @@ local function releaseOutputLock(lock, failure)
                 release_path = release_path,
             })
         else
-            local moved, move_err = os.rename(lock.path, release_path)
+            local moved, move_err = renamePath(lock.path, release_path)
             if not moved then
                 cleanup_err = makeError("FilesystemError", "Cannot bind output lock for release", {
                     lock_path = lock.path,
@@ -881,7 +794,7 @@ local function releaseOutputLock(lock, failure)
                 restore_error = restored and nil or tostring(restore_err),
             })
         elseif not cleanup_err then
-            local removed_owner, owner_err = os.remove(release_owner)
+            local removed_owner, owner_err = removeFile(release_owner)
             if not removed_owner then
                 cleanup_err = makeError("FilesystemError", "Cannot remove output lock owner record", {
                     lock_path = lock.path,
@@ -1003,7 +916,7 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
                 path = candidate,
             })
         end
-        local moved, move_err = os.rename(candidate, quarantine_path)
+        local moved, move_err = renamePath(candidate, quarantine_path)
         if not moved then
             return makeError("FilesystemError", "Cannot quarantine an owned backup file", {
                 path = candidate,
@@ -1019,7 +932,7 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
                 cause = read_err,
             })
         end
-        local removed, remove_err = os.remove(quarantine_path)
+        local removed, remove_err = removeFile(quarantine_path)
         if not removed then
             return makeError("FilesystemError", "Cannot remove a verified quarantined backup file", {
                 path = candidate,
@@ -1107,7 +1020,7 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
                 path = final_path,
             })
         end
-        local renamed, rename_err = os.rename(final_path, backup_path)
+        local renamed, rename_err = renamePath(final_path, backup_path)
         if not renamed then
             return makeError("FilesystemError", "Cannot preserve previous output directory", {
                 path = final_path,
@@ -1122,7 +1035,7 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
             final_path
         )
         if not moved_unchanged then
-            local restored, restore_err = os.rename(backup_path, final_path)
+            local restored, restore_err = renamePath(backup_path, final_path)
             if moved_err and moved_err.error then
                 moved_err.error.path = final_path
                 moved_err.error.backup_path = backup_path
@@ -1142,12 +1055,12 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
         end
     end
 
-    local committed, commit_err = os.rename(stage_path, final_path)
+    local committed, commit_err = renamePath(stage_path, final_path)
     if not committed then
         local restore_err
         if backup_path then
             local restored
-            restored, restore_err = os.rename(backup_path, final_path)
+            restored, restore_err = renamePath(backup_path, final_path)
             if restored then
                 restore_err = nil
             end
@@ -1168,10 +1081,10 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
             final_path
         )
         if not still_unchanged then
-            local staged_again, stage_restore_err = os.rename(final_path, stage_path)
+            local staged_again, stage_restore_err = renamePath(final_path, stage_path)
             local restored, restore_err
             if staged_again then
-                restored, restore_err = os.rename(backup_path, final_path)
+                restored, restore_err = renamePath(backup_path, final_path)
             end
             if backup_changed_err and backup_changed_err.error then
                 backup_changed_err.error.path = final_path
@@ -1455,40 +1368,13 @@ function M.bundleOnedir(opts)
         lua_prefix = opts.lua_prefix,
     })
     if not profile then return profile_err end
-    local native_toolchain
-    if profile.target_os ~= "windows" then
-        local toolchain_err
-        native_toolchain, toolchain_err = toolchain.resolve({
-            target_os = profile.target_os,
-            target_arch = profile.target_arch,
-            lua_prefix = profile.lua_prefix,
-            lua_version = lua_version,
-        })
-        if not native_toolchain then return toolchain_err end
-    end
-    local windows_lua
-    if profile.target_os == "windows" then
-        return makeError("UnsupportedPlatformError", "native Windows bundling is not yet initialized")
-    elseif profile.target_os == "macos" then
-        local prefix_err = validateLuaPrefix(profile.lua_prefix)
-        if prefix_err then
-            return prefix_err
-        end
-    end
-    if profile.target_os == "windows" then
-        -- Convention: success is (nil, data); failure is a single error table.
-        local windows_prefix_error
-        windows_prefix_error, windows_lua = validateWindowsLuaPrefix(profile.lua_prefix, lua_version)
-        if windows_prefix_error then
-            return windows_prefix_error
-        end
-        local cc_ok, cc_output = commandOutput(shellQuote(windowsCompiler()) .. " --version")
-        if not cc_ok then
-            return makeError("ToolchainError", "Windows onedir bundling requires a native C compiler", {
-                output = cc_output,
-            })
-        end
-    end
+    local native_toolchain, toolchain_err = toolchain.resolve({
+        target_os = profile.target_os,
+        target_arch = profile.target_arch,
+        lua_prefix = profile.lua_prefix,
+        lua_version = lua_version,
+    })
+    if not native_toolchain then return toolchain_err end
 
     local exe_name = executableName(final_out_dir, entry, profile)
     local exe_valid, exe_reason = validateTargetRelative(exe_name, profile.target_os)
@@ -1509,8 +1395,10 @@ function M.bundleOnedir(opts)
         [".luai"] = true,
         [exe_name] = true,
     }
-    if windows_lua then
-        allowed_generated_entries[windows_lua.dll_name] = true
+    local runtime_name = native_toolchain.runtime_path
+        and basename(native_toolchain.runtime_path) or nil
+    if profile.target_os == "windows" and runtime_name then
+        allowed_generated_entries[runtime_name] = true
     end
     local output_err = validateOutputDirectory(final_out_dir, allowed_generated_entries)
     if output_err then
@@ -1624,37 +1512,12 @@ function M.bundleOnedir(opts)
         end
     end
 
-    local function compileCommand(source_path, output_path)
-        if profile.target_os == "windows" then
-            return table.concat({
-                shellQuote(windowsCompiler()),
-                shellQuote(source_path),
-                "-I" .. shellQuote(windows_lua.include_dir),
-                "-L" .. shellQuote(windows_lua.dll_dir),
-                "-o",
-                shellQuote(output_path),
-                "-static-libgcc",
-                "-Wl,--no-insert-timestamp",
-                "-l" .. windows_lua.library_name,
-            }, " ")
-        end
-        return table.concat({
-            shellQuote(native_toolchain.cc),
-            "-std=c11",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-pedantic",
-            shellQuote(source_path),
-            "-o",
-            shellQuote(output_path),
-            "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
-            table.concat(native_toolchain.link_args, " "),
-        }, " ")
-    end
-
-    local compile_cmd = compileCommand(c_path, exe_path)
-    local compile_ok, compile_output = commandOutput(compile_cmd)
+    local compile_ok, compile_output, compile_cmd = toolchain.compile(
+        native_toolchain,
+        c_path,
+        exe_path,
+        { work_dir = build_dir, rpath = profile.loader_rpath }
+    )
     if not compile_ok then
         return abandon(makeError("CompilationFailedError", "C launcher compilation failed", {
             command = compile_cmd,
@@ -1663,7 +1526,7 @@ function M.bundleOnedir(opts)
     end
 
     if profile.target_os ~= "windows" then
-        local chmod_ok, chmod_output = commandOutput("chmod +x " .. shellQuote(exe_path))
+        local chmod_ok, chmod_output = process.outputCommand("chmod", { "+x", exe_path })
         if not chmod_ok then
             return abandon(makeError("FilesystemError", "Cannot mark launcher executable", {
                 path = exe_path,
@@ -1672,42 +1535,26 @@ function M.bundleOnedir(opts)
         end
     end
 
-    if profile.target_os == "windows" then
-        local exe_dll = normalizePath(out_dir .. "/" .. windows_lua.dll_name)
-        err = copyFile(windows_lua.dll_path, exe_dll)
-        if err then
-            return abandon(err)
-        end
-        local native_dll = normalizePath(native_dir .. "/" .. windows_lua.dll_name)
-        if pathExists(native_dll) or isSymlink(native_dll) then
-            return abandon(makeError(
-                "DuplicateModuleError",
-                "Lua runtime destination collides with a native module",
-                {
-                    source_path = normalizePath(windows_lua.dll_path),
-                    destination_path = native_dll,
-                }
-            ))
-        end
-        err = copyFile(windows_lua.dll_path, native_dll)
+    if native_toolchain.link_mode == "shared" and profile.target_os == "windows" then
+        local exe_dll = normalizePath(out_dir .. "/" .. runtime_name)
+        err = copyFile(native_toolchain.runtime_path, exe_dll)
         if err then
             return abandon(err)
         end
         manifest.launcher.lua_runtime = {
-            source_path = normalizePath(windows_lua.dll_path),
-            destination_path = windows_lua.dll_name,
-            native_destination_path = normalizePath(".luai/native/" .. windows_lua.dll_name),
+            source_path = normalizePath(native_toolchain.runtime_path),
+            destination_path = runtime_name,
             link_mode = "shared-dll",
         }
-    elseif profile.target_os == "macos" then
+    elseif native_toolchain.link_mode == "static" then
         manifest.launcher.lua_runtime = {
-            source_path = normalizePath(profile.lua_prefix .. "/lib/liblua.a"),
+            source_path = normalizePath(native_toolchain.static_library_path),
             destination_path = nil,
             link_mode = "static",
         }
     else
         local runtime_record
-        err, runtime_record = copyLuaRuntime(exe_path, native_dir)
+        err, runtime_record = copyLuaRuntime(native_toolchain.runtime_path, native_dir)
         if err then
             return abandon(err)
         end
@@ -1722,8 +1569,12 @@ function M.bundleOnedir(opts)
     if err then
         return abandon(err)
     end
-    local abi_compile_cmd = compileCommand(abi_probe_c, abi_probe_exe)
-    local abi_compile_ok, abi_compile_output = commandOutput(abi_compile_cmd)
+    local abi_compile_ok, abi_compile_output, abi_compile_cmd = toolchain.compile(
+        native_toolchain,
+        abi_probe_c,
+        abi_probe_exe,
+        { work_dir = build_dir, rpath = profile.loader_rpath }
+    )
     if not abi_compile_ok then
         return abandon(makeError("ToolchainError", "Cannot compile the linked Lua runtime ABI probe", {
             command = abi_compile_cmd,
@@ -1731,8 +1582,8 @@ function M.bundleOnedir(opts)
         }))
     end
     if profile.target_os ~= "windows" then
-        local probe_mode_ok, probe_mode_output = commandOutput(
-            "chmod +x " .. shellQuote(abi_probe_exe)
+        local probe_mode_ok, probe_mode_output = process.outputCommand(
+            "chmod", { "+x", abi_probe_exe }
         )
         if not probe_mode_ok then
             return abandon(makeError("FilesystemError", "Cannot mark the Lua ABI probe executable", {
@@ -1742,36 +1593,32 @@ function M.bundleOnedir(opts)
         end
     end
     local abi_probe_runtime
-    if profile.target_os == "windows" then
-        abi_probe_runtime = normalizePath(build_dir .. "/" .. windows_lua.dll_name)
-        err = copyFile(windows_lua.dll_path, abi_probe_runtime)
+    if profile.target_os == "windows" and native_toolchain.runtime_path then
+        abi_probe_runtime = normalizePath(build_dir .. "/" .. runtime_name)
+        err = copyFile(native_toolchain.runtime_path, abi_probe_runtime)
         if err then return abandon(err) end
     end
-    local abi_run_cmd
-    if profile.target_os == "windows" then
-        abi_run_cmd = shellQuote(abi_probe_exe)
-    elseif profile.target_os ~= "macos" then
-        local library_path = native_dir
-        local inherited_library_path = os.getenv("LD_LIBRARY_PATH")
-        if inherited_library_path and inherited_library_path ~= "" then
-            library_path = library_path .. ":" .. inherited_library_path
-        end
-        abi_run_cmd = "LD_LIBRARY_PATH=" .. shellQuote(library_path)
-            .. " " .. shellQuote(abi_probe_exe)
-    else
-        abi_run_cmd = shellQuote(abi_probe_exe)
+    local abi_environment = {}
+    if profile.target_os == "linux" and native_toolchain.link_mode == "shared" then
+        abi_environment.LD_LIBRARY_PATH = native_dir
+    elseif profile.target_os == "macos" and native_toolchain.link_mode == "shared" then
+        abi_environment.DYLD_LIBRARY_PATH = native_dir
     end
-    local abi_ok, abi_output = commandOutput(abi_run_cmd)
+    local abi_ok, abi_output = process.outputCommand(
+        abi_probe_exe,
+        {},
+        abi_environment
+    )
     if not abi_ok then
         return abandon(makeError("ToolchainError", "The linked Lua runtime does not match the selected Lua ABI", {
-            command = abi_run_cmd,
+            command = process.command(abi_probe_exe, {}),
             output = abi_output,
             expected = lua_version.version,
         }))
     end
-    local removed_probe = os.remove(abi_probe_exe)
-    local removed_probe_source = os.remove(abi_probe_c)
-    local removed_probe_runtime = not abi_probe_runtime or os.remove(abi_probe_runtime)
+    local removed_probe = removeFile(abi_probe_exe)
+    local removed_probe_source = removeFile(abi_probe_c)
+    local removed_probe_runtime = not abi_probe_runtime or removeFile(abi_probe_runtime)
     if not removed_probe or not removed_probe_source or not removed_probe_runtime then
         return abandon(makeError("FilesystemError", "Cannot remove the completed Lua ABI probe", {
             executable = abi_probe_exe,

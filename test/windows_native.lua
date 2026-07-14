@@ -27,6 +27,12 @@ local shell_ok, shell_output = process.outputPowerShell(
         "[Convert]::FromBase64String('5rWL6K+VICYgJSBeICE=')))"
 )
 assert(shell_ok and shell_output == "测试 & % ^ !", tostring(shell_output))
+local long_unicode_ok, long_unicode_output = process.outputPowerShell(
+    string.rep("$null=1;", 1000)
+        .. "[Console]::Write([Text.Encoding]::UTF8.GetString("
+        .. "[Convert]::FromBase64String('6ZW/6ISa5pys6Zuq')))"
+)
+assert(long_unicode_ok and long_unicode_output == "长脚本雪", tostring(long_unicode_output))
 local root = assert(fs.makePrivateDirectory("windows-native"))
 local special = path.join(root, "&A%caret^bang!-测试")
 assert(fs.makeDirectory(special))
