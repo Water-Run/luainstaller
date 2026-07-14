@@ -1158,7 +1158,6 @@ test("runtime discovery reports temporary directory cleanup failures", function(
         return original_output(command)
     end
     local loaded, isolated_discovery = pcall(dofile, "src/discovery.lua")
-    process.output = original_output
     assert(loaded, isolated_discovery)
 
     local successful_plan, cleanup_err = isolated_discovery.plan({
@@ -1169,10 +1168,12 @@ test("runtime discovery reports temporary directory cleanup failures", function(
         entry = failure_entry,
         discovery_mode = "runtime",
     })
+    process.output = original_output
     for _, cleanup_path in ipairs(cleanup_paths) do
         if cleanup_path then runCommand("rm -rf " .. shellQuote(cleanup_path)) end
     end
 
+    assert(#cleanup_paths == 2, "runtime cleanup failure injection did not cover both traces")
     assert(not successful_plan, "runtime discovery ignored cleanup failure after success")
     assertEqual(cleanup_err.error.type, "FilesystemError", "runtime cleanup error")
     assert(cleanup_err.error.path:find("luainstaller%-require%-trace%-"))
