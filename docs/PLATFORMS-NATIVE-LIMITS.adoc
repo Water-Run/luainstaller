@@ -140,6 +140,7 @@ Every listed device runs the pinned official Lua 5.1.5, 5.2.4, 5.3.6, 5.4.8,
 and 5.5.0 compatibility matrix. Release coverage includes LuaRocks installation,
 native onedir and onefile builds, repeated-build checks, and execution with Lua
 removed from the target `PATH`.
+Lua 5.5 installation coverage uses LuaRocks 3.13.0 or newer.
 
 [cols="2,2,1,3",options="header"]
 |===

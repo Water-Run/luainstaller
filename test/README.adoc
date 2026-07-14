@@ -64,6 +64,8 @@ Both matrix runners download the official Lua 5.1.5, 5.2.4, 5.3.6, 5.4.8,
 and 5.5.0 sources, verify pinned SHA-256 digests, and write per-version evidence
 logs below a guarded `luainstaller-*` temporary directory. These are tested
 versions, not a platform or patch-version allowlist.
+LuaRocks 3.13.0 is pinned because it is the first release in this matrix that
+recognizes Lua 5.5.
 
 == Packaging targets
 

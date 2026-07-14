@@ -36,6 +36,9 @@ luarocks install luainstaller
 luai -v
 ----
 
+Lua 5.5 requires LuaRocks 3.13.0 or newer; earlier LuaRocks releases do not
+recognize the Lua 5.5 installation ABI.
+
 Start with the small runtime sample. Build the directory form first because it
 keeps the manifest, generated C source, and copied native libraries visible.
 In shell examples, set `LUA` to the official interpreter being packaged.

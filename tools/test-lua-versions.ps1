@@ -10,9 +10,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$LuaRocksVersion = '3.12.2'
+$LuaRocksVersion = '3.13.0'
 $LuaRocksArchive = "luarocks-$LuaRocksVersion-windows-64.zip"
-$LuaRocksSha256 = 'D3F4DDDA6926618CADF560170A7C18A5CEEAD5997BA10832CD0E3B624C7DE886'
+$LuaRocksSha256 = '0897ADE5D459D55CD1962A948153745A6749FEB345403C68AAA9207388557AB9'
 $Versions = @(
     @{ Version='5.1.5'; Sha256='2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333' },
     @{ Version='5.2.4'; Sha256='b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b' },

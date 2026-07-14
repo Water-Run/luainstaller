@@ -59,6 +59,9 @@ luai -v
 luainstaller version
 ----
 
+Use LuaRocks 3.13.0 or newer for Lua 5.5. The release matrix pins 3.13.0 and
+verifies its official source or native Windows archive before use.
+
 The release test installs into an isolated tree, invokes both installed command
 names from outside the checkout, builds an outside-checkout application, then
 runs the generated executable with `LUA_PATH`, `LUA_CPATH`, and Lua-bearing

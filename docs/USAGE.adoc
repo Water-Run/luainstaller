@@ -14,6 +14,7 @@ luainstaller supports official Lua `>= 5.1` and `< 6.0`; LuaJIT is rejected.
 The interpreter that runs luainstaller defines the bundle's Lua major/minor
 ABI. Headers, libraries, runtime discovery, copied native modules, and the
 linked runtime must match it.
+Lua 5.5 installations require LuaRocks 3.13.0 or newer.
 
 toc::[]
 

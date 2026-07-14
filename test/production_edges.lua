@@ -3324,6 +3324,18 @@ test("remote scripts are pinned and non-destructive", function()
         assert(posix_matrix:find(version, 1, true), "POSIX matrix omits Lua " .. version)
         assert(windows_matrix:find(version, 1, true), "Windows matrix omits Lua " .. version)
     end
+    assert(posix_matrix:find("LUAROCKS_VERSION=3.13.0", 1, true))
+    assert(posix_matrix:find(
+        "245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37",
+        1,
+        true
+    ))
+    assert(windows_matrix:find("$LuaRocksVersion = '3.13.0'", 1, true))
+    assert(windows_matrix:find(
+        "0897ADE5D459D55CD1962A948153745A6749FEB345403C68AAA9207388557AB9",
+        1,
+        true
+    ))
     for _, pin in ipairs({
         "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
         "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",

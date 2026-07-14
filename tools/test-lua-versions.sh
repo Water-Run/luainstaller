@@ -7,9 +7,9 @@ WORK_ROOT=${WORK_ROOT:-/tmp/luainstaller-lua-matrix}
 EVIDENCE_DIR=${EVIDENCE_DIR:-/tmp/luainstaller-lua-evidence}
 HOST_LABEL=${HOST_LABEL:-$(uname -n | tr -c 'A-Za-z0-9._-' '-')}
 PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-LUAROCKS_VERSION=3.12.2
+LUAROCKS_VERSION=3.13.0
 LUAROCKS_TARBALL=luarocks-$LUAROCKS_VERSION.tar.gz
-LUAROCKS_SHA256=b0e0c85205841ddd7be485f53d6125766d18a81d226588d2366931e9a1484492
+LUAROCKS_SHA256=245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37
 VERSIONS='5.1.5:2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
 5.2.4:b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b
 5.3.6:fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60
@@ -106,7 +106,6 @@ build_lua() {
     source_dir=$source_dir/lua-$version
     case "$(uname -s):$version" in
         Linux:*) make_target=linux ;;
-        Darwin:5.5.0) make_target=macos ;;
         Darwin:*) make_target=macosx ;;
         *) echo "unsupported POSIX build host: $(uname -s)" >&2; return 1 ;;
     esac
