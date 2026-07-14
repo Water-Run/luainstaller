@@ -1307,7 +1307,7 @@ local function generateExtractor(files, payload_id, inner_exe)
 end
 
 local function windowsCompiler()
-    return os.getenv("LUAI_WINDOWS_CC") or "x86_64-w64-mingw32-gcc"
+    return os.getenv("LUAI_WINDOWS_CC") or os.getenv("LUAI_CC") or os.getenv("CC") or "cc"
 end
 
 local function compileExtractor(c_path, exe_path, profile)
@@ -1362,10 +1362,11 @@ end
 
 function M.bundleOnefile(opts)
     opts = opts or {}
-    local profile = platform.profile({
+    local profile, profile_err = platform.profile({
         target_os = opts.target_os,
         lua_prefix = opts.lua_prefix,
     })
+    if not profile then return profile_err end
     local out_path = outputPath(opts, profile)
     local output_err = validateOutputPath(out_path)
     if output_err then

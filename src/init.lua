@@ -186,19 +186,15 @@ local function validateMaxDeps(opts)
     return nil
 end
 
-local VALID_TARGET_OS = {
-    linux = true,
-    macos = true,
-    windows = true,
-}
-
 local function validateTargetOs(opts)
     local value = opts.target_os
-    if value == nil or value == "" then
-        return nil
-    end
-    if not VALID_TARGET_OS[value] then
-        return invalidOption("target_os", "target_os must be one of: linux, macos, windows")
+    if value == nil or value == "" then value = os.getenv("LUAI_TARGET_OS") end
+    local profile, profile_err = platform.profile({
+        target_os = value,
+        lua_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
+    })
+    if not profile then
+        return profile_err
     end
     return nil
 end
@@ -210,6 +206,7 @@ local function validateLauncherProfile(opts)
         target_os = opts.target_os or os.getenv("LUAI_TARGET_OS"),
         lua_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
     })
+    if not profile then return nil end
     if value ~= profile.launcher_profile then
         return invalidOption("launcher_profile", string.format(
             "launcher_profile is derived from the target and must be %s",

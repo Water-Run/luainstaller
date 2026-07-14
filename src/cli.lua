@@ -101,6 +101,9 @@ local function installSourcePreloads()
     package.preload["luainstaller.platform"] = package.preload["luainstaller.platform"] or function()
         return dofile(sourcePath("platform.lua"))
     end
+    package.preload["luainstaller.toolchain"] = package.preload["luainstaller.toolchain"] or function()
+        return dofile(sourcePath("toolchain.lua"))
+    end
     package.preload["luainstaller.cgen"] = package.preload["luainstaller.cgen"] or function()
         return dofile(sourcePath("cgen.lua"))
     end

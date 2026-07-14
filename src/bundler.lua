@@ -19,6 +19,7 @@ local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
 local result = require("luainstaller.result")
+local toolchain = require("luainstaller.toolchain")
 
 local M = {}
 
@@ -42,31 +43,6 @@ local GENERATED_MARKER = "luainstaller-generated-output-v2"
 local GENERATED_MARKER_RELATIVE = ".luai/generated-output.txt"
 local writeFile
 local validateOutputDirectory
-
--- Split pkg-config output into shell-safe tokens. Reject metacharacters.
--- NOTE: assumes pkg-config tokens do not contain spaces; space-bearing paths
--- are rare and would be split by %S+ before quoting.
-local function sanitizePkgConfigFlags(raw)
-    local tokens = {}
-    for token in tostring(raw or ""):gmatch("%S+") do
-        if token:find("[\n\r;&|`$()<>]") then
-            return nil, makeError("ToolchainError", "pkg-config output contains unsafe characters", {
-                token = token,
-            })
-        end
-        if token:sub(1, 1) == "-" then
-            if not token:match("^%-[%w%+%,%./=:_@%%-]+$") then
-                return nil, makeError("ToolchainError", "pkg-config produced an unsafe compiler flag", {
-                    token = token,
-                })
-            end
-            tokens[#tokens + 1] = token
-        else
-            tokens[#tokens + 1] = shellQuote(token)
-        end
-    end
-    return tokens
-end
 
 local function fromThrownError(err)
     return result.fromThrown(err, "LauncherGenerationError")
@@ -722,13 +698,6 @@ int main(void) {
     return source
 end
 
-local function pkgConfigVersionMatches(value, lua_version)
-    local expected = string.format("%d.%d", lua_version.major, lua_version.minor)
-    if value == expected then return true end
-    local escaped = expected:gsub("%.", "%%.")
-    return value:match("^" .. escaped .. "[%.%-%+][0-9A-Za-z%.%-%+]*$") ~= nil
-end
-
 local function executableName(out_path, entry, profile)
     local name = basename(out_path or "")
     if name == "" or name == "." then
@@ -744,7 +713,7 @@ local function executableName(out_path, entry, profile)
 end
 
 local function windowsCompiler()
-    return os.getenv("LUAI_WINDOWS_CC") or "x86_64-w64-mingw32-gcc"
+    return os.getenv("LUAI_WINDOWS_CC") or os.getenv("LUAI_CC") or os.getenv("CC") or "cc"
 end
 
 local function defaultOut(entry)
@@ -1237,16 +1206,6 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
     return nil
 end
 
-local function linuxHost()
-    local ok, output = commandOutput("uname -s")
-    return ok and output:match("^Linux") ~= nil
-end
-
-local function macosHost()
-    local ok, output = commandOutput("uname -s")
-    return ok and output:match("^Darwin") ~= nil
-end
-
 local function unsafeOutputError(path)
     return makeError("InvalidOutputError", "Refusing to overwrite unsafe output directory: " .. tostring(path), {
         path = path,
@@ -1491,15 +1450,32 @@ function M.bundleOnedir(opts)
         return makeError("ToolchainError", "io.popen is required to build onedir bundles")
     end
 
-    local profile = platform.profile({
+    local profile, profile_err = platform.profile({
         target_os = opts.target_os,
         lua_prefix = opts.lua_prefix,
     })
+    if not profile then return profile_err end
+    local native_toolchain
+    if profile.target_os ~= "windows" then
+        local toolchain_err
+        native_toolchain, toolchain_err = toolchain.resolve({
+            target_os = profile.target_os,
+            target_arch = profile.target_arch,
+            lua_prefix = profile.lua_prefix,
+            lua_version = lua_version,
+        })
+        if not native_toolchain then return toolchain_err end
+    end
     local windows_lua
     if profile.target_os == "windows" then
-        if not linuxHost() then
-            return makeError("UnsupportedPlatformError", "windows onedir bundling requires a Linux host with MinGW")
+        return makeError("UnsupportedPlatformError", "native Windows bundling is not yet initialized")
+    elseif profile.target_os == "macos" then
+        local prefix_err = validateLuaPrefix(profile.lua_prefix)
+        if prefix_err then
+            return prefix_err
         end
+    end
+    if profile.target_os == "windows" then
         -- Convention: success is (nil, data); failure is a single error table.
         local windows_prefix_error
         windows_prefix_error, windows_lua = validateWindowsLuaPrefix(profile.lua_prefix, lua_version)
@@ -1508,30 +1484,10 @@ function M.bundleOnedir(opts)
         end
         local cc_ok, cc_output = commandOutput(shellQuote(windowsCompiler()) .. " --version")
         if not cc_ok then
-            return makeError("ToolchainError", "Windows onedir bundling requires x86_64-w64-mingw32-gcc", {
+            return makeError("ToolchainError", "Windows onedir bundling requires a native C compiler", {
                 output = cc_output,
             })
         end
-        local wine_ok, wine_output = commandOutput("wine --version")
-        if not wine_ok then
-            return makeError("ToolchainError", "Windows onedir bundling requires Wine for the linked Lua ABI probe", {
-                output = wine_output,
-            })
-        end
-    elseif profile.target_os == "macos" then
-        if not macosHost() then
-            return makeError("UnsupportedPlatformError", "macos onedir bundling requires a macOS host")
-        end
-        local prefix_err = validateLuaPrefix(profile.lua_prefix)
-        if prefix_err then
-            return prefix_err
-        end
-    elseif profile.target_os == "linux" then
-        if not linuxHost() then
-            return makeError("UnsupportedPlatformError", "linux onedir bundling requires a Linux host")
-        end
-    else
-        return makeError("UnsupportedPlatformError", "unsupported onedir target: " .. tostring(profile.target_os))
     end
 
     local exe_name = executableName(final_out_dir, entry, profile)
@@ -1668,31 +1624,6 @@ function M.bundleOnedir(opts)
         end
     end
 
-    local linux_tokens
-    if profile.target_os == "linux" then
-        local version_ok, pkg_version = commandOutput("pkg-config --modversion lua")
-        pkg_version = tostring(pkg_version or ""):gsub("%s+$", "")
-        local version_matches = pkgConfigVersionMatches(pkg_version, lua_version)
-        if not version_ok or not version_matches then
-            return abandon(makeError("ToolchainError", "pkg-config must resolve the selected Lua ABI", {
-                version = pkg_version,
-                expected = lua_version.version,
-            }))
-        end
-        local pkg_ok, pkg_flags = commandOutput("pkg-config --cflags --libs lua")
-        if not pkg_ok then
-            return abandon(makeError("ToolchainError", "pkg-config cannot find lua", {
-                output = pkg_flags,
-            }))
-        end
-
-        local token_err
-        linux_tokens, token_err = sanitizePkgConfigFlags(pkg_flags:gsub("%s+$", ""))
-        if not linux_tokens then
-            return abandon(token_err)
-        end
-    end
-
     local function compileCommand(source_path, output_path)
         if profile.target_os == "windows" then
             return table.concat({
@@ -1707,25 +1638,18 @@ function M.bundleOnedir(opts)
                 "-l" .. windows_lua.library_name,
             }, " ")
         end
-        if profile.target_os == "macos" then
-            return table.concat({
-                "cc",
-                shellQuote(source_path),
-                "-I" .. shellQuote(profile.lua_prefix .. "/include"),
-                "-o",
-                shellQuote(output_path),
-                "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
-                shellQuote(profile.lua_prefix .. "/lib/liblua.a"),
-                "-lm",
-            }, " ")
-        end
         return table.concat({
-            "cc",
+            shellQuote(native_toolchain.cc),
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pedantic",
             shellQuote(source_path),
             "-o",
             shellQuote(output_path),
             "-Wl,-rpath," .. shellQuote(profile.loader_rpath),
-            table.concat(linux_tokens, " "),
+            table.concat(native_toolchain.link_args, " "),
         }, " ")
     end
 
@@ -1825,8 +1749,8 @@ function M.bundleOnedir(opts)
     end
     local abi_run_cmd
     if profile.target_os == "windows" then
-        abi_run_cmd = "WINEDEBUG=-all wine " .. shellQuote(abi_probe_exe)
-    elseif profile.target_os == "linux" then
+        abi_run_cmd = shellQuote(abi_probe_exe)
+    elseif profile.target_os ~= "macos" then
         local library_path = native_dir
         local inherited_library_path = os.getenv("LD_LIBRARY_PATH")
         if inherited_library_path and inherited_library_path ~= "" then

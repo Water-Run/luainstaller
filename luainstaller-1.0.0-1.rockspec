@@ -46,6 +46,7 @@ build = {
         ["luainstaller.path"]     = "src/path.lua",
         ["luainstaller.platform"] = "src/platform.lua",
         ["luainstaller.process"]  = "src/process.lua",
+        ["luainstaller.toolchain"] = "src/toolchain.lua",
         ["luainstaller.result"]   = "src/result.lua",
         ["luainstaller.runtime"]  = "src/runtime.lua",
         ["luainstaller.cgen"]     = "src/cgen.lua",

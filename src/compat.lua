@@ -215,10 +215,13 @@ end
 function M.diagnose(opts)
     opts = opts or {}
     local host = platform.detectHost()
-    local profile = platform.profile({
+    local profile, profile_err = platform.profile({
         target_os = opts.target_os,
         lua_prefix = opts.lua_prefix,
     })
+    if not profile then
+        return profile_err
+    end
     local lua = M.luaVersion()
     local library_count = countLibraries(opts.dependencies)
     local notes = {

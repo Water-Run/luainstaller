@@ -84,6 +84,7 @@ local product_files = {
     "src/process.lua",
     "src/result.lua",
     "src/runtime.lua",
+    "src/toolchain.lua",
 }
 for _, path in ipairs(product_files) do
     local chunk, load_error = loadfile(path)

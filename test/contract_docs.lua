@@ -272,7 +272,7 @@ local function check_option_validation_contracts()
     assert_error(luainstaller.trace({
         entry = "test/runtime_bundle/main.lua",
         target_os = "plan9",
-    }), "InvalidOptionsError")
+    }), "UnsupportedPlatformError")
     assert_error(luainstaller.analyze({
         entry = "test/runtime_bundle/main.lua",
         max_deps = 0,

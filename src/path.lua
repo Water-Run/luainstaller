@@ -147,10 +147,6 @@ function M.validateTargetRelative(value, target_os)
         return false, "target path must be a safe relative path"
     end
     target_os = target_os or (IS_WINDOWS and "windows" or "linux")
-    if target_os ~= "linux" and target_os ~= "macos" and target_os ~= "windows"
-        and target_os ~= "unknown" then
-        return false, "unknown target OS"
-    end
     if (target_os == "windows" or target_os == "macos")
         and containsNonAsciiByte(portable) then
         return false, "target path contains non-ASCII bytes that cannot be case-folded safely"

@@ -12,6 +12,7 @@ Updated:
 ]]
 
 local process = require("luainstaller.process")
+local result = require("luainstaller.result")
 
 local M = {}
 
@@ -50,6 +51,8 @@ function M.detectHost()
         os_name = "linux"
     elseif uname_s == "Darwin" then
         os_name = "macos"
+    elseif type(uname_s) == "string" and uname_s ~= "" then
+        os_name = uname_s:lower():gsub("[^%w]+", "")
     end
     return {
         os = os_name,
@@ -64,17 +67,28 @@ function M.profile(opts)
     if target_os == nil or target_os == "" then
         target_os = host.os
     end
-    local target_arch = M.normalizeArch(opts.target_arch
-        or (target_os == "windows" and "x86_64")
-        or host.arch)
-    if target_os == "linux" then
+    local host_arch = M.normalizeArch(host.arch)
+    local target_arch = M.normalizeArch(opts.target_arch or host_arch)
+    if target_os ~= host.os or target_arch ~= host_arch then
+        return nil, result.error(
+            "UnsupportedPlatformError",
+            "luainstaller only builds for the native host OS and architecture",
+            {
+                host_os = host.os,
+                host_arch = host_arch,
+                target_os = target_os,
+                target_arch = target_arch,
+            }
+        )
+    end
+    if target_os == "windows" then
         return {
-            target_os = "linux",
+            target_os = target_os,
             target_arch = target_arch,
-            launcher_profile = "shared-lua",
-            executable_suffix = "",
-            native_extensions = { ".so" },
-            loader_rpath = "$ORIGIN/.luai/native",
+            launcher_profile = "windows-shared-lua",
+            executable_suffix = ".exe",
+            native_extensions = { ".dll" },
+            loader_rpath = nil,
             lua_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
         }
     end
@@ -89,24 +103,13 @@ function M.profile(opts)
             lua_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
         }
     end
-    if target_os == "windows" then
-        return {
-            target_os = "windows",
-            target_arch = target_arch,
-            launcher_profile = "windows-shared-lua",
-            executable_suffix = ".exe",
-            native_extensions = { ".dll" },
-            loader_rpath = nil,
-            lua_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
-        }
-    end
     return {
         target_os = target_os,
         target_arch = target_arch,
-        launcher_profile = "unknown",
+        launcher_profile = "shared-lua",
         executable_suffix = "",
         native_extensions = { ".so" },
-        loader_rpath = nil,
+        loader_rpath = "$ORIGIN/.luai/native",
         lua_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
     }
 end

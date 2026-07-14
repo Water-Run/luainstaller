@@ -385,6 +385,60 @@ test("API rejects non-file and non-finite inputs", function()
     )
 end)
 
+test("native platform and toolchain reject cross targets", function()
+    local platform = require("luainstaller.platform")
+    local host = platform.detectHost()
+    local native, native_err = platform.profile({ target_os = host.os })
+    assert(native, native_err and native_err.error and native_err.error.message)
+    assertEqual(native.target_os, host.os, "native target OS")
+    assertEqual(native.target_arch, platform.normalizeArch(host.arch), "native target architecture")
+
+    local generic = assert(platform.profile({
+        host = { os = "freebsd", arch = "x86_64" },
+        target_os = "freebsd",
+    }))
+    assertEqual(generic.launcher_profile, "shared-lua", "generic POSIX launcher")
+    assert(require("luainstaller.path").validateTargetRelative(
+        "native/module.so",
+        "freebsd"
+    ))
+
+    local cross_os = host.os == "windows" and "linux" or "windows"
+    local cross, cross_err = platform.profile({ target_os = cross_os })
+    assert(cross == nil, "cross target profile was accepted")
+    assert(cross_err and cross_err.error.type == "UnsupportedPlatformError")
+
+    local root = makeTempDir("native-target")
+    local out = root .. "/out"
+    local result = require("luainstaller").bundle({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+        target_os = cross_os,
+    })
+    assert(not result.ok)
+    assertEqual(result.error.type, "UnsupportedPlatformError", "cross target API")
+    assert(not fileExists(out), "cross target mutated its output")
+    removeTree(root)
+
+    local toolchain = require("luainstaller.toolchain")
+    local resolved, resolve_err = toolchain.resolve({
+        target_os = host.os,
+        lua_version = require("luainstaller.compat").luaVersion(),
+    })
+    local failure_messages = {}
+    for _, failure in ipairs(resolve_err and resolve_err.error
+        and resolve_err.error.failures or {}) do
+        failure_messages[#failure_messages + 1] = tostring(failure.message)
+            .. ": " .. tostring(failure.output or "")
+    end
+    assert(resolved, resolve_err and resolve_err.error
+        and (resolve_err.error.message .. "\n" .. table.concat(failure_messages, "\n")))
+    assertEqual(resolved.host.os, host.os, "toolchain host OS")
+    assertEqual(resolved.lua_version.abi,
+        require("luainstaller.compat").luaVersion().abi, "toolchain Lua ABI")
+    assert(type(resolved.cc) == "string" and resolved.cc ~= "")
+end)
+
 test("API rejects unsafe string and manual include inputs", function()
     local luainstaller = require("luainstaller")
     local root = makeTempDir("input-validation")
@@ -2179,20 +2233,28 @@ test("target paths reject Windows hazards and portable collisions", function()
     writeFile(root .. "/core.DLL", "second")
     writeFile(root .. "/CON.dll", "reserved")
     local manifest = require("luainstaller.manifest")
-    local duplicate = manifest.build({
-        entry = "test/single_file/01_hello_luainstaller.lua",
-        target_os = "windows",
-        dependencies = {
-            scripts = {},
-            libraries = { root .. "/Core.dll", root .. "/core.DLL" },
-        },
-    })
+    local platform = require("luainstaller.platform")
+    local original_detect = platform.detectHost
+    platform.detectHost = function() return { os = "windows", arch = "x86_64" } end
+    local build_ok, duplicate, reserved = pcall(function()
+        local duplicate_result = manifest.build({
+            entry = "test/single_file/01_hello_luainstaller.lua",
+            target_os = "windows",
+            dependencies = {
+                scripts = {},
+                libraries = { root .. "/Core.dll", root .. "/core.DLL" },
+            },
+        })
+        local reserved_result = manifest.build({
+            entry = "test/single_file/01_hello_luainstaller.lua",
+            target_os = "windows",
+            dependencies = { scripts = {}, libraries = { root .. "/CON.dll" } },
+        })
+        return duplicate_result, reserved_result
+    end)
+    platform.detectHost = original_detect
+    assert(build_ok, duplicate)
     assert(not duplicate.ok and duplicate.error.type == "DuplicateModuleError")
-    local reserved = manifest.build({
-        entry = "test/single_file/01_hello_luainstaller.lua",
-        target_os = "windows",
-        dependencies = { scripts = {}, libraries = { root .. "/CON.dll" } },
-    })
     assert(not reserved.ok and reserved.error.type == "InvalidOptionsError")
     removeTree(root)
 end)
@@ -2249,7 +2311,6 @@ test("unsafe output is rejected before platform and toolchain probes", function(
     local result = require("luainstaller").bundle({
         entry = "test/single_file/01_hello_luainstaller.lua",
         out = ".",
-        target_os = "macos",
         lua_prefix = "/tmp/luainstaller-missing-lua-prefix",
     })
     assert(not result.ok)
@@ -2286,8 +2347,12 @@ exec "$LUAI_REAL_PKG_CONFIG" "$@"
 : > "$LUAI_COMPILER_MARKER"
 exec "$LUAI_REAL_CC" "$@"
 ]])
+    writeFile(fake_bin .. "/luarocks", "#!/bin/sh\nexit 2\n")
+    writeFile(fake_bin .. "/lua-no-dev", "#!/bin/sh\nexit 2\n")
     runCommand("chmod +x " .. shellQuote(fake_bin .. "/pkg-config")
-        .. " " .. shellQuote(fake_bin .. "/cc"))
+        .. " " .. shellQuote(fake_bin .. "/cc")
+        .. " " .. shellQuote(fake_bin .. "/luarocks")
+        .. " " .. shellQuote(fake_bin .. "/lua-no-dev"))
 
     local child = harness.loader_prelude() .. string.format([[
 local result = require("luainstaller").bundle({
@@ -2302,6 +2367,7 @@ assert(io.open(%q, "rb") == nil, "compiler was invoked before ABI rejection")
         "LUAI_REAL_PKG_CONFIG=" .. shellQuote(commandOutputTrimmed("command -v pkg-config")),
         "LUAI_REAL_CC=" .. shellQuote(commandOutputTrimmed("command -v cc")),
         "LUAI_COMPILER_MARKER=" .. shellQuote(compiler_marker),
+        "LUAI_LUA=" .. shellQuote(fake_bin .. "/lua-no-dev"),
         "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
         "lua -e " .. shellQuote(child),
     }, " "))

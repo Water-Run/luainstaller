@@ -243,11 +243,12 @@ function M.build(opts)
     local entry_path = absolutePath(opts.entry)
     local entry_dir = dirname(entry_path)
     local host = platform.detectHost()
-    local profile = platform.profile({
+    local profile, profile_err = platform.profile({
         host = host,
         target_os = opts.target_os,
         lua_prefix = opts.lua_prefix,
     })
+    if not profile then return profile_err end
     local entry_record, entry_err = fileEntry(
         entry_path,
         ".luai/lua",

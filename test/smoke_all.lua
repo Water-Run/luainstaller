@@ -24,6 +24,7 @@ package.preload["luainstaller.logger"] = function() return dofile("src/logger.lu
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
 package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
 package.preload["luainstaller.process"] = function() return dofile("src/process.lua") end
+package.preload["luainstaller.toolchain"] = function() return dofile("src/toolchain.lua") end
 package.preload["luainstaller.path"] = function() return dofile("src/path.lua") end
 package.preload["luainstaller.result"] = function() return dofile("src/result.lua") end
 package.preload["luainstaller.platform"] = function() return dofile("src/platform.lua") end
@@ -686,6 +687,9 @@ assert(type(built.manifest.platform.host.os) == "string")
 assert(type(built.manifest.platform.host.arch) == "string")
 assert(type(built.manifest.platform.target.os) == "string")
 assert(type(built.manifest.platform.target.arch) == "string")
+local platform = require("luainstaller.platform")
+local original_detect = platform.detectHost
+platform.detectHost = function() return { os = "windows", arch = "x86_64" } end
 local windows = manifest.build({
     entry = os.getenv("PWD") .. "/test/runtime_bundle/main.lua",
     dependencies = { scripts = {}, libraries = {} },
@@ -697,6 +701,7 @@ assert(windows.ok == true, windows.error and windows.error.message)
 assert(windows.manifest.platform.target.os == "windows")
 assert(windows.manifest.platform.target.arch == "x86_64")
 assert(windows.manifest.launcher.profile == "windows-shared-lua")
+platform.detectHost = function() return { os = "macos", arch = "arm64" } end
 local macos = manifest.build({
     entry = os.getenv("PWD") .. "/test/runtime_bundle/main.lua",
     dependencies = { scripts = {}, libraries = {} },
@@ -707,6 +712,7 @@ local macos = manifest.build({
 assert(macos.ok == true, macos.error and macos.error.message)
 assert(macos.manifest.platform.target.os == "macos")
 assert(macos.manifest.launcher.profile == "static-lua")
+platform.detectHost = original_detect
 print("manifest no popen ok")
 ]]
     assert_contains(run("lua -e " .. shell_quote(script)), "manifest no popen ok")
@@ -771,14 +777,17 @@ local host = platform.detectHost()
 assert(host.os == "linux" or host.os == "macos" or host.os == "windows" or host.os == "unknown")
 assert(type(host.arch) == "string")
 
-local linux = platform.profile({ target_os = "linux" })
+local original_detect = platform.detectHost
+platform.detectHost = function() return { os = "linux", arch = "x86_64" } end
+local linux = assert(platform.profile({ target_os = "linux" }))
 assert(linux.executable_suffix == "")
 assert(linux.native_extensions[1] == ".so")
 assert(linux.loader_rpath == "$ORIGIN/.luai/native")
 assert(type(linux.target_arch) == "string")
 assert(linux.launcher_profile == "shared-lua")
 
-local macos = platform.profile({ target_os = "macos", lua_prefix = "/tmp/lua" })
+platform.detectHost = function() return { os = "macos", arch = "arm64" } end
+local macos = assert(platform.profile({ target_os = "macos", lua_prefix = "/tmp/lua" }))
 assert(macos.executable_suffix == "")
 assert(macos.native_extensions[1] == ".so")
 assert(macos.native_extensions[2] == ".dylib")
@@ -786,12 +795,16 @@ assert(macos.loader_rpath == "@loader_path/.luai/native")
 assert(macos.lua_prefix == "/tmp/lua")
 assert(macos.launcher_profile == "static-lua")
 
-local windows = platform.profile({ target_os = "windows" })
+platform.detectHost = function() return { os = "windows", arch = "x86_64" } end
+local windows = assert(platform.profile({ target_os = "windows" }))
 assert(windows.executable_suffix == ".exe")
 assert(windows.native_extensions[1] == ".dll")
 assert(windows.loader_rpath == nil)
 assert(windows.target_arch == "x86_64")
 assert(windows.launcher_profile == "windows-shared-lua")
+local cross, cross_err = platform.profile({ target_os = "linux" })
+assert(cross == nil and cross_err.error.type == "UnsupportedPlatformError")
+platform.detectHost = original_detect
 print("platform profiles ok")
 ]]
     assert_contains(run("lua -e " .. shell_quote(script)), "platform profiles ok")
@@ -844,7 +857,7 @@ local result = bundler.bundleOnedir({
 })
 assert(result.ok == false)
 local host_os = require("luainstaller.platform").detectHost().os
-if host_os == "linux" then
+if host_os == "windows" then
     assert(result.error.type == "ToolchainError")
     assert(tostring(result.error.message):find("Windows Lua prefix", 1, true))
 else
@@ -1023,7 +1036,7 @@ local result = luainstaller.bundle({
     max_deps = 120,
 })
 assert(result.ok == false, "forced toolchain failure must fail the rebuild")
-assert(result.error.type == "CompilationFailedError")
+assert(result.error.type == "ToolchainError")
 print("failed rebuild reported")
 ]], rebuild_out)
     assert_contains(run("PATH=" .. shell_quote(failing_bin .. ":/usr/bin:/bin")
