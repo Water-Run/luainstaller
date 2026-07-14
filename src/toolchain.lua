@@ -706,25 +706,39 @@ function M.resolve(opts)
     }
 
     local candidates = {}
-    local explicit = prefixCandidate(
-        opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),
-        lua_version,
-        "explicit-prefix",
-        config
-    )
-    if explicit then candidates[#candidates + 1] = explicit end
-    local active = prefixCandidate(
-        prefixFromInterpreter(opts.lua or os.getenv("LUAI_LUA") or (arg and arg[-1])),
-        lua_version,
-        "active-lua",
-        config
-    )
-    if active then candidates[#candidates + 1] = active end
-    local rock = luarocksCandidate(lua_version, config)
-    if rock then candidates[#candidates + 1] = rock end
-    if host.os ~= "windows" then
-        local pkg = pkgConfigCandidate(lua_version)
-        if pkg then candidates[#candidates + 1] = pkg end
+    local requested_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX")
+    if type(requested_prefix) == "string" and requested_prefix ~= "" then
+        local explicit = prefixCandidate(
+            requested_prefix,
+            lua_version,
+            "explicit-prefix",
+            config
+        )
+        if not explicit then
+            return nil, makeError(
+                "ToolchainError",
+                "Lua prefix does not contain development files for the selected Lua ABI",
+                {
+                    lua_prefix = normalizePath(requested_prefix),
+                    lua_abi = lua_version.abi,
+                }
+            )
+        end
+        candidates[#candidates + 1] = explicit
+    else
+        local active = prefixCandidate(
+            prefixFromInterpreter(opts.lua or os.getenv("LUAI_LUA") or (arg and arg[-1])),
+            lua_version,
+            "active-lua",
+            config
+        )
+        if active then candidates[#candidates + 1] = active end
+        local rock = luarocksCandidate(lua_version, config)
+        if rock then candidates[#candidates + 1] = rock end
+        if host.os ~= "windows" then
+            local pkg = pkgConfigCandidate(lua_version)
+            if pkg then candidates[#candidates + 1] = pkg end
+        end
     end
     if #candidates == 0 then
         return nil, makeError("ToolchainError", "No Lua development metadata matches the selected ABI", {

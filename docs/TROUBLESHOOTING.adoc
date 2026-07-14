@@ -93,6 +93,8 @@ A required compiler, Lua prefix, shared runtime, or `pkg-config` record is
 missing or does not identify the active Lua major/minor ABI. Check both
 `pkg-config --modversion lua`
 and the header's `LUA_VERSION_NUM`; a plausible library filename is not enough.
+If `--lua-prefix` or `LUAI_LUA_PREFIX` is set, fix or remove that selection;
+an invalid explicit prefix is not replaced by an automatically discovered one.
 The linked-runtime probe must report the same `Lua 5.x` result as the build
 interpreter. It runs directly on the native build host.
 

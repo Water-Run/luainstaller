@@ -71,6 +71,18 @@ local function validPath(path)
     return type(path) == "string" and path ~= "" and not path:find("\0", 1, true)
 end
 
+local function trustedRootDirectoryLink(path)
+    if IS_WINDOWS or type(path) ~= "string" then return false end
+    local normalized = path:gsub("/+$", "")
+    if not normalized:match("^/[^/]+$") then return false end
+    local quoted = process.quote(normalized)
+    if not process.output("test -d " .. quoted) then return false end
+    local listed, output = process.output("LC_ALL=C ls -ldn " .. quoted)
+    if not listed then return false end
+    local owner = tostring(output):match("^%S+%s+%d+%s+(%d+)%s+")
+    return owner == "0"
+end
+
 local function windowsPathExpression(path)
     return "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
         .. base64Encode(path) .. "'))"
@@ -244,7 +256,11 @@ function M.makeDirectory(path)
     if not IS_WINDOWS then
         local ok, output = process.output("mkdir -p -m 700 " .. process.quote(path))
         if not ok then return nil, output end
-        return M.pathType(path) == "directory" and true or nil
+        local kind = M.pathType(path)
+        if kind == "directory" or (kind == "reparse" and trustedRootDirectoryLink(path)) then
+            return true
+        end
+        return nil, "path is not a safe directory"
     end
     local expression = windowsPathExpression(path)
     local ok, output = windowsRun(table.concat({

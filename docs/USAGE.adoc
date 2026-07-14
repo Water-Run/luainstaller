@@ -176,6 +176,9 @@ from the current host is rejected; this option does not enable cross-building.
 `--lua-prefix PATH`::
 Provide the Lua headers and runtime required by macOS and Windows profiles.
 `LUAI_LUA_PREFIX` is used when the option is absent.
+An explicitly selected prefix is authoritative: missing or incompatible
+development files produce `ToolchainError` instead of falling back to another
+installed Lua.
 Generated launchers compile only with headers for the active Lua major/minor
 ABI. Linux also rejects a mismatched `pkg-config` Lua version before invoking
 the compiler. Every native backend compiles and executes a linked-runtime ABI

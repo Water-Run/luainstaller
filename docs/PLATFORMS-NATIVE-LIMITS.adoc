@@ -75,6 +75,8 @@ own release test.
 Use `--lua-prefix PATH` or `LUAI_LUA_PREFIX` when automatic discovery cannot
 identify the intended Lua installation. The prefix must belong to the current
 host and the interpreter's major/minor ABI. It is not a cross-compilation SDK.
+Once selected explicitly, that prefix is authoritative and discovery does not
+silently substitute another installed Lua.
 
 On Linux, `pkg-config --modversion` and compiler/linker flags are checked
 against the active Lua ABI. A static-only Lua installation is insufficient for

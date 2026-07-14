@@ -2326,6 +2326,20 @@ test("unsafe output is rejected before platform and toolchain probes", function(
     assertEqual(result.error.type, "InvalidOutputError", "unsafe output validation order")
 end)
 
+test("an explicit Lua prefix never falls back to another toolchain", function()
+    local root = makeTempDir("missing-explicit-lua-prefix")
+    local result = require("luainstaller").bundle({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = root .. "/out",
+        lua_prefix = root .. "/missing-prefix",
+    })
+    assert(not result.ok, "an invalid explicit Lua prefix was silently ignored")
+    assertEqual(result.error.type, "ToolchainError", "explicit Lua prefix error")
+    assert(tostring(result.error.message):find("Lua prefix", 1, true))
+    assert(not fileExists(root .. "/out"), "invalid Lua prefix published an output")
+    removeTree(root)
+end)
+
 test("onedir rejects an executable collision with metadata directory", function()
     local root = makeTempDir("metadata-executable-collision")
     local result = require("luainstaller").bundle({
