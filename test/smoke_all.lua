@@ -1156,7 +1156,7 @@ end
 
 local function check_release_metadata_contract()
     local rockspec = read_file("luainstaller-1.0.0-1.rockspec")
-    assert_contains(rockspec, '"lua >= 5.4, < 5.5"')
+    assert_contains(rockspec, '"lua >= 5.1, < 6.0"')
     local bundling = read_file("docs/BUNDLING.adoc")
     assert_contains(bundling, "luainstaller-generated-output-v2")
     assert_contains(bundling, "SHA-256")

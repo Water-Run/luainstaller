@@ -12,6 +12,7 @@ Updated:
 ]]
 
 local process = require("luainstaller.process")
+local compat = require("luainstaller.compat")
 
 local M = {}
 
@@ -24,14 +25,16 @@ local function base64Encode(value)
         local first = value:byte(index)
         local second = value:byte(index + 1)
         local third = value:byte(index + 2)
-        local packed = (first << 16) | ((second or 0) << 8) | (third or 0)
-        output[#output + 1] = BASE64_ALPHABET:sub(((packed >> 18) & 63) + 1, ((packed >> 18) & 63) + 1)
-        output[#output + 1] = BASE64_ALPHABET:sub(((packed >> 12) & 63) + 1, ((packed >> 12) & 63) + 1)
+        local packed = first * 0x10000 + (second or 0) * 0x100 + (third or 0)
+        local first_index = compat.rshift(packed, 18) % 64 + 1
+        local second_index = compat.rshift(packed, 12) % 64 + 1
+        output[#output + 1] = BASE64_ALPHABET:sub(first_index, first_index)
+        output[#output + 1] = BASE64_ALPHABET:sub(second_index, second_index)
         output[#output + 1] = second
-            and BASE64_ALPHABET:sub(((packed >> 6) & 63) + 1, ((packed >> 6) & 63) + 1)
+            and BASE64_ALPHABET:sub(compat.rshift(packed, 6) % 64 + 1, compat.rshift(packed, 6) % 64 + 1)
             or "="
         output[#output + 1] = third
-            and BASE64_ALPHABET:sub((packed & 63) + 1, (packed & 63) + 1)
+            and BASE64_ALPHABET:sub(packed % 64 + 1, packed % 64 + 1)
             or "="
     end
     return table.concat(output)

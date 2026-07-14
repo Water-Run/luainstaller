@@ -517,7 +517,7 @@ local function check_documentation_contract()
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
     local rockspec = read_file("luainstaller-1.0.0-1.rockspec")
-    assert_contains(rockspec, '"lua >= 5.4, < 5.5"')
+    assert_contains(rockspec, '"lua >= 5.1, < 6.0"')
 
     local direct_output = run("lua test/runtime_bundle/main.lua docs")
     assert_contains(direct_output, "hello docs")
