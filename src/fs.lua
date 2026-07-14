@@ -355,6 +355,24 @@ function M.makePrivateDirectory(label, parent)
     end
     local made, make_err = M.makeDirectory(parent)
     if not made then return nil, make_err end
+    if IS_WINDOWS then
+        local parent_expression = windowsPathExpression(parent)
+        local label_expression = windowsPathExpression(label)
+        local ok, output = windowsRun(table.concat({
+            "$Parent=[IO.Path]::GetFullPath(", parent_expression, ");",
+            "$Label=", label_expression, ";",
+            "for($Attempt=0;$Attempt -lt 40;$Attempt++){",
+            "$Name='luainstaller-'+$Label+'-'+[Guid]::NewGuid().ToString('N');",
+            "$Path=[IO.Path]::Combine($Parent,$Name);",
+            "if(Test-Path -LiteralPath $Path){continue};",
+            "try{$null=New-Item -ItemType Directory -Path $Path -ErrorAction Stop;",
+            "[Console]::Write($Path);exit 0}catch{continue}",
+            "};throw 'cannot create a unique private directory'",
+        }))
+        output = tostring(output or ""):gsub("%s+$", "")
+        if ok and output ~= "" then return output:gsub("\\", "/") end
+        return nil, output ~= "" and output or "cannot create a unique private directory"
+    end
     for attempt = 1, 40 do
         local suffix = table.concat({
             tostring(os.time()),
@@ -364,18 +382,8 @@ function M.makePrivateDirectory(label, parent)
         }, "-")
         local separator = parent:match("[/\\]$") and "" or package.config:sub(1, 1)
         local candidate = parent .. separator .. "luainstaller-" .. label .. "-" .. suffix
-        if IS_WINDOWS then
-            local expression = windowsPathExpression(candidate)
-            local ok = windowsRun(table.concat({
-                "$Path=[IO.Path]::GetFullPath(", expression, ");",
-                "if(Test-Path -LiteralPath $Path){exit 17};",
-                "$null=New-Item -ItemType Directory -Path $Path -ErrorAction Stop",
-            }))
-            if ok then return candidate:gsub("\\", "/") end
-        else
-            local ok = process.output("mkdir -m 700 " .. process.quote(candidate))
-            if ok then return candidate end
-        end
+        local ok = process.output("mkdir -m 700 " .. process.quote(candidate))
+        if ok then return candidate end
     end
     return nil, "cannot create a unique private directory"
 end

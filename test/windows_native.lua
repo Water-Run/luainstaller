@@ -44,7 +44,62 @@ local long_unicode_ok, long_unicode_output = process.outputPowerShell(
         .. "[Convert]::FromBase64String('6ZW/6ISa5pys6Zuq')))"
 )
 assert(long_unicode_ok and long_unicode_output == "长脚本雪", tostring(long_unicode_output))
+local powershell = assert(process.windowsPowerShellPath())
 local root = assert(fs.makePrivateDirectory("windows-native"))
+
+local concurrent_root = path.join(root, "private-directory-concurrency")
+assert(fs.makeDirectory(concurrent_root))
+local private_worker = path.join(root, "private-directory-worker.lua")
+assert(fs.writeFile(private_worker, [[
+local harness = dofile("test/support/harness.lua")
+harness.install_loader()
+local fs = require("luainstaller.fs")
+local result_path, owner = assert(arg[1]), assert(arg[2])
+local directory = assert(fs.makePrivateDirectory("concurrent-private"))
+local marker = directory .. "/owner.txt"
+assert(fs.writeFile(marker, owner))
+local deadline = os.clock() + 0.75
+while os.clock() < deadline do end
+if fs.readRegularFile(marker) ~= owner then os.exit(41) end
+if not fs.removeTree(directory) then os.exit(42) end
+assert(fs.writeFile(result_path, directory))
+]]))
+local private_launcher = path.join(root, "private-directory-concurrency.ps1")
+assert(fs.writeFile(private_launcher, [[
+param([string]$Lua,[string]$Worker,[string]$Results,[string]$Project)
+$ErrorActionPreference='Stop'
+$Processes=foreach($Index in 1..12){
+    $Result=[IO.Path]::Combine($Results,"result-$Index.txt")
+    Start-Process -FilePath $Lua -ArgumentList @($Worker,$Result,[string]$Index) `
+        -WorkingDirectory $Project -WindowStyle Hidden -PassThru
+}
+$Failures=@()
+foreach($Process in $Processes){
+    $Process.WaitForExit()
+    if($Process.ExitCode -ne 0){$Failures += "$($Process.Id):$($Process.ExitCode)"}
+}
+if($Failures.Count -ne 0){throw "private directory workers failed: $($Failures -join ',')"}
+]]))
+local concurrent_ok, concurrent_output = process.outputCommand(powershell, {
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy", "Bypass",
+    "-File", private_launcher,
+    lua,
+    private_worker,
+    concurrent_root,
+    path.currentDirectory(),
+})
+assert(concurrent_ok, concurrent_output)
+local private_paths = {}
+for index = 1, 12 do
+    local private_path = assert(fs.readRegularFile(
+        path.join(concurrent_root, "result-" .. index .. ".txt")
+    ))
+    assert(not private_paths[private_path], "private directory path was reused concurrently")
+    private_paths[private_path] = true
+end
 local special = path.join(root, "&A%caret^bang!-测试")
 assert(fs.makeDirectory(special))
 
@@ -81,7 +136,6 @@ assert(fs.readRegularFile(large) == large_content)
 local target = path.join(root, "junction-target")
 local junction = path.join(root, "junction")
 assert(fs.makeDirectory(target))
-local powershell = assert(process.windowsPowerShellPath())
 local junction_script = [[
 & {
     param([string]$Link, [string]$Target)
