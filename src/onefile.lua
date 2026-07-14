@@ -8,16 +8,17 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 local bundler = require("luainstaller.bundler")
+local compat = require("luainstaller.compat")
 local fs = require("luainstaller.fs")
 local hash = require("luainstaller.hash")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
-local process = require("luainstaller.process")
 local result = require("luainstaller.result")
+local toolchain = require("luainstaller.toolchain")
 
 local M = {}
 
@@ -29,12 +30,10 @@ local basename = path.basename
 local stem = path.stem
 local isSafeRelative = path.isSafeRelative
 local validateTargetRelative = path.validateTargetRelative
-local commandOutput = process.output
-local shellQuote = process.shellQuote
 local makeError = result.error
 
 local function ensureDirectory(path)
-    local ok, output = commandOutput("mkdir -p " .. shellQuote(path))
+    local ok, output = fs.makeDirectory(path)
     if not ok then
         return makeError("FilesystemError", "Cannot create directory: " .. tostring(path), {
             path = path,
@@ -45,7 +44,8 @@ local function ensureDirectory(path)
 end
 
 local function removeTree(path)
-    local ok, output = commandOutput("rm -rf " .. shellQuote(path))
+    if fs.pathType(path) == "missing" then return nil end
+    local ok, output = fs.removeTree(path)
     if not ok then
         return makeError("FilesystemError", "Cannot remove path: " .. tostring(path), {
             path = path,
@@ -109,18 +109,15 @@ local function unsafeOutputError(path)
 end
 
 local function pathExists(path)
-    local ok = commandOutput("test -e " .. shellQuote(path))
-    return ok == true
+    return fs.pathType(path) ~= "missing"
 end
 
 local function directoryExists(path)
-    local ok = commandOutput("test -d " .. shellQuote(path))
-    return ok == true
+    return fs.pathType(path) == "directory"
 end
 
 local function isSymlink(path)
-    local ok = commandOutput("test -L " .. shellQuote(path))
-    return ok == true
+    return fs.pathType(path) == "reparse"
 end
 
 local function validateOutputPath(path)
@@ -148,15 +145,6 @@ local function validateOutputPath(path)
     return nil
 end
 
-local function uniqueTempName(name)
-    local root = os.getenv("TMPDIR") or "/tmp"
-    return normalizePath(root .. "/luainstaller-" .. name .. "-"
-        .. tostring(os.time())
-        .. tostring(os.clock()):gsub("%.", "")
-        .. "-"
-        .. tostring(math.random(100000, 999999)))
-end
-
 local function createPrivateDirectory(name, parent)
     if parent then
         local parent_err = ensureDirectory(parent)
@@ -164,29 +152,11 @@ local function createPrivateDirectory(name, parent)
             return nil, parent_err
         end
     end
-    for _ = 1, 20 do
-        local candidate
-        if parent then
-            candidate = normalizePath(parent .. "/." .. name .. "-"
-                .. tostring(os.time())
-                .. tostring(os.clock()):gsub("%.", "")
-                .. "-" .. tostring(math.random(100000, 999999)))
-        else
-            candidate = uniqueTempName(name)
-        end
-        local ok, output = commandOutput("mkdir -m 700 " .. shellQuote(candidate))
-        if ok then
-            return candidate
-        end
-        if not pathExists(candidate) then
-            return nil, makeError("FilesystemError", "Cannot create private build directory", {
-                path = candidate,
-                output = output,
-            })
-        end
-    end
-    return nil, makeError("FilesystemError", "Cannot allocate a unique private build directory", {
-        path = parent or (os.getenv("TMPDIR") or "/tmp"),
+    local candidate, output = fs.makePrivateDirectory(name, parent)
+    if candidate then return normalizePath(candidate) end
+    return nil, makeError("FilesystemError", "Cannot create private build directory", {
+        path = parent or os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp",
+        output = output,
     })
 end
 
@@ -200,43 +170,44 @@ local function cleanupDirectory(path_value, failure)
 end
 
 local function collectFiles(root, target_os)
-    local ok, output = commandOutput("cd " .. shellQuote(root) .. " && find . -type f -print0")
-    if not ok then
+    local inventory, inventory_err = fs.listTree(root)
+    if not inventory then
         return nil, makeError("FilesystemError", "Cannot list staged files", {
             root = root,
-            output = output,
+            output = inventory_err,
         })
     end
     local relative_paths = {}
-    local position = 1
-    while position <= #output do
-        local terminator = output:find("\0", position, true)
-        if not terminator then
-            return nil, makeError("FilesystemError", "Staged file listing is incomplete", {
+    for _, item in ipairs(inventory) do
+        if item.type == "reparse" or item.type == "other" then
+            return nil, makeError("FilesystemError", "Staged tree contains an unsafe entry", {
                 root = root,
+                path = item.path,
+                entry_type = item.type,
             })
         end
-        local listed_rel = output:sub(position, terminator - 1):gsub("^%./", "")
-        local rel = normalizePath(listed_rel)
-        position = terminator + 1
-        if listed_rel ~= rel or not isSafeRelative(rel) then
-            return nil, makeError("FilesystemError", "Staged file path is not a safe relative path", {
-                path = listed_rel,
-                root = root,
-            })
-        end
-        local target_ok, target_reason = validateTargetRelative(rel, target_os)
-        if not target_ok then
-            return nil, makeError("InvalidOptionsError", "Staged target path is not portable: " .. rel, {
-                path = rel,
-                target_os = target_os,
-                reason = target_reason,
-            })
-        end
-        if rel ~= ".luai/generated-output.txt"
-            and rel ~= ".luai/build"
-            and rel:sub(1, #".luai/build/") ~= ".luai/build/" then
-            relative_paths[#relative_paths + 1] = rel
+        if item.type == "file" then
+            local listed_rel = item.path:gsub("^%./", "")
+            local rel = normalizePath(listed_rel)
+            if listed_rel ~= rel or not isSafeRelative(rel) then
+                return nil, makeError("FilesystemError", "Staged file path is not a safe relative path", {
+                    path = listed_rel,
+                    root = root,
+                })
+            end
+            local target_ok, target_reason = validateTargetRelative(rel, target_os)
+            if not target_ok then
+                return nil, makeError("InvalidOptionsError", "Staged target path is not portable: " .. rel, {
+                    path = rel,
+                    target_os = target_os,
+                    reason = target_reason,
+                })
+            end
+            if rel ~= ".luai/generated-output.txt"
+                and rel ~= ".luai/build"
+                and rel:sub(1, #".luai/build/") ~= ".luai/build/" then
+                relative_paths[#relative_paths + 1] = rel
+            end
         end
     end
     table.sort(relative_paths)
@@ -255,18 +226,22 @@ local function collectFiles(root, target_os)
         if not content then
             return nil, err
         end
-        local mode_ok = os.execute("test -x " .. shellQuote(abs) .. " >/dev/null 2>&1")
-        local executable = mode_ok == true or mode_ok == 0
+        local executable = fs.isExecutable(abs)
         files[#files + 1] = {
             path = rel,
             content = content,
             size = #content,
             executable = executable,
         }
-        payload_hash_parts[#payload_hash_parts + 1] = string.pack(">I4", #rel)
+        payload_hash_parts[#payload_hash_parts + 1] = compat.packU32BE(#rel)
         payload_hash_parts[#payload_hash_parts + 1] = rel
         payload_hash_parts[#payload_hash_parts + 1] = executable and "\1" or "\0"
-        payload_hash_parts[#payload_hash_parts + 1] = string.pack(">I8", #content)
+        payload_hash_parts[#payload_hash_parts + 1] = compat.packU32BE(
+            math.floor(#content / 4294967296)
+        )
+        payload_hash_parts[#payload_hash_parts + 1] = compat.packU32BE(
+            #content % 4294967296
+        )
         payload_hash_parts[#payload_hash_parts + 1] = content
     end
     return files, hash.sha256(table.concat(payload_hash_parts))
@@ -1306,42 +1281,25 @@ local function generateExtractor(files, payload_id, inner_exe)
     return table.concat(lines, "\n\n")
 end
 
-local function windowsCompiler()
-    return os.getenv("LUAI_WINDOWS_CC") or os.getenv("LUAI_CC") or os.getenv("CC") or "cc"
-end
-
 local function compileExtractor(c_path, exe_path, profile)
-    local command
-    if profile.target_os == "windows" then
-        command = table.concat({
-            shellQuote(windowsCompiler()),
-            "-std=c11",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-pedantic",
-            shellQuote(c_path),
-            "-o",
-            shellQuote(exe_path),
-            "-static-libgcc",
-            "-Wl,--no-insert-timestamp",
-            "-ladvapi32",
-        }, " ")
-    else
-        local parts = {
-            "cc",
-            "-std=c11",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-pedantic",
-            shellQuote(c_path),
-            "-o",
-            shellQuote(exe_path),
-        }
-        command = table.concat(parts, " ")
+    local compiler, compiler_err = toolchain.resolveCompiler({})
+    if not compiler then return compiler_err end
+    if compiler.host.os ~= profile.target_os
+        or platform.normalizeArch(compiler.host.arch) ~= profile.target_arch then
+        return makeError("UnsupportedPlatformError",
+            "Onefile extractor compiler must target the native host", {
+                host_os = compiler.host.os,
+                host_arch = compiler.host.arch,
+                target_os = profile.target_os,
+                target_arch = profile.target_arch,
+            })
     end
-    local ok, output = commandOutput(command)
+    local ok, output, command = toolchain.compileStandalone(
+        compiler,
+        c_path,
+        exe_path,
+        { work_dir = dirname(c_path) }
+    )
     if not ok then
         return makeError("CompilationFailedError", "Onefile extractor compilation failed", {
             command = command,
@@ -1349,7 +1307,7 @@ local function compileExtractor(c_path, exe_path, profile)
         })
     end
     if profile.target_os ~= "windows" then
-        local chmod_ok, chmod_output = commandOutput("chmod +x " .. shellQuote(exe_path))
+        local chmod_ok, chmod_output = fs.setExecutable(exe_path)
         if not chmod_ok then
             return makeError("FilesystemError", "Cannot mark onefile output executable", {
                 path = exe_path,
@@ -1364,6 +1322,7 @@ function M.bundleOnefile(opts)
     opts = opts or {}
     local profile, profile_err = platform.profile({
         target_os = opts.target_os,
+        target_arch = opts.target_arch,
         lua_prefix = opts.lua_prefix,
     })
     if not profile then return profile_err end
@@ -1397,6 +1356,7 @@ function M.bundleOnefile(opts)
         entry = opts.entry,
         out = stage_dir,
         target_os = opts.target_os,
+        target_arch = opts.target_arch,
         lua_prefix = opts.lua_prefix,
         dependencies = opts.dependencies,
         trace = opts.trace,
@@ -1411,7 +1371,18 @@ function M.bundleOnefile(opts)
         return cleanupDirectory(work_dir, payload_id)
     end
 
-    local inner_exe = normalizePath(staged.executable):sub(#normalizePath(stage_dir) + 2)
+    local stage_root = normalizePath(absolutePath(stage_dir))
+    local staged_executable = normalizePath(absolutePath(staged.executable))
+    if not path.isWithin(staged_executable, stage_root)
+        or staged_executable == stage_root then
+        return cleanupDirectory(work_dir, makeError(
+            "FilesystemError", "Staged executable escapes the onefile payload root", {
+                executable = staged_executable,
+                root = stage_root,
+            }
+        ))
+    end
+    local inner_exe = staged_executable:sub(#stage_root + 2)
     local c_source = generateExtractor(files, payload_id, inner_exe)
     err = writeFile(c_path, c_source)
     if err then
@@ -1430,7 +1401,7 @@ function M.bundleOnefile(opts)
     end
     local published = false
     if not err then
-        local linked, link_output = commandOutput("ln " .. shellQuote(staged_exe) .. " " .. shellQuote(out_path))
+        local linked, link_output = fs.hardLink(staged_exe, out_path)
         if not linked then
             if pathExists(out_path) or isSymlink(out_path) then
                 err = makeError("InvalidOutputError", "Onefile output appeared while the bundle was being built", {

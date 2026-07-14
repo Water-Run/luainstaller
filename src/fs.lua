@@ -330,7 +330,13 @@ end
 
 function M.makePrivateDirectory(label, parent)
     label = tostring(label or "private"):gsub("[^%w_-]", "-")
-    parent = parent or os.getenv("TEMP") or os.getenv("TMP") or "."
+    if not parent then
+        if IS_WINDOWS then
+            parent = os.getenv("TEMP") or os.getenv("TMP") or "."
+        else
+            parent = os.getenv("TMPDIR") or "/tmp"
+        end
+    end
     local made, make_err = M.makeDirectory(parent)
     if not made then return nil, make_err end
     for attempt = 1, 40 do
@@ -413,6 +419,51 @@ function M.rename(source, destination)
         "elseif($Item -is [IO.DirectoryInfo]){[IO.Directory]::Move($Source,$Destination)}",
         "else{throw 'source has an unsafe type'}",
     }))
+    if not ok then return nil, output end
+    return true
+end
+
+function M.hardLink(source, destination)
+    if not validPath(source) or not validPath(destination) then
+        return nil, "source or destination path is invalid"
+    end
+    if M.pathType(source) ~= "file" then
+        return nil, "source is not a safe regular file"
+    end
+    if M.pathType(destination) ~= "missing" then
+        return nil, "destination already exists"
+    end
+    if not IS_WINDOWS then
+        local ok, output = process.outputCommand("ln", { source, destination })
+        if not ok then return nil, output end
+        return true
+    end
+    local source_expression = windowsPathExpression(source)
+    local destination_expression = windowsPathExpression(destination)
+    local ok, output = windowsRun(table.concat({
+        "$Source=", source_expression, ";$Destination=", destination_expression, ";",
+        "$Item=Get-Item -LiteralPath $Source -Force -ErrorAction Stop;",
+        "if(-not ($Item -is [IO.FileInfo])){throw 'source is not a file'};",
+        "if(($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)",
+        "{throw 'source is a reparse point'};",
+        "if(Test-Path -LiteralPath $Destination){throw 'destination already exists'};",
+        "$null=New-Item -ItemType HardLink -Path $Destination -Target $Source -ErrorAction Stop",
+    }))
+    if not ok then return nil, output end
+    return true
+end
+
+function M.isExecutable(path)
+    if M.pathType(path) ~= "file" then return false end
+    if IS_WINDOWS then return true end
+    local ok = process.outputCommand("test", { "-x", path })
+    return ok == true
+end
+
+function M.setExecutable(path)
+    if M.pathType(path) ~= "file" then return nil, "path is not a regular file" end
+    if IS_WINDOWS then return true end
+    local ok, output = process.outputCommand("chmod", { "+x", path })
     if not ok then return nil, output end
     return true
 end

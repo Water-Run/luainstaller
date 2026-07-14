@@ -2681,7 +2681,7 @@ test("onefile cleanup failure reports a committed output", function()
     writeFile(fake_bin .. "/rm", [[#!/bin/sh
 for value in "$@"; do
     case "$value" in
-        *.luai-output-*)
+        *luainstaller-luai-output-*)
             printf '%s\n' 'injected output-stage cleanup failure' >&2
             exit 73
             ;;

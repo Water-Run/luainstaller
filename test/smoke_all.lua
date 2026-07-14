@@ -1714,7 +1714,8 @@ local function check_onefile_build_temp_safety()
     local root = make_temp_dir("onefile-build-temp-safety")
     local temp_root = root .. "/tmp"
     local victim = root .. "/victim"
-    local stage_parent = temp_root .. "/luainstaller-onefile-work-123025-111111"
+    local stage_parent = temp_root
+        .. "/luainstaller-onefile-work-123-250000000-111111-1"
     local out_path = root .. "/onefile"
     run("mkdir -p " .. shell_quote(temp_root) .. " " .. shell_quote(victim))
     run("ln -s " .. shell_quote(victim) .. " " .. shell_quote(stage_parent))
@@ -1730,8 +1731,8 @@ local result = luainstaller.bundle({
     out = %q,
     max_deps = 120,
 })
-assert(result.ok == false, "precreated onefile staging symlink must be rejected")
-assert(result.error.type == "FilesystemError")
+assert(result.ok == true,
+    result.error and result.error.message or "precreated staging symlink was not bypassed")
 print("onefile build temp safety ok")
 ]], out_path)
     assert_contains(run("TMPDIR=" .. shell_quote(temp_root) .. " lua -e " .. shell_quote(script)),

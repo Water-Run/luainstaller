@@ -537,6 +537,54 @@ function M.compile(config, source_path, output_path, opts)
     return ok, output, descriptor
 end
 
+function M.resolveCompiler(opts)
+    opts = opts or {}
+    local host = platform.detectHost()
+    local compiler, compiler_err = discoverCompiler(opts, host)
+    if not compiler then return nil, compiler_err end
+    compiler.host = host
+    return compiler
+end
+
+function M.compileStandalone(config, source_path, output_path, opts)
+    opts = opts or {}
+    local arguments = {}
+    if config.compiler_family == "msvc" then
+        for _, value in ipairs({ "/nologo", "/std:c11", "/W4", "/WX", "/Brepro" }) do
+            arguments[#arguments + 1] = value
+        end
+        if config.host and config.host.os == "windows" then
+            arguments[#arguments + 1] = "/D_CRT_SECURE_NO_WARNINGS"
+        end
+        local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
+        local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
+        arguments[#arguments + 1] = source_path:gsub("/", "\\")
+        arguments[#arguments + 1] = "/Fo" .. normalizePath(
+            object_dir .. "/" .. object_name
+        ):gsub("/", "\\")
+        arguments[#arguments + 1] = "/Fe:" .. output_path:gsub("/", "\\")
+        arguments[#arguments + 1] = "/link"
+        arguments[#arguments + 1] = "/INCREMENTAL:NO"
+        if config.host and config.host.os == "windows" then
+            arguments[#arguments + 1] = "Advapi32.lib"
+        end
+    else
+        for _, value in ipairs({ "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic" }) do
+            arguments[#arguments + 1] = value
+        end
+        arguments[#arguments + 1] = source_path
+        arguments[#arguments + 1] = "-o"
+        arguments[#arguments + 1] = output_path
+        if config.host and config.host.os == "windows" then
+            arguments[#arguments + 1] = "-static-libgcc"
+            arguments[#arguments + 1] = "-Wl,--no-insert-timestamp"
+            arguments[#arguments + 1] = "-ladvapi32"
+        end
+    end
+    local ok, output = process.outputCommand(config.cc, arguments, config.environment)
+    return ok, output, process.command(config.cc, arguments)
+end
+
 local function findLinkedRuntime(config, executable)
     if config.host.os == "windows" then return config.runtime_path end
     local tool = config.host.os == "macos" and "otool" or "ldd"
