@@ -322,7 +322,9 @@ exe_path() {
 }
 
 cd "\$REMOTE_ROOT"
-sh tools/install-source.sh --lua "\$LUA_PREFIX/bin/lua" --prefix "\$PREFIX"
+PATH="\$LUAROCKS_PREFIX/bin:\$LUA_PREFIX/bin:\$PATH" \
+    "\$LUAROCKS_PREFIX/bin/luarocks" make --force --tree "\$PREFIX" \
+    luainstaller-1.0.0-1.rockspec
 PATH="\$LUAROCKS_PREFIX/bin:\$LUA_PREFIX/bin:\$PATH"
 LUA_PATH="\$DEPS_LUA_PATH"
 LUA_CPATH="\$DEPS_LUA_CPATH"

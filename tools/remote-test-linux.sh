@@ -208,7 +208,6 @@ set -eu
 cd "$REMOTE_ROOT"
 test "$(lua -e 'io.write(_VERSION)')" = "Lua 5.4"
 find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-sh -n tools/install-source.sh
 lua test/cli_split_smoke.lua
 lua test/contract_docs.lua
 LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 lua test/production_edges.lua
@@ -218,10 +217,10 @@ if printf '%s\n' "$smoke_output" | grep -i 'skipped' >/dev/null; then
     echo "linux x64 smoke suite reported a skipped probe" >&2
     exit 1
 fi
-rm -rf /tmp/luainstaller-linux-source-prefix /tmp/luainstaller-linux-runtime
-sh tools/install-source.sh --prefix /tmp/luainstaller-linux-source-prefix
-/tmp/luainstaller-linux-source-prefix/bin/luai -v
-/tmp/luainstaller-linux-source-prefix/bin/luainstaller build --dir test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-runtime --max-deps 120
+rm -rf /tmp/luainstaller-linux-rocktree /tmp/luainstaller-linux-runtime
+luarocks make --tree /tmp/luainstaller-linux-rocktree luainstaller-1.0.0-1.rockspec
+/tmp/luainstaller-linux-rocktree/bin/luai -v
+/tmp/luainstaller-linux-rocktree/bin/luainstaller build --dir test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-runtime --max-deps 120
 output=$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-linux-runtime/luainstaller-linux-runtime linux-clean)
 printf '%s\n' "$output" | grep "hello linux-clean"
 echo "linux x64 remote ok"
@@ -249,7 +248,6 @@ verify_source "$LSQLITE3_SHA256" "/tmp/$LSQLITE3_ZIP"
 verify_source "$SQLITE_SHA256" "/tmp/$SQLITE_ZIP"
 cd "$REMOTE_ROOT"
 find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-sh -n tools/install-source.sh
 lua test/cli_split_smoke.lua
 
 if [ ! -f "$ARM_LUA_PREFIX/lib/liblua.so.5.4" ] \
@@ -363,15 +361,16 @@ if printf '%s\n' "$smoke_output" | grep -i 'skipped' >/dev/null; then
     exit 1
 fi
 
-rm -rf /tmp/luainstaller-linux-arm64-source-prefix /tmp/luainstaller-linux-arm64-runtime \
+rm -rf /tmp/luainstaller-linux-arm64-runtime \
     /tmp/luainstaller-linux-arm64-runtime-onefile /tmp/luainstaller-linux-arm64-cache \
     /tmp/luainstaller-linux-arm64-link
-sh tools/install-source.sh --lua "$ARM_LUA_PREFIX/bin/lua" \
-    --prefix /tmp/luainstaller-linux-arm64-source-prefix
-/tmp/luainstaller-linux-arm64-source-prefix/bin/luai -v
-/tmp/luainstaller-linux-arm64-source-prefix/bin/luai -a test/runtime_bundle/main.lua --max-deps 120
+PATH="$ARM_LUAROCKS_PREFIX/bin:$ARM_LUA_PREFIX/bin:$PATH" \
+    "$ARM_LUAROCKS_PREFIX/bin/luarocks" make --force --tree "$ARM_ROCKTREE" \
+    luainstaller-1.0.0-1.rockspec
+"$ARM_ROCKTREE/bin/luai" -v
+"$ARM_ROCKTREE/bin/luai" -a test/runtime_bundle/main.lua --max-deps 120
 PKG_CONFIG_PATH="$ARM_LUA_PREFIX/lib/pkgconfig" \
-    /tmp/luainstaller-linux-arm64-source-prefix/bin/luainstaller build --dir \
+    "$ARM_ROCKTREE/bin/luainstaller" build --dir \
     test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-arm64-runtime --max-deps 120
 output=$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-linux-arm64-runtime/luainstaller-linux-arm64-runtime arm64-clean)
 printf '%s\n' "$output" | grep "hello arm64-clean"
@@ -382,7 +381,7 @@ output=$(env -i PATH=/usr/bin:/bin /tmp/luainstaller-linux-arm64-link arm64-syml
 printf '%s\n' "$output" | grep "hello arm64-symlink"
 
 PKG_CONFIG_PATH="$ARM_LUA_PREFIX/lib/pkgconfig" \
-    /tmp/luainstaller-linux-arm64-source-prefix/bin/luainstaller build --file \
+    "$ARM_ROCKTREE/bin/luainstaller" build --file \
     test/runtime_bundle/main.lua -o /tmp/luainstaller-linux-arm64-runtime-onefile --max-deps 120
 mkdir -m 700 /tmp/luainstaller-linux-arm64-cache
 output=$(env -i PATH=/usr/bin:/bin TMPDIR=/tmp/luainstaller-linux-arm64-cache \

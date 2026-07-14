@@ -901,7 +901,7 @@ local function check_remote_onefile_script_coverage()
     local linux = read_file("tools/remote-test-linux.sh")
     assert_contains(linux, "test/contract_docs.lua")
     assert_contains(linux, "test/cli_split_smoke.lua")
-    assert_contains(linux, "sh -n tools/install-source.sh")
+    assert_contains(linux, "luarocks make")
     assert_contains(linux, "git ls-files -z")
     print("remote onefile script coverage ok")
 end
@@ -1789,33 +1789,6 @@ local function check_installed_cli_bundle()
     print("installed cli bundle ok")
 end
 
-local function check_source_install_bundle()
-    local root = make_temp_dir("source-install")
-    local prefix = root .. "/prefix"
-    local out_dir = root .. "/runtime"
-    run("sh tools/install-source.sh --prefix " .. shell_quote(prefix))
-    assert_equals(
-        run(shell_quote(prefix .. "/bin/luai") .. " -v"),
-        "luai 1.0.0\n"
-    )
-    assert_equals(
-        run(shell_quote(prefix .. "/bin/luainstaller") .. " version"),
-        "luainstaller 1.0.0  LGPL 3.0 by WaterRun\n"
-    )
-    assert_file_exists(prefix .. "/share/man/man1/luai.1")
-    assert_file_exists(prefix .. "/share/man/man1/luainstaller.1")
-    run("cd /tmp && " .. shell_quote(prefix .. "/bin/luainstaller") .. " build --dir "
-        .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
-        .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
-    assert_contains(run(shell_quote(out_dir .. "/runtime") .. " source-install"), "hello source-install")
-    local lua_version = current_lua_version()
-    run("LUA_PATH=" .. shell_quote(prefix .. "/share/lua/" .. lua_version .. "/?.lua;"
-        .. prefix .. "/share/lua/" .. lua_version .. "/?/init.lua;;")
-        .. " lua -e 'local launcher = require(\"luainstaller.launcher\"); assert(type(launcher.generateSource) == \"function\")'")
-    remove_tree(root)
-    print("source install bundle ok")
-end
-
 check_style()
 check_syntax()
 check_samples()
@@ -1842,6 +1815,5 @@ check_onefile_bundles()
 check_onefile_build_temp_safety()
 check_cli_discovery_runtime()
 check_installed_cli_bundle()
-check_source_install_bundle()
 
 print("all packaging-target samples passed comprehensive smoke audit")

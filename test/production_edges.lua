@@ -3314,59 +3314,6 @@ print("logger empty stale replacement ok")
     removeTree(root)
 end)
 
-test("source installer rejects incompatible Lua before writing", function()
-    if package.config:sub(1, 1) ~= "/" then
-        return
-    end
-    local root = makeTempDir("installer-lua-abi")
-    local fake_lua = root .. "/lua-old"
-    local rejected_prefix = root .. "/rejected"
-    writeFile(fake_lua, [[#!/bin/sh
-printf '%s\n' 'Lua 5.3'
-]])
-    runCommand("chmod 700 " .. shellQuote(fake_lua))
-
-    local rejected_log = root .. "/rejected.log"
-    local ok = os.execute(table.concat({
-        "sh tools/install-source.sh --lua " .. shellQuote(fake_lua),
-        "--prefix " .. shellQuote(rejected_prefix),
-        ">" .. shellQuote(rejected_log) .. " 2>&1",
-    }, " "))
-    assert(ok ~= true and ok ~= 0, "incompatible Lua unexpectedly installed")
-    assert(not fileExists(rejected_prefix .. "/bin/luai"), "installer wrote before ABI rejection")
-    assert(readFile(rejected_log):find("Lua 5.4", 1, true), "ABI error was not actionable")
-
-    local prefix = root .. "/accepted"
-    runCommand("sh tools/install-source.sh --lua lua --prefix " .. shellQuote(prefix))
-    local wrapper_log = root .. "/wrapper.log"
-    local wrapper_ok = os.execute(table.concat({
-        "LUAI_LUA=" .. shellQuote(fake_lua),
-        shellQuote(prefix .. "/bin/luai") .. " -v",
-        ">" .. shellQuote(wrapper_log) .. " 2>&1",
-    }, " "))
-    assert(wrapper_ok ~= true and wrapper_ok ~= 0, "installed wrapper accepted incompatible Lua")
-    assert(readFile(wrapper_log):find("Lua 5.4", 1, true), "wrapper ABI error was not actionable")
-    removeTree(root)
-end)
-
-test("source installer shell-quotes the default Lua path", function()
-    if package.config:sub(1, 1) ~= "/" then return end
-    local root = makeTempDir("installer-lua-path-quoting")
-    local lua_path = root .. "/lua$LUAI_INSTALLER_UNSET'\" with-space"
-    local prefix = root .. "/prefix"
-    runCommand("ln -s " .. shellQuote(commandOutputTrimmed("command -v lua"))
-        .. " " .. shellQuote(lua_path))
-    runCommand("sh tools/install-source.sh --lua " .. shellQuote(lua_path)
-        .. " --prefix " .. shellQuote(prefix))
-
-    local log = root .. "/wrapper.log"
-    local ok = os.execute("env -u LUAI_INSTALLER_UNSET "
-        .. shellQuote(prefix .. "/bin/luai") .. " -v >" .. shellQuote(log) .. " 2>&1")
-    assert(ok == true or ok == 0, "installed wrapper corrupted a special-character Lua path")
-    assertEqual(readFile(log), "luai 1.0.0\n", "special-character Lua wrapper")
-    removeTree(root)
-end)
-
 test("remote scripts are pinned and non-destructive", function()
     local scripts = {
         "tools/remote-test-linux.sh",

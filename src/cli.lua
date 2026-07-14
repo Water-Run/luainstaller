@@ -60,6 +60,7 @@ local function installSourcePreloads()
         "luainstaller.manifest",
         "luainstaller.compat",
         "luainstaller.platform",
+        "luainstaller.toolchain",
         "luainstaller.cgen",
         "luainstaller.launcher",
         "luainstaller.bundler",
