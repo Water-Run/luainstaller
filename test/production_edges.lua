@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -177,39 +177,42 @@ test("checked write reports flush or close failure", function()
 end)
 
 test("Windows regular-file checks use a non-follow type query", function()
-    local process = require("luainstaller.process")
-    local original_output = process.output
+    local original_process = require("luainstaller.process")
     local original_config = package.config
     local original_getenv = os.getenv
     local calls = 0
-    process.output = function(command)
+    rawset(package, "config", "\\\n;\n?\n!\n-")
+    local windows_process = dofile("src/process.lua")
+    windows_process.output = function(command)
         calls = calls + 1
-        assert(command:find(
-            'call "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
+        local powershell_position = command:find(
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
             1,
             true
-        ), "Windows type query depended on PATH for PowerShell")
-        assert(command:find("FromBase64String", 1, true), "Windows path was not encoded")
-        assert(command:find("[Text.Encoding]::Default.GetString", 1, true),
-            "Windows narrow-path bytes were not decoded with the active ANSI code page")
+        )
+        assert(powershell_position and powershell_position <= 2,
+            "Windows type query depended on PATH for PowerShell")
+        assert(command:find("-EncodedCommand", 1, true),
+            "Windows type query did not encode its PowerShell script")
         assert(not command:find("NUL&echo unsafe", 1, true), "raw Windows path reached the shell")
-        return calls == 2, "simulated Windows file type"
+        return true, calls == 1 and "other" or "file"
     end
-    rawset(package, "config", "\\\n;\n?\n!\n-")
     rawset(os, "getenv", function(name)
         if name == "SystemRoot" then return "C:\\Windows" end
         return original_getenv(name)
     end)
+    package.loaded["luainstaller.process"] = windows_process
     local loaded, windows_fs = pcall(dofile, "src/fs.lua")
-    rawset(package, "config", original_config)
     if not loaded then
-        process.output = original_output
+        rawset(package, "config", original_config)
+        package.loaded["luainstaller.process"] = original_process
         rawset(os, "getenv", original_getenv)
         error(windows_fs)
     end
     local device = windows_fs.isRegularFile("NUL&echo unsafe")
     local regular = windows_fs.isRegularFile("C:\\safe\\empty.lua")
-    process.output = original_output
+    rawset(package, "config", original_config)
+    package.loaded["luainstaller.process"] = original_process
     rawset(os, "getenv", original_getenv)
 
     assert(not device, "Windows device was accepted as a regular file")
@@ -253,13 +256,18 @@ test("Windows PowerShell helper is absolute and rejects shell metacharacters", f
     assert(unsafe_ok and unsafe == nil, "unsafe SystemRoot reached a shell command")
 end)
 
-test("Windows logger encodes legal metacharacters in filesystem paths", function()
-    local source = readFile("src/logger.lua")
-    assert(source:find("FromBase64String", 1, true),
-        "Windows logger does not encode filesystem paths")
-    assert(source:find("[Text.Encoding]::Default.GetString", 1, true),
-        "Windows logger does not decode narrow paths with the active ANSI code page")
-    assert(not source:find("windowsCommandPathIsSafe", 1, true),
+test("Windows logger delegates encoded filesystem operations", function()
+    local logger_source = readFile("src/logger.lua")
+    local fs_source = readFile("src/fs.lua")
+    assert(fs_source:find("FromBase64String", 1, true),
+        "Windows filesystem backend does not encode paths and file contents")
+    assert(fs_source:find("[Text.Encoding]::UTF8.GetString", 1, true),
+        "Windows filesystem backend does not decode paths as UTF-8")
+    for _, operation in ipairs({ "fs.pathType", "fs.writeFile", "fs.rename", "fs.removeFile" }) do
+        assert(logger_source:find(operation, 1, true),
+            "Windows logger does not delegate to checked operation " .. operation)
+    end
+    assert(not logger_source:find("windowsCommandPathIsSafe", 1, true),
         "Windows logger rejects legal filesystem metacharacters")
 end)
 

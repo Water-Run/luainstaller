@@ -8,7 +8,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 local fs = require("luainstaller.fs")
@@ -34,7 +34,6 @@ local IS_WINDOWS = PATH_SEP == "\\"
 local cached_log_file_path = nil
 local cached_process_id = nil
 local token_counter = 0
-local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 local function commandSucceeded(status)
     return status == true or status == 0
@@ -43,45 +42,6 @@ end
 local function execute(command)
     local called, first = pcall(os.execute, command)
     return called and commandSucceeded(first)
-end
-
-local function base64Encode(value)
-    local output = {}
-    for index = 1, #value, 3 do
-        local first = value:byte(index)
-        local second = value:byte(index + 1)
-        local third = value:byte(index + 2)
-        local packed = first * 0x10000 + (second or 0) * 0x100 + (third or 0)
-        local first_index = math.floor(packed / 0x40000) % 64 + 1
-        local second_index = math.floor(packed / 0x1000) % 64 + 1
-        output[#output + 1] = BASE64_ALPHABET:sub(first_index, first_index)
-        output[#output + 1] = BASE64_ALPHABET:sub(second_index, second_index)
-        output[#output + 1] = second
-            and BASE64_ALPHABET:sub(math.floor(packed / 0x40) % 64 + 1,
-                math.floor(packed / 0x40) % 64 + 1)
-            or "="
-        output[#output + 1] = third
-            and BASE64_ALPHABET:sub(packed % 64 + 1, packed % 64 + 1)
-            or "="
-    end
-    return table.concat(output)
-end
-
-local function windowsPathExpression(path)
-    if type(path) ~= "string" or path == "" or path:find("\0", 1, true) then
-        return nil
-    end
-    return "[Text.Encoding]::Default.GetString([Convert]::FromBase64String('"
-        .. base64Encode(path) .. "'))"
-end
-
-local function windowsPowerShellCommand(script)
-    local powershell = process.windowsPowerShellPath()
-    if not powershell then
-        return nil
-    end
-    return 'call "' .. powershell .. '" -NoProfile -NonInteractive -Command "'
-        .. script .. '"'
 end
 
 local function getLogDirectory()
@@ -98,50 +58,21 @@ end
 
 local function isSymbolicLink(path)
     if IS_WINDOWS then
-        local expression = windowsPathExpression(path)
-        if not expression then return true end
-        local command = windowsPowerShellCommand(string.format(
-            "$p=%s;$i=Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue;"
-                .. "if ($null -eq $i) { exit 0 };"
-                .. "if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 };"
-                .. "exit 0",
-            expression
-        ))
-        local safe = command and execute(command .. " >NUL 2>&1")
-        -- Treat an unavailable/failed inspection as unsafe instead of
-        -- silently accepting a junction or other reparse point.
-        return not safe
+        return fs.pathType(path) == "reparse"
     end
     return execute("test -L " .. process.shellQuote(path))
 end
 
 local function pathExists(path)
     if IS_WINDOWS then
-        local expression = windowsPathExpression(path)
-        if not expression then return false end
-        local command = windowsPowerShellCommand(
-            "$p=" .. expression
-                .. ";$i=Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue;"
-                .. "if ($null -eq $i) { exit 1 };exit 0"
-        )
-        return command and execute(command .. " >NUL 2>&1") or false
+        return fs.pathType(path) ~= "missing"
     end
     return execute("test -e " .. process.shellQuote(path)) or isSymbolicLink(path)
 end
 
 local function isDirectory(path)
     if IS_WINDOWS then
-        local expression = windowsPathExpression(path)
-        if not expression then return false end
-        local command = windowsPowerShellCommand(string.format(
-            "$p=%s;$i=Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue;"
-                .. "if ($null -eq $i) { exit 1 };"
-                .. "if (-not ($i -is [IO.DirectoryInfo])) { exit 1 };"
-                .. "if ($i.Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 };"
-                .. "exit 0",
-            expression
-        ))
-        return command and execute(command .. " >NUL 2>&1") or false
+        return fs.pathType(path) == "directory"
     end
     return not isSymbolicLink(path) and execute("test -d " .. process.shellQuote(path))
 end
@@ -168,30 +99,7 @@ local function ensureDirectory(path)
         return false
     end
     if IS_WINDOWS then
-        local expression = windowsPathExpression(path)
-        if not expression then return false end
-        local command = windowsPowerShellCommand(table.concat({
-            "$p=", expression, ";try {",
-            "$full=[IO.Path]::GetFullPath($p);",
-            "$root=[IO.Path]::GetPathRoot($full);",
-            "if ([string]::IsNullOrEmpty($root)) { exit 1 };",
-            "$current=$root;$relative=$full.Substring($root.Length);",
-            "foreach ($part in ($relative -split '[\\\\/]')) {",
-            "if ([string]::IsNullOrEmpty($part)) { continue };",
-            "$current=Join-Path $current $part;",
-            "if (Test-Path -LiteralPath $current) {",
-            "$item=Get-Item -LiteralPath $current -Force -ErrorAction Stop;",
-            "if (-not ($item -is [IO.DirectoryInfo]) -or ",
-            "($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 }",
-            "} else { break }",
-            "};",
-            "$null=[IO.Directory]::CreateDirectory($full);",
-            "$final=Get-Item -LiteralPath $full -Force -ErrorAction Stop;",
-            "if (-not ($final -is [IO.DirectoryInfo]) -or ",
-            "($final.Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 };",
-            "exit 0 } catch { exit 1 }",
-        }))
-        return command and execute(command .. " >NUL 2>&1") or false
+        return fs.makeDirectory(path) == true
     end
 
     local quoted = process.shellQuote(path)
@@ -207,33 +115,30 @@ end
 
 local function createDirectory(path)
     if IS_WINDOWS then
-        local expression = windowsPathExpression(path)
-        if not expression then return false end
-        local command = windowsPowerShellCommand(
-            "$p=" .. expression
-                .. ";$ErrorActionPreference='Stop';"
-                .. "try {$null=New-Item -Path $p -ItemType Directory;exit 0}"
-                .. "catch {exit 1}"
-        )
-        return command and execute(command .. " >NUL 2>&1") or false
+        return fs.createDirectory(path) == true
     end
     return execute("mkdir -m 700 " .. process.shellQuote(path) .. " 2>/dev/null")
 end
 
 local function removeDirectory(path)
     if IS_WINDOWS then
-        local expression = windowsPathExpression(path)
-        if not expression then return false end
-        local command = windowsPowerShellCommand(
-            "$p=" .. expression
-                .. ";try {$i=Get-Item -LiteralPath $p -Force -ErrorAction Stop;"
-                .. "if (-not ($i -is [IO.DirectoryInfo]) -or "
-                .. "($i.Attributes -band [IO.FileAttributes]::ReparsePoint)) {exit 1};"
-                .. "[IO.Directory]::Delete($p,$false);exit 0}catch{exit 1}"
-        )
-        return command and execute(command .. " >NUL 2>&1") or false
+        return fs.removeDirectory(path) == true
     end
     return execute("rmdir " .. process.shellQuote(path) .. " 2>/dev/null")
+end
+
+local function renamePath(source, destination)
+    if IS_WINDOWS then
+        return fs.rename(source, destination) == true
+    end
+    return os.rename(source, destination) and true or false
+end
+
+local function removeFile(path)
+    if IS_WINDOWS then
+        return fs.removeFile(path) == true
+    end
+    return os.remove(path) and true or false
 end
 
 local function getProcessId()
@@ -242,8 +147,8 @@ local function getProcessId()
     end
     local value
     if IS_WINDOWS then
-        local command = windowsPowerShellCommand("[Console]::Write($PID)")
-        value = command and process.firstLine(command) or nil
+        local ok, output = process.outputPowerShell("[Console]::Write($PID)")
+        value = ok and output:match("%d+") or nil
     else
         value = process.firstLine([[printf '%s\n' "$PPID"]])
     end
@@ -279,23 +184,13 @@ local function parseOwner(content)
 end
 
 local function directoryModifiedAt(path)
-    local line
     if IS_WINDOWS then
-        local expression = windowsPathExpression(path)
-        if not expression then return nil end
-        local command = windowsPowerShellCommand(string.format(
-            "$p=%s;$i=Get-Item -LiteralPath $p -Force -ErrorAction Stop;"
-                .. "$d=[DateTimeOffset]$i.LastWriteTimeUtc;"
-                .. "[Console]::Write($d.ToUnixTimeSeconds())",
-            expression
-        ))
-        line = command and process.firstLine(command) or nil
-    else
-        local quoted = process.shellQuote(path)
-        line = process.firstLine("stat -c %Y " .. quoted .. " 2>/dev/null")
-        if not tonumber(line) then
-            line = process.firstLine("stat -f %m " .. quoted .. " 2>/dev/null")
-        end
+        return fs.modifiedAt(path)
+    end
+    local quoted = process.shellQuote(path)
+    local line = process.firstLine("stat -c %Y " .. quoted .. " 2>/dev/null")
+    if not tonumber(line) then
+        line = process.firstLine("stat -f %m " .. quoted .. " 2>/dev/null")
     end
     return tonumber(line)
 end
@@ -316,28 +211,27 @@ local function directoryIdentity(path)
 end
 
 local function singleOwnerSentinel(lock_path)
-    local ok, output
     if IS_WINDOWS then
-        local expression = windowsPathExpression(lock_path)
-        if not expression then return nil end
-        local command = windowsPowerShellCommand(
-            "$p=" .. expression
-                .. ";Get-ChildItem -LiteralPath $p -Force -File -Filter 'owner.*' "
-                .. "-ErrorAction SilentlyContinue | ForEach-Object {$_.Name}"
-        )
-        if command then
-            ok, output = process.output(command)
-        else
-            ok, output = false, nil
+        local entries = fs.listTree(lock_path)
+        if not entries then return nil end
+        local found
+        for _, entry in ipairs(entries) do
+            if not entry.path:find("/", 1, true) and entry.path:match("^owner%.") then
+                local token = entry.path:match("^owner%.([%w_.-]+)$")
+                if entry.type ~= "file" or not token or found then return nil end
+                found = {
+                    token = token,
+                    path = lock_path .. PATH_SEP .. entry.path,
+                }
+            end
         end
-    else
-        ok, output = process.output("cd " .. process.shellQuote(lock_path)
-            .. " 2>/dev/null && for item in owner.*; do "
-            .. "test -f \"$item\" && printf '%s\\n' \"$item\"; done")
-    end
-    if not ok and (not output or output == "") then
+        if found and isRegularFile(found.path) then return found end
         return nil
     end
+    local ok, output = process.output("cd " .. process.shellQuote(lock_path)
+        .. " 2>/dev/null && for item in owner.*; do "
+        .. "test -f \"$item\" && printf '%s\\n' \"$item\"; done")
+    if not ok and (not output or output == "") then return nil end
     local found
     for name in tostring(output or ""):gmatch("[^\r\n]+") do
         local token = name:match("^owner%.([%w_.-]+)$")
@@ -402,7 +296,7 @@ local function restoreMovedLock(release_path, lock_path)
     if IS_WINDOWS then
         -- Windows directory rename does not replace a destination that appears
         -- in this window, so a best-effort restore is no-clobber there.
-        return os.rename(release_path, lock_path) and true or false
+        return renamePath(release_path, lock_path)
     end
     -- Reserve the public name first.  POSIX rename then replaces only this
     -- empty directory atomically, so a newly acquired lock cannot appear in
@@ -416,7 +310,7 @@ end
 local function removeOwnedLock(lock_path, token, release_token, expected_content)
     local release_path = lock_path .. ".release." .. release_token
     if pathExists(release_path) or isSymbolicLink(release_path)
-        or not os.rename(lock_path, release_path) then
+        or not renamePath(lock_path, release_path) then
         return false
     end
     local sentinel_path = release_path .. PATH_SEP .. "owner." .. token
@@ -426,7 +320,7 @@ local function removeOwnedLock(lock_path, token, release_token, expected_content
         restoreMovedLock(release_path, lock_path)
         return false
     end
-    if not os.remove(sentinel_path) then
+    if not removeFile(sentinel_path) then
         return false
     end
     return removeDirectory(release_path)
@@ -435,7 +329,7 @@ end
 local function abandonPartiallyCreatedLock(lock_path, token, release_token, expected_content)
     local release_path = lock_path .. ".release." .. release_token
     if pathExists(release_path) or isSymbolicLink(release_path)
-        or not os.rename(lock_path, release_path) then
+        or not renamePath(lock_path, release_path) then
         return false
     end
     local sentinel_path = release_path .. PATH_SEP .. "owner." .. token
@@ -447,7 +341,7 @@ local function abandonPartiallyCreatedLock(lock_path, token, release_token, expe
         restoreMovedLock(release_path, lock_path)
         return false
     end
-    if not os.remove(sentinel_path) then
+    if not removeFile(sentinel_path) then
         return false
     end
     return removeDirectory(release_path)
@@ -468,7 +362,7 @@ local function recoverStaleLock(lock_path)
     end
 
     local tombstone = lock_path .. ".stale." .. uniqueToken()
-    if not os.rename(lock_path, tombstone) then
+    if not renamePath(lock_path, tombstone) then
         return false
     end
 
@@ -501,7 +395,7 @@ local function recoverStaleLock(lock_path)
     local stale_owner_path = observed.kind == "legacy"
         and owner_path
         or tombstone .. PATH_SEP .. "owner." .. observed.token
-    if not os.remove(stale_owner_path) then
+    if not removeFile(stale_owner_path) then
         return false
     end
     return removeDirectory(tombstone)
@@ -509,11 +403,9 @@ end
 
 local function waitForLockRetry()
     if IS_WINDOWS then
-        local command = windowsPowerShellCommand(string.format(
-            "Start-Sleep -Milliseconds %d",
+        process.outputPowerShell("Start-Sleep -Milliseconds " .. tostring(
             math.floor(LOCK_RETRY_SECONDS * 1000)
         ))
-        if command then execute(command) end
     else
         execute("sleep " .. tostring(LOCK_RETRY_SECONDS))
     end
@@ -693,18 +585,12 @@ local function parseLogContent(content, chunk_name)
 end
 
 local function logFileState(path)
-    if isSymbolicLink(path) then
-        return { kind = "unsafe" }
-    end
     local kind
     if IS_WINDOWS then
-        if not pathExists(path) then
-            kind = "missing"
-        elseif isRegularFile(path) then
-            kind = "regular"
-        else
-            kind = "unsafe"
-        end
+        local path_type = fs.pathType(path)
+        kind = path_type == "missing" and "missing"
+            or path_type == "file" and "regular"
+            or "unsafe"
     else
         local quoted = process.shellQuote(path)
         local ok, output = process.output(table.concat({
@@ -751,7 +637,7 @@ local function removeRegular(path, state)
     if state.kind ~= "regular" then
         return false
     end
-    return os.remove(path) and true or false
+    return removeFile(path)
 end
 
 local function publishTemporary(path, temporary, primary, backup)
@@ -761,27 +647,27 @@ local function publishTemporary(path, temporary, primary, backup)
     end
 
     if primary.kind == "missing" then
-        return os.rename(temporary, path) and true or false
+        return renamePath(temporary, path)
     end
 
     if not primary.logs and backup.kind == "regular" and backup.logs then
         if not removeRegular(path, primary) then
             return false
         end
-        return os.rename(temporary, path) and true or false
+        return renamePath(temporary, path)
     end
 
     if not removeRegular(backup_path, backup) then
         return false
     end
-    if not os.rename(path, backup_path) then
+    if not renamePath(path, backup_path) then
         return false
     end
-    if os.rename(temporary, path) then
+    if renamePath(temporary, path) then
         return true
     end
 
-    os.rename(backup_path, path)
+    renamePath(backup_path, path)
     return false
 end
 
@@ -799,24 +685,24 @@ local function saveToFile(logs, token)
     local temporary = path .. ".tmp." .. token
     local wrote = fs.writeFile(temporary, payload)
     if not wrote then
-        os.remove(temporary)
+        removeFile(temporary)
         return false
     end
     if not chmodPath(temporary, 600) then
-        os.remove(temporary)
+        removeFile(temporary)
         return false
     end
 
     local persisted = fs.readFile(temporary)
     if persisted ~= payload or not parseLogContent(persisted, "@" .. temporary) then
-        os.remove(temporary)
+        removeFile(temporary)
         return false
     end
 
     local primary = logFileState(path)
     local backup = logFileState(path .. ".bak")
     if not publishTemporary(path, temporary, primary, backup) then
-        os.remove(temporary)
+        removeFile(temporary)
         return false
     end
     return true
