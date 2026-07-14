@@ -228,11 +228,11 @@ fi
 test "\$("\$LUA_PREFIX/bin/lua" -e 'io.write(_VERSION)')" = "Lua 5.4"
 
 if [ ! -x "\$LUAROCKS_PREFIX/bin/luarocks" ] \
-    || ! "\$LUAROCKS_PREFIX/bin/luarocks" --version | grep '3\.12\.2' >/dev/null; then
+    || ! "\$LUAROCKS_PREFIX/bin/luarocks" --version | grep '3\.13\.0' >/dev/null; then
     rm -rf "\$LUAROCKS_PREFIX" /tmp/luainstaller-mac-luarocks-build
     mkdir -p /tmp/luainstaller-mac-luarocks-build
     tar -xzf "/tmp/$LUAROCKS_TARBALL" -C /tmp/luainstaller-mac-luarocks-build
-    cd /tmp/luainstaller-mac-luarocks-build/luarocks-3.12.2
+    cd /tmp/luainstaller-mac-luarocks-build/luarocks-3.13.0
     ./configure --prefix="\$LUAROCKS_PREFIX" --with-lua="\$LUA_PREFIX" >/tmp/luainstaller-macos-luarocks-configure.log
     make >/tmp/luainstaller-macos-luarocks-build.log
     make install >/tmp/luainstaller-macos-luarocks-install.log

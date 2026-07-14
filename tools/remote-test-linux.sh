@@ -290,11 +290,11 @@ fi
 test "$("$ARM_LUA_PREFIX/bin/lua" -e 'io.write(_VERSION)')" = "Lua 5.4"
 
 if [ ! -x "$ARM_LUAROCKS_PREFIX/bin/luarocks" ] \
-    || ! "$ARM_LUAROCKS_PREFIX/bin/luarocks" --version | grep '3\.12\.2' >/dev/null; then
+    || ! "$ARM_LUAROCKS_PREFIX/bin/luarocks" --version | grep '3\.13\.0' >/dev/null; then
     rm -rf "$ARM_LUAROCKS_PREFIX" /tmp/luainstaller-linux-arm64-luarocks-build
     mkdir -p /tmp/luainstaller-linux-arm64-luarocks-build
     tar -xzf "/tmp/$LUAROCKS_TARBALL" -C /tmp/luainstaller-linux-arm64-luarocks-build
-    cd /tmp/luainstaller-linux-arm64-luarocks-build/luarocks-3.12.2
+    cd /tmp/luainstaller-linux-arm64-luarocks-build/luarocks-3.13.0
     ./configure --prefix="$ARM_LUAROCKS_PREFIX" --with-lua="$ARM_LUA_PREFIX" \
         >/tmp/luainstaller-linux-arm64-luarocks-configure.log
     make >/tmp/luainstaller-linux-arm64-luarocks-build.log

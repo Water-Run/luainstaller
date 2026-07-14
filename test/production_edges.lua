@@ -3336,6 +3336,15 @@ test("remote scripts are pinned and non-destructive", function()
         1,
         true
     ))
+    for runner_name, runner in pairs({
+        ["Linux remote runner"] = linux_runner,
+        ["macOS remote runner"] = macos_runner,
+    }) do
+        assert(runner:find("luarocks-3.13.0", 1, true),
+            runner_name .. " does not use the pinned LuaRocks release")
+        assert(not runner:find("luarocks-3.12.2", 1, true),
+            runner_name .. " retains a stale LuaRocks release path")
+    end
     for _, pin in ipairs({
         "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
         "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
