@@ -106,15 +106,18 @@ end
 
 local function validateLuaInterpreter(interpreter)
     local probe = table.concat({
-        "if _VERSION ~= 'Lua 5.4' then",
-        "io.stderr:write('expected Lua 5.4, got ', tostring(_VERSION), '\\n')",
-        "os.exit(42)",
-        "end",
+        "local major, minor = tostring(_VERSION):match('Lua%s+(%d+)%.(%d+)')",
+        "major, minor = tonumber(major), tonumber(minor)",
+        "if major ~= 5 or not minor or minor < 1 or type(rawget(_G, 'jit')) == 'table' then "
+            .. "io.stderr:write('expected official Lua 5.1+, got ', tostring(_VERSION), '\\n'); "
+            .. "os.exit(42) end",
         "io.write(_VERSION)",
     }, ";")
     local ok, output = commandOutput(shellQuote(interpreter) .. " -e " .. shellQuote(probe))
-    if not ok or output:gsub("%s+$", "") ~= "Lua 5.4" then
-        return makeError("ToolchainError", "Runtime discovery requires a Lua 5.4 interpreter", {
+    local major, minor = tostring(output):match("^Lua%s+(%d+)%.(%d+)%s*$")
+    major, minor = tonumber(major), tonumber(minor)
+    if not ok or major ~= 5 or not minor or minor < 1 then
+        return makeError("ToolchainError", "Runtime discovery requires an official Lua 5.1+ interpreter", {
             interpreter = interpreter,
             output = output,
         })
@@ -352,8 +355,12 @@ local entry_dir = %q
 local original_require = require
 local original_exit = os.exit
 local original_load = load
+local original_loadstring = loadstring
+local original_setfenv = setfenv
+local original_getfenv = getfenv
 local original_string_dump = string.dump
 local original_debug_getupvalue = debug.getupvalue
+local original_debug_getinfo = debug.getinfo
 local original_io_open = io.open
 local original_global = _G
 local recorded_names = {}
@@ -362,6 +369,20 @@ local records = {}
 local active_records = {}
 local wrapped_searchers = setmetatable({}, { __mode = "k" })
 local completion = "LUAINSTALLER_TRACE_V4_COMPLETE"
+local unpack_values = table.unpack or unpack
+local function pack_values(...)
+    return { n = select("#", ...), ... }
+end
+local function load_text(source, chunk_name, environment)
+    if type(source) ~= "string" then return nil, "source must be a string" end
+    if source:byte(1) == 27 then return nil, "binary chunks are not accepted" end
+    if _VERSION == "Lua 5.1" then
+        local loader, load_err = original_loadstring(source, chunk_name)
+        if loader and environment then original_setfenv(loader, environment) end
+        return loader, load_err
+    end
+    return original_load(source, chunk_name, "t", environment)
+end
 local function hex(value)
     return (tostring(value or ""):gsub(".", function(character)
         return string.format("%%02x", string.byte(character))
@@ -438,10 +459,9 @@ local function capture_loader_snapshot(record, loader, loader_path)
     if snapshot == nil then
         error("cannot snapshot runtime loader " .. loader_path .. ": " .. tostring(read_err), 0)
     end
-    local rebuilt, rebuild_err = original_load(
+    local rebuilt, rebuild_err = load_text(
         strip_source(snapshot),
         "@" .. loader_path,
-        "t",
         original_global
     )
     if not rebuilt then
@@ -452,11 +472,17 @@ local function capture_loader_snapshot(record, loader, loader_path)
     if not loader_ok or not rebuilt_ok or loader_dump ~= rebuilt_dump then
         error("runtime source changed while its loader was created: " .. loader_path, 0)
     end
-    local environment_name, environment = original_debug_getupvalue(loader, 1)
-    local extra_upvalue = original_debug_getupvalue(loader, 2)
-    if environment_name ~= "_ENV"
-        or environment ~= original_global
-        or extra_upvalue ~= nil then
+    local environment_ok
+    local extra_upvalue
+    if _VERSION == "Lua 5.1" then
+        environment_ok = original_getfenv(loader) == original_global
+        extra_upvalue = original_debug_getupvalue(loader, 1)
+    else
+        local environment_name, environment = original_debug_getupvalue(loader, 1)
+        extra_upvalue = original_debug_getupvalue(loader, 2)
+        environment_ok = environment_name == "_ENV" and environment == original_global
+    end
+    if not environment_ok or extra_upvalue ~= nil then
         error(
             "LUAINSTALLER_RUNTIME_LOADER_UNVERIFIABLE: non-reproducible loader environment "
                 .. loader_path,
@@ -472,16 +498,24 @@ local function wrap_searchers()
         local original_searcher = searchers[index]
         if not wrapped_searchers[original_searcher] then
             local wrapper = function(name)
-                local returned = table.pack(original_searcher(name))
+                local returned = pack_values(original_searcher(name))
                 local active = active_records[#active_records]
                 if type(active) == "table" and active.name == tostring(name)
                     and type(returned[1]) == "function" then
-                    if type(returned[2]) == "string" then
-                        active.loader_path = returned[2]
+                    local loader_path = returned[2]
+                    if type(loader_path) ~= "string" then
+                        local loader_info = original_debug_getinfo(returned[1], "S") or {}
+                        local loader_source = tostring(loader_info.source or "")
+                        if loader_source:sub(1, 1) == "@" then
+                            loader_path = loader_source:sub(2)
+                        end
                     end
-                    capture_loader_snapshot(active, returned[1], returned[2])
+                    if type(loader_path) == "string" then
+                        active.loader_path = loader_path
+                    end
+                    capture_loader_snapshot(active, returned[1], loader_path)
                 end
-                return table.unpack(returned, 1, returned.n)
+                return unpack_values(returned, 1, returned.n)
             end
             wrapped_searchers[wrapper] = true
             searchers[index] = wrapper
@@ -520,7 +554,7 @@ require = function(name)
     end
     inflight_names[module_key] = (inflight_names[module_key] or 0) + 1
     active_records[#active_records + 1] = record or false
-    local result = table.pack(pcall(function()
+    local result = pack_values(pcall(function()
         wrap_searchers()
         return original_require(name)
     end))
@@ -537,7 +571,7 @@ require = function(name)
     if record and type(result[3]) == "string" then
         record.loader_path = result[3]
     end
-    return table.unpack(result, 2, result.n)
+    return unpack_values(result, 2, result.n)
 end
 os.exit = function(code, close)
     flush_records()

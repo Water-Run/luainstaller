@@ -31,6 +31,13 @@ assert(output == _VERSION, string.format(
     tostring(output)
 ))
 
+local process = require("luainstaller.process")
+local child_succeeded = process.output(harness.command(interpreter, {
+    "-e",
+    "os.exit(7)",
+}))
+assert(child_succeeded == false, "child process failure must be observable")
+
 assert(compat.band(0xf0, 0x3c) == 0x30)
 assert(compat.bor(0xf0, 0x0f) == 0xff)
 assert(compat.bxor(0xaa, 0xff) == 0x55)
@@ -56,6 +63,93 @@ if info.minor >= 3 then
     hash.sha256(string.rep("a", 1024 * 1024))
     local elapsed = os.clock() - started
     assert(elapsed < 3, string.format("native SHA-256 backend is too slow: %.2fs", elapsed))
+end
+
+local product_files = {
+    "src/analyzer.lua",
+    "src/bundler.lua",
+    "src/cgen.lua",
+    "src/cli.lua",
+    "src/compat.lua",
+    "src/discovery.lua",
+    "src/fs.lua",
+    "src/hash.lua",
+    "src/init.lua",
+    "src/launcher.lua",
+    "src/logger.lua",
+    "src/manifest.lua",
+    "src/onefile.lua",
+    "src/path.lua",
+    "src/platform.lua",
+    "src/process.lua",
+    "src/result.lua",
+    "src/runtime.lua",
+}
+for _, path in ipairs(product_files) do
+    local chunk, load_error = loadfile(path)
+    assert(chunk, path .. ": " .. tostring(load_error))
+end
+
+local analyzed = require("luainstaller").analyze({
+    entry = "test/runtime_bundle/main.lua",
+    max_deps = 120,
+})
+assert(analyzed.ok, analyzed.error and analyzed.error.message)
+assert(#analyzed.dependencies.scripts == 1)
+
+local runtime = require("luainstaller.runtime")
+local returned = compat.pack(runtime.run({
+    entry = {
+        path = "version-contract-entry.lua",
+        source = "local m = require('version_contract_module'); return m.values()",
+    },
+    modules = {
+        version_contract_module = {
+            path = "version-contract-module.lua",
+            source = "return { values = function() return 17, nil, 29 end }",
+        },
+    },
+}))
+assert(returned.n == 3 and returned[1] == 17 and returned[2] == nil and returned[3] == 29)
+
+local cgen = require("luainstaller.cgen")
+local bootstrap = cgen.generateBootstrap({
+    entry = "test/runtime_bundle/main.lua",
+    dependencies = {
+        scripts = { "test/runtime_bundle/greeter.lua" },
+        libraries = {},
+    },
+})
+local generated = assert(compat.loadText(bootstrap, "@version-contract-bootstrap", _G))
+local old_arg = _G.arg
+_G.arg = { [0] = "version-contract-bundle", [1] = "embedded" }
+local generated_ok, generated_error = pcall(generated)
+_G.arg = old_arg
+assert(generated_ok, generated_error)
+
+if package.config:sub(1, 1) ~= "\\" then
+    local trace_root = harness.make_temp_dir("version-trace")
+    harness.write_file(trace_root .. "/main.lua", [[
+local loaded = require("version_contract_trace_module")
+assert(loaded.value == 41)
+]])
+    harness.write_file(trace_root .. "/version_contract_trace_module.lua",
+        "return { value = 41 }\n")
+    local traced = require("luainstaller").analyze({
+        entry = trace_root .. "/main.lua",
+        discovery_mode = "runtime",
+        lua = interpreter,
+        max_deps = 120,
+    })
+    harness.remove_tree(trace_root)
+    assert(traced.ok, traced.error and (traced.error.message
+        .. "\n" .. tostring(traced.error.output or "")))
+    assert(#traced.dependencies.scripts == 1, string.format(
+        "expected one runtime dependency, got %d (trace=%d): %s",
+        #traced.dependencies.scripts,
+        #(traced.trace or {}),
+        table.concat(traced.dependencies.scripts, ", ")
+    ))
 end
 
 print("version contract ok: " .. info.version)

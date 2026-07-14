@@ -292,8 +292,21 @@ local function loaderTable()
   return package.searchers or package.loaders
 end
 
+local unpackValues = table.unpack or unpack
+
+local function packValues(...)
+  return { n = select("#", ...), ... }
+end
+
+local function loadText(source, chunk_name)
+  if type(source) ~= "string" then return nil, "source must be a string" end
+  if source:byte(1) == 27 then return nil, "binary chunks are not accepted" end
+  if _VERSION == "Lua 5.1" then return loadstring(source, chunk_name) end
+  return load(source, chunk_name, "t")
+end
+
 local function loadPayloadSource(record, chunk_name)
-  local loader, err = load(stripSource(record.source or ""), chunk_name or ("@" .. tostring(record.path or "bundle")), "t")
+  local loader, err = loadText(stripSource(record.source or ""), chunk_name or ("@" .. tostring(record.path or "bundle")))
   if not loader then error(err) end
   return loader
 end
@@ -340,7 +353,7 @@ local function run(payload, run_args)
   local runtime_arg = { [0] = entry.path or entry.id or "__entry__" }
   for i = 1, #(run_args or {}) do runtime_arg[i] = run_args[i] end
   _G.arg = runtime_arg
-  local results = table.pack(pcall(function()
+  local results = packValues(pcall(function()
     return loadPayloadSource(entry, "@" .. tostring(entry.path or entry.id or "__entry__"))()
   end))
   _G.arg = old_arg
@@ -348,7 +361,7 @@ local function run(payload, run_args)
   restoreLoadedModules(loaded, previous_modules)
   if not results[1] then error(results[2], 0) end
   if not uninstall_ok then error(uninstall_err, 0) end
-  return table.unpack(results, 2, results.n)
+  return unpackValues(results, 2, results.n)
 end
 ]=]
 

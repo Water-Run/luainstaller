@@ -19,6 +19,7 @@ Updated:
 local fs = require("luainstaller.fs")
 local hash = require("luainstaller.hash")
 local path = require("luainstaller.path")
+local compat = require("luainstaller.compat")
 
 -- ============================================================
 -- Path Utilities
@@ -213,7 +214,7 @@ end
 
 local function validateSource(source, script_path)
     local prepared = prepareSource(source)
-    local loader, syntax_err = load(prepared, "@" .. tostring(script_path), "t", {})
+    local loader, syntax_err = compat.loadText(prepared, "@" .. tostring(script_path), {})
     if not loader then
         error(errors.luaSyntax(script_path, syntax_err))
     end
@@ -452,10 +453,9 @@ function LuaLexer:extractStringLiteral(start_line)
         if ch == quote and self:isNotEscaped() then
             self.pos = self.pos + 1
             local raw = self.source:sub(start_pos, self.pos - 1)
-            local decoder, decode_err = load(
+            local decoder, decode_err = compat.loadText(
                 "return " .. raw,
                 "=(luainstaller-require-literal)",
-                "t",
                 {}
             )
             if not decoder then
@@ -502,10 +502,9 @@ function LuaLexer:extractLongStringLiteral(level, start_line)
         if self:currentChar() == "]" and self:checkClosingBracket(level) then
             self.pos = self.pos + 2 + level
             local raw = self.source:sub(start_pos, self.pos - 1)
-            local decoder, decode_err = load(
+            local decoder, decode_err = compat.loadText(
                 "return " .. raw,
                 "=(luainstaller-require-long-literal)",
-                "t",
                 {}
             )
             if not decoder then
@@ -1165,19 +1164,18 @@ function DependencyAnalyzer:analyzeRecursive(script_path)
         local trace_item = self:recordTrace(script_path, req, inspected)
 
         if inspected.ok then
-            if inspected.type == "builtin" then
-                goto continue_req
-            end
-            if inspected.type == "native" then
-                if not self.native_set[inspected.path] then
-                    self.native_set[inspected.path] = true
-                    self.native_libs[#self.native_libs + 1] = inspected.path
-                end
-            elseif inspected.type == "lua" then
-                if not child_seen[inspected.path] then
-                    child_seen[inspected.path] = true
-                    children[#children + 1] = inspected.path
-                    self:analyzeRecursive(inspected.path)
+            if inspected.type ~= "builtin" then
+                if inspected.type == "native" then
+                    if not self.native_set[inspected.path] then
+                        self.native_set[inspected.path] = true
+                        self.native_libs[#self.native_libs + 1] = inspected.path
+                    end
+                elseif inspected.type == "lua" then
+                    if not child_seen[inspected.path] then
+                        child_seen[inspected.path] = true
+                        children[#children + 1] = inspected.path
+                        self:analyzeRecursive(inspected.path)
+                    end
                 end
             end
         elseif req.optional then
@@ -1185,7 +1183,6 @@ function DependencyAnalyzer:analyzeRecursive(script_path)
         else
             error(inspected.error)
         end
-        ::continue_req::
     end
 
     self.dep_graph[script_path] = children

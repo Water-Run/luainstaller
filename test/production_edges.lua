@@ -1006,7 +1006,7 @@ assert(require("swap") == 41)
     removeTree(root)
 end)
 
-test("runtime discovery rejects a non-5.4 interpreter", function()
+test("runtime discovery rejects a non-official Lua interpreter", function()
     if not os.execute("command -v luajit >/dev/null 2>&1") then
         return
     end

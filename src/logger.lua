@@ -13,6 +13,7 @@ Updated:
 
 local fs = require("luainstaller.fs")
 local process = require("luainstaller.process")
+local compat = require("luainstaller.compat")
 
 local LogLevel = {
     DEBUG   = "debug",
@@ -50,16 +51,17 @@ local function base64Encode(value)
         local first = value:byte(index)
         local second = value:byte(index + 1)
         local third = value:byte(index + 2)
-        local packed = (first << 16) | ((second or 0) << 8) | (third or 0)
-        output[#output + 1] = BASE64_ALPHABET:sub(((packed >> 18) & 63) + 1,
-            ((packed >> 18) & 63) + 1)
-        output[#output + 1] = BASE64_ALPHABET:sub(((packed >> 12) & 63) + 1,
-            ((packed >> 12) & 63) + 1)
+        local packed = first * 0x10000 + (second or 0) * 0x100 + (third or 0)
+        local first_index = math.floor(packed / 0x40000) % 64 + 1
+        local second_index = math.floor(packed / 0x1000) % 64 + 1
+        output[#output + 1] = BASE64_ALPHABET:sub(first_index, first_index)
+        output[#output + 1] = BASE64_ALPHABET:sub(second_index, second_index)
         output[#output + 1] = second
-            and BASE64_ALPHABET:sub(((packed >> 6) & 63) + 1, ((packed >> 6) & 63) + 1)
+            and BASE64_ALPHABET:sub(math.floor(packed / 0x40) % 64 + 1,
+                math.floor(packed / 0x40) % 64 + 1)
             or "="
         output[#output + 1] = third
-            and BASE64_ALPHABET:sub((packed & 63) + 1, (packed & 63) + 1)
+            and BASE64_ALPHABET:sub(packed % 64 + 1, packed % 64 + 1)
             or "="
     end
     return table.concat(output)
@@ -556,12 +558,12 @@ local function withLock(callback)
     if not lock_path then
         return false
     end
-    local packed = table.pack(pcall(callback, token))
+    local packed = compat.pack(pcall(callback, token))
     local released = removeOwnedLock(lock_path, token, release_token, owner_content)
     if not packed[1] or not released then
         return false
     end
-    return table.unpack(packed, 2, packed.n)
+    return compat.unpack(packed, 2, packed.n)
 end
 
 local function serializeValue(value, indent, seen)
@@ -679,7 +681,7 @@ local function parseLogContent(content, chunk_name)
     if type(content) ~= "string" or not content:match("^return%s") then
         return nil
     end
-    local chunk = load(content, chunk_name, "t", {})
+    local chunk = compat.loadText(content, chunk_name, {})
     if not chunk then
         return nil
     end

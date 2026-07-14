@@ -15,6 +15,8 @@ Updated:
     2026-07-11
 ]]
 
+local compat = require("luainstaller.compat")
+
 local M = {}
 
 local function loaderTable()
@@ -42,7 +44,10 @@ end
 
 local function loadPayloadSource(record, chunk_name)
     local source = M.stripSource(record.source or "")
-    local loader, err = load(source, chunk_name or ("@" .. tostring(record.path or "bundle")), "t")
+    local loader, err = compat.loadText(
+        source,
+        chunk_name or ("@" .. tostring(record.path or "bundle"))
+    )
     if not loader then
         error({
             type = "LoadError",
@@ -123,7 +128,7 @@ function M.run(payload, run_args)
     end
     _G.arg = runtime_arg
 
-    local results = table.pack(pcall(function()
+    local results = compat.pack(pcall(function()
         local entry_loader = loadPayloadSource(entry, "@" .. tostring(entry.path or entry.id or "__entry__"))
         return entry_loader()
     end))
@@ -138,7 +143,7 @@ function M.run(payload, run_args)
     if not uninstall_ok then
         error(uninstall_err, 0)
     end
-    return table.unpack(results, 2, results.n)
+    return compat.unpack(results, 2, results.n)
 end
 
 return M

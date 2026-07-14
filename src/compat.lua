@@ -157,10 +157,17 @@ function M.loadText(source, chunk_name, environment)
         end
         return loader, err
     end
+    if environment == nil then
+        return load(source, chunk_name, "t")
+    end
     return load(source, chunk_name, "t", environment)
 end
 
 M.unpack = table.unpack or unpack
+
+function M.pack(...)
+    return { n = select("#", ...), ... }
+end
 
 function M.searchpath(name, search_path, separator, replacement)
     if package.searchpath then
