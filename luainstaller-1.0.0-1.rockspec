@@ -30,7 +30,7 @@ description = {
 }
 
 dependencies = {
-    "lua >= 5.4, < 5.5",
+    "lua >= 5.1, < 6.0",
 }
 
 build = {

@@ -1,1 +1,7 @@
+*.lua text eol=lf
 *.sh text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.adoc text eol=lf
+*.rockspec text eol=lf
+*.txt text eol=lf

@@ -15,12 +15,17 @@ local platform = require("luainstaller.platform")
 
 local M = {}
 
-local function luaInfo()
+function M.luaVersion()
     local version = _VERSION or "Lua"
     local major, minor = version:match("Lua%s+(%d+)%.(%d+)")
+    major = tonumber(major)
+    minor = tonumber(minor)
     return {
         version = version,
         abi = major and minor and ("lua" .. major .. "." .. minor) or "unknown",
+        major = major,
+        minor = minor,
+        num = major and minor and (major * 100 + minor) or nil,
     }
 end
 
@@ -39,7 +44,7 @@ function M.diagnose(opts)
         target_os = opts.target_os,
         lua_prefix = opts.lua_prefix,
     })
-    local lua = luaInfo()
+    local lua = M.luaVersion()
     local library_count = countLibraries(opts.dependencies)
     local notes = {
         "does not claim universal cross-platform output",

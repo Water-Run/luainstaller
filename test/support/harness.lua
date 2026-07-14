@@ -13,6 +13,36 @@ Updated:
 ]]
 
 local M = {}
+local IS_WINDOWS = package.config:sub(1, 1) == "\\"
+
+local function quote_windows(value)
+    value = tostring(value or "")
+    if value == "" then
+        return '""'
+    end
+    if not value:find('[%s"]') then
+        return value
+    end
+    local output = { '"' }
+    local slashes = 0
+    for index = 1, #value do
+        local character = value:sub(index, index)
+        if character == "\\" then
+            slashes = slashes + 1
+        elseif character == '"' then
+            output[#output + 1] = string.rep("\\", slashes * 2 + 1)
+            output[#output + 1] = '"'
+            slashes = 0
+        else
+            output[#output + 1] = string.rep("\\", slashes)
+            output[#output + 1] = character
+            slashes = 0
+        end
+    end
+    output[#output + 1] = string.rep("\\", slashes * 2)
+    output[#output + 1] = '"'
+    return table.concat(output)
+end
 
 local PRELOADS = {
     { "luainstaller", "src/init.lua" },
@@ -59,7 +89,18 @@ harness.install_loader()
 end
 
 function M.shell_quote(value)
+    if IS_WINDOWS then
+        return quote_windows(value)
+    end
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+function M.command(executable, arguments)
+    local parts = { M.shell_quote(executable) }
+    for _, value in ipairs(arguments or {}) do
+        parts[#parts + 1] = M.shell_quote(value)
+    end
+    return table.concat(parts, " ")
 end
 
 function M.run(command)
@@ -70,6 +111,22 @@ function M.run(command)
         error("command failed (" .. tostring(code) .. "): " .. command .. "\n" .. output, 2)
     end
     return output
+end
+
+function M.lua_command()
+    local configured = os.getenv("LUAI_TEST_LUA")
+    if configured and configured ~= "" then
+        return configured
+    end
+    local current = arg and arg[-1]
+    if current and current ~= "" then
+        return current
+    end
+    return "lua"
+end
+
+function M.run_lua(arguments)
+    return M.run(M.command(M.lua_command(), arguments))
 end
 
 function M.command_output_trimmed(command)
