@@ -10,8 +10,8 @@ Match the surrounding file when a rule does not settle a formatting choice.
 Lua files
 ---------
 
-* Target Lua 5.4 or newer. Do not add compatibility branches for older Lua
-  releases unless the package dependency changes first.
+* Target official Lua 5.1 through 5.5 without using syntax unavailable in Lua
+  5.1. Reject LuaJIT explicitly where an interpreter or ABI is selected.
 * Indent with four spaces. Do not use tabs or trailing whitespace.
 * Keep lines readable; split long command construction and error tables by
   meaning rather than at an arbitrary column.
@@ -78,7 +78,8 @@ Generated C
 
 * Keep the standalone launcher template and the embedded default synchronized.
 * Use bounded writes and check every buffer length.
-* Preserve platform branches for Linux, macOS, and Windows.
+* Preserve native-host branches and the tested Linux, macOS, and Windows
+  backends without treating the tested device matrix as a platform allowlist.
 * Follow the target runtime's argument quoting rules; POSIX and Windows command
   lines are not interchangeable.
 * Any extractor path must remain below its private root after normalization.
@@ -121,13 +122,14 @@ Documentation
 Required checks
 ---------------
 
-    find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
+    find src -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
     find tools -type f -name '*.sh' -print0 | xargs -0 -n1 sh -n
     git diff --check
     lua test/cli_split_smoke.lua
     lua test/contract_docs.lua
     lua test/smoke_all.lua
 
-Generated-C, native-module, or platform changes also require the applicable
-Linux x86_64, Linux ARM64, macOS ARM64, Wine, and Windows VM checks described in
-docs/TESTING.adoc.
+Generated-C, native-module, or platform changes also require the physical-host
+Lua-version matrix described in docs/TESTING.adoc: Windows x86_64, Linux
+x86_64/ARM64, Mac mini, and Mac Studio. No VM, Wine, or cross-build result may
+substitute for a native-host pass.

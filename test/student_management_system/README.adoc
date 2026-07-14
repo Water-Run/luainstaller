@@ -12,7 +12,8 @@ luarocks install lua-cjson
 lua -e 'require("cjson"); print("cjson ok")'
 ----
 
-The native `cjson` module must match Lua 5.4 and the target architecture.
+The native `cjson` module must match the Lua major/minor ABI used for the build
+and the target architecture.
 
 == Files
 

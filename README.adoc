@@ -16,11 +16,12 @@ The project provides two command names:
 
 Both commands call the same Lua API and produce the same bundles.
 
-The supported interpreter range is Lua `>= 5.4` and `< 5.5`; in practice every
-installer, discovery process, header set, and linked runtime must identify as
-Lua 5.4. LuaJIT and other Lua major/minor ABIs are rejected. A linked-runtime
-probe runs before publication; Windows cross-builds therefore require Wine in
-addition to MinGW.
+The supported interpreter range is official Lua `>= 5.1` and `< 6.0`.
+LuaJIT is rejected. Analysis, headers, linked runtime, and native modules must
+all use the same Lua major/minor ABI as the interpreter running luainstaller.
+The project is tested with the upstream patch releases 5.1.5, 5.2.4, 5.3.6,
+5.4.8, and 5.5.0. Those versions and the devices listed below are test
+coverage, not an allowlist.
 
 toc::[]
 
@@ -35,21 +36,14 @@ luarocks install luainstaller
 luai -v
 ----
 
-Or install directly from a checkout:
-
-[source,sh]
-----
-sh tools/install-source.sh --prefix "$HOME/.local"
-export PATH="$HOME/.local/bin:$PATH"
-luainstaller version
-----
-
 Start with the small runtime sample. Build the directory form first because it
 keeps the manifest, generated C source, and copied native libraries visible.
+In shell examples, set `LUA` to the official interpreter being packaged.
 
 [source,sh]
 ----
-lua test/runtime_bundle/main.lua direct
+LUA=${LUA:-lua}
+$LUA test/runtime_bundle/main.lua direct
 luai -a test/runtime_bundle/main.lua --max-deps 120
 luai -t test/runtime_bundle/main.lua --max-deps 120
 luai -b --dir test/runtime_bundle/main.lua \
@@ -79,38 +73,53 @@ target environments must agree on all four of these boundaries:
 * system and compiler ABI;
 * Lua major/minor ABI.
 
-The generated launcher enforces `LUA_VERSION_NUM == 504`, and Linux additionally
-requires `pkg-config --modversion lua` to report 5.4. This is a same-environment
-packager, not a hermetic sandbox: embedded modules win, but an undeclared module
-may fall through to the target host's normal Lua/native searchers. Always run a
-release candidate once with `LUA_PATH` and `LUA_CPATH` cleared.
+The generated launcher derives its compile-time guard and module paths from the
+active Lua ABI. Toolchain discovery verifies that headers, library, and linked
+runtime report the same ABI before publication. This is a native-host packager,
+not a cross-compiler or a hermetic sandbox: embedded modules win, but an
+undeclared module may fall through to the target host's normal Lua/native
+searchers. Always run a release candidate once with `LUA_PATH` and `LUA_CPATH`
+cleared and without Lua on `PATH`.
 
 Pure-Lua modules are embedded in the launcher. Lua C modules are copied into the
 bundle, but their dependent system libraries are not discovered recursively.
 Check them with `ldd`, `otool -L`, or a Windows dependency viewer before release.
 
-Current target profiles are:
+The following physical devices are in the release test matrix:
 
-[cols="1,2,3",options="header"]
+[cols="1,2,2",options="header"]
 |===
-|Target |Build profile |Release test environment
+|Device |Tested system |Architecture
 
-|Linux x86_64
-|Shared Lua runtime
-|Native Linux x86_64 host
+|Local workstation
+|Windows 11 Pro for Workstations
+|x86_64
 
-|Linux ARM64
-|Shared Lua runtime
-|NVIDIA DGX Spark (`aarch64`)
+|`yynicepc`
+|Debian 13
+|x86_64
 
-|macOS ARM64
-|Static Lua launcher
-|Apple Silicon Mac Studio
+|`localhost.localdomain`
+|Rocky Linux 10.2
+|x86_64
 
-|Windows x86_64
-|MinGW launcher with Lua DLL
-|Wine and Windows 10 x64 VM
+|NVIDIA DGX Spark (`spark-49c8`)
+|Ubuntu 24.04 LTS
+|ARM64
+
+|`yymac06` Mac mini
+|macOS 26.5
+|ARM64
+
+|`yymacstudio` Mac Studio
+|macOS 26.5.1
+|ARM64
 |===
+
+This matrix records where releases were exercised; it does not say that
+luainstaller can run only on these models, distributions, or OS versions.
+Every bundle is built on the native target OS and architecture. There is no
+cross-build mode.
 
 See xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules] for
 toolchain requirements and unsupported combinations.
@@ -176,12 +185,14 @@ From the repository root:
 
 [source,sh]
 ----
-find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
+LUA=${LUA:-lua}
+LUAC=${LUAC:-luac}
+find src -type f -name '*.lua' -print0 | xargs -0 -n1 "$LUAC" -p
 for script in tools/*.sh; do sh -n "$script"; done
-lua test/cli_split_smoke.lua
-lua test/contract_docs.lua
-lua test/production_edges.lua
-lua test/smoke_all.lua
+"$LUA" test/cli_split_smoke.lua
+"$LUA" test/contract_docs.lua
+"$LUA" test/production_edges.lua
+"$LUA" test/smoke_all.lua
 luarocks lint luainstaller-1.0.0-1.rockspec
 ----
 

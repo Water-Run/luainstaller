@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-11
+    2026-07-14
 ]]
 
 local function localFileExists(path)
@@ -152,9 +152,9 @@ Options:
   -o, --out <path>      output path
   --include <path>      include an extra file
   --exclude <path>      exclude a dependency
-  --target-os <os>      linux, macos, or windows
+  --target-os <os>      assert the detected native host OS
   --lua <path>          Lua interpreter for runtime discovery
-  --lua-prefix <path>   Lua prefix for profiled targets
+  --lua-prefix <path>   matching native Lua headers/runtime prefix
   -d, --discovery-mode <mode>
                         static, manual, or runtime
   --no-depscan          manual dependencies only
@@ -184,9 +184,9 @@ Build options:
   -o, --out <path>             Output path.
   --include <path>             Include an extra file; repeatable.
   --exclude <path>             Exclude a dependency; repeatable.
-  --target-os <os>             Target profile: linux, macos, or windows.
+  --target-os <os>             Assert the detected native host OS.
   --lua <path>                 Lua interpreter for runtime discovery.
-  --lua-prefix <path>          Lua prefix for profiled targets.
+  --lua-prefix <path>          Matching native Lua headers/runtime prefix.
   -d, --discovery-mode <mode>
                                Dependency discovery mode: static, manual, runtime.
   --no-depscan                 Manual dependencies only.

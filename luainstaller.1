@@ -37,13 +37,13 @@ The output is not a universal executable. The target must match the selected
 operating-system family, CPU architecture, system ABI, and Lua ABI. External
 shared libraries required by Lua C modules are not copied automatically.
 .PP
-Lua 5.4 is the only supported interpreter ABI. Source installation, runtime
-discovery, generated headers, pkg-config metadata, linked runtimes, and native
-modules must all match Lua 5.4. LuaJIT and Lua 5.5 are rejected.
+Official Lua 5.1 or newer within the 5.x series is supported. Runtime
+discovery, generated headers, linked runtimes, and native modules must all
+match the interpreter's Lua major/minor ABI. LuaJIT is rejected.
 .PP
-Before publishing, every profile compiles and executes a linked-runtime probe;
-Windows runs that probe under Wine. Generated launchers repeat the runtime
-version check when started.
+Before publishing, every native backend compiles and executes a linked-runtime
+probe on the build host. Generated launchers repeat the runtime version check
+when started. Cross-building is not provided.
 .PP
 .B luai
 and
@@ -118,18 +118,14 @@ Set the maximum discovered Lua source dependency count. Default: 36.
 .TP
 .BI \-\-lua " path"
 Select the Lua interpreter used by runtime discovery. It must report exactly
-Lua 5.4.
+an official Lua 5.x version at least Lua 5.1.
 .TP
 .BI \-\-target-os " os"
-Select
-.BR linux ,
-.BR macos ,
-or
-.B windows
-build profile.
+Assert the detected native host OS. A different OS is rejected; this option
+does not enable cross-building.
 .TP
 .BI \-\-lua-prefix " path"
-Select the Lua headers/runtime prefix used by profiled targets.
+Select matching native Lua headers and runtime files.
 .TP
 .B \-\-verbose
 Print additional trace or bundle counts.
@@ -170,7 +166,7 @@ Execute the entry under a temporary require tracer. Only executed branches are
 observed. Successfully loaded modules are retained; missing modules caught by
 the application with
 .B pcall
-remain optional. Lua 5.4 loader data records the path actually selected by
+remain optional. Loader data, when available, records the path actually selected by
 .BR require ;
 incomplete or duplicate completion output is rejected.
 .TP
@@ -199,13 +195,6 @@ Trace a computed dependency path with build-time arguments:
 .PP
 .nf
 luai \-t app/main.lua \-d runtime \-\- profile_a input.json
-.fi
-.PP
-Cross-build a Windows x86_64 profile from Linux:
-.PP
-.nf
-luainstaller build app/main.lua \-\-target-os windows \\
-  \-\-lua-prefix /opt/windows-lua54 \-o build/app
 .fi
 .SH OUTPUT
 An onedir bundle contains the native executable and a hidden
@@ -242,18 +231,14 @@ cleared.
 .SH ENVIRONMENT
 .TP
 .B LUAI_LUA
-Default interpreter for runtime discovery and source-installed wrappers. A
-source-installed wrapper rejects an override that is not Lua 5.4.
+Default interpreter for runtime discovery. A selected interpreter that is not
+official Lua 5.1 or newer is rejected.
 .TP
 .B LUAI_LUA_PREFIX
-Default Lua prefix for profiled builds.
+Default matching native Lua headers/runtime prefix.
 .TP
 .B LUAI_TARGET_OS
-Default target profile when the API option is absent.
-.TP
-.B LUAI_WINDOWS_CC
-Windows cross-compiler command. Default:
-.BR x86_64-w64-mingw32-gcc .
+Optional assertion for the detected native host OS.
 .TP
 .B LUA_PATH, LUA_CPATH
 Search paths used during dependency discovery. Clear them when verifying that a
@@ -287,14 +272,8 @@ application failure returns nonzero.
 luarocks install luainstaller
 .fi
 .PP
-From a source checkout:
-.PP
-.nf
-sh tools/install-source.sh \-\-prefix "$HOME/.local"
-.fi
-.PP
-The source installer checks for Lua 5.4 before writing the prefix. LuaRocks
-metadata constrains Lua to versions at least 5.4 and below 5.5.
+LuaRocks is the supported installation path. Package metadata requires Lua
+versions at least 5.1 and below 6.0; luainstaller rejects LuaJIT when used.
 .SH LUA API
 The module
 .B luainstaller

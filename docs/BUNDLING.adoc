@@ -26,7 +26,7 @@ app/
     ├── generated-output.txt
     ├── manifest.lua
     └── native/
-        ├── liblua-5.4.so        # shared-Lua profiles
+        ├── liblua-5.x.so        # active shared-Lua ABI
         └── module.so            # when required
 ----
 
@@ -145,7 +145,8 @@ The launcher RPATH handles the copied Lua runtime. It does not copy every shared
 library referenced by a Lua C module. Those external dependencies remain a
 release responsibility. The runtime destination is reserved and cannot be
 overwritten by a same-named native module. Before publication, a linked probe
-must report exactly `Lua 5.4` (under Wine for a Windows target).
+must report the same `Lua 5.x` ABI as the build interpreter. The probe always
+runs natively on the build host.
 
 [#bundling-manifest]
 == Manifest

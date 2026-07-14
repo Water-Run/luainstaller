@@ -6,322 +6,189 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Run commands from the repository root. A skipped native or remote check is not
-a release pass unless the release explicitly excludes that target.
+This guide defines the checks required before a release. All release targets
+are physical native hosts; the project does not use a VM, Wine, MinGW, or a
+cross-compiler as release evidence.
 
 toc::[]
 
 [#testing-local]
-== Local baseline
+== Local contract suites
+
+Run from the repository root with the official Lua interpreter under test:
 
 [source,sh]
 ----
-find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-for script in tools/*.sh; do sh -n "$script"; done
-git diff --check
+LUA=${LUA:-lua}
+"$LUA" test/cli_split_smoke.lua
+"$LUA" test/contract_docs.lua
+"$LUA" test/production_edges.lua
+"$LUA" test/smoke_all.lua
 luarocks lint luainstaller-1.0.0-1.rockspec
-
-lua test/cli_split_smoke.lua
-lua test/contract_docs.lua
-LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 lua test/production_edges.lua
-lua test/smoke_all.lua
 ----
 
-The four Lua entry points have different purposes:
-
-`test/cli_split_smoke.lua`::
+`cli_split_smoke.lua`::
 Checks that `luai` accepts only its flag grammar and `luainstaller` accepts only
-its word-command grammar.
+its descriptive grammar.
 
-`test/contract_docs.lua`::
-Exercises behavior promised by public documentation: discovery modes,
-include/exclude rules, option validation, output ownership, manifests, bundled
-searcher order, logs, and the documentation index.
+`contract_docs.lua`::
+Turns public documentation promises into executable contracts.
 
-`test/production_edges.lua`::
-Exercises fail-closed production boundaries: Lua lexical/syntax cases, checked
-I/O, source mutation, module aliases, runtime loader paths, recursive SHA-256
-ownership, target path collisions, compiler ABI checks, deterministic onefile
-output/cache repair, concurrent logs, installer rejection, and remote-script
-safety contracts.
+`production_edges.lua`::
+Exercises fail-closed filesystem handling, checked I/O, source snapshots,
+SHA-256 ownership, output transactions, runtime tracing, logs, remote-script
+safety, and deterministic onefile behavior.
 
-`test/smoke_all.lua`::
-Runs the broader packaging audit, including realistic samples, generated C,
-installed commands, source installation, onedir/onefile, native modules,
-runtime cache safety, failed rebuild preservation, and clean-environment runs.
+`smoke_all.lua`::
+Runs the broad API, sample, dependency-discovery, generated-C, onedir, and
+onefile suite.
 
-[#testing-smoke]
-== What smoke_all must prove
+Tests under `test/` may use syntax from the interpreter selected for that
+particular suite. All production files under `src/` must parse on every
+supported Lua major/minor version.
 
-The suite is expected to exercise all of these areas:
+[#testing-luarocks]
+== Installation contract
 
-* source files meet syntax and project header rules;
-* sample applications run before packaging;
-* literal, optional, escaped, local-bound, dynamic, runtime, and manual
-  dependency cases behave as documented;
-* public API failures are structured and logged;
-* generated C compiles and forwards `arg`;
-* an onedir bundle runs without host `LUA_PATH`/`LUA_CPATH`;
-* a native onedir still works when reached through `PATH` and a symlink;
-* onefile reuses matching cache files, repairs executable mode, rejects unsafe
-  cache permissions, parent symlinks, and non-sticky writable TMPDIR ancestors,
-  while accepting a canonicalizable private or sticky TMPDIR;
-* a toolchain failure during rebuild preserves the previous executable;
-* source-installed and LuaRocks-installed command layouts can build a bundle.
-
-The production-edge suite additionally compiles captured launcher/extractor C
-with strict GCC/Clang flags, executes ASan/UBSan builds where available, proves
-repeated onefile bytes are identical, and runs a 60-process logging contention
-case. No filtered `EDGE_FILTER` run substitutes for the unfiltered release run.
-
-Read skips in context. `cc`, `pkg-config`, `readelf`, `curl`, LuaRocks, and
-sample native dependencies enable deeper branches. On the primary release host
-these dependencies should be installed so the branches execute rather than
-skip.
-
-[#testing-samples]
-== Sample applications
-
-`test/single_file/`::
-Small Lua programs used for fast syntax and entry packaging coverage.
-
-`test/runtime_bundle/`::
-Minimal multi-file payload used for launcher, onedir, and onefile checks.
-
-`test/student_management_system/`::
-JSON-backed CLI application; covers multi-file Lua and `cjson`.
-
-`test/savinglua/`::
-SQLite-backed key/value application; covers multiple native dependencies.
-
-`test/ltokei/`::
-Filesystem-based source statistics application.
-
-`test/firebird_web_sql/`::
-HTTP application with authentication and status probe; covers LuaSocket,
-Pegasus, native modules, child process lifetime, and network readiness.
-
-Shared test utilities are under `test/support/`. Add reusable process, fixture,
-and assertion helpers there instead of copying them between contract suites.
-
-[#testing-install]
-== Installation checks
-
-Source install into an isolated prefix:
+LuaRocks is the only supported installation path:
 
 [source,sh]
 ----
-prefix=$(mktemp -d /tmp/luainstaller-prefix.XXXXXX)
-sh tools/install-source.sh --prefix "$prefix"
-"$prefix/bin/luai" -v
-"$prefix/bin/luainstaller" build --dir \
-  test/runtime_bundle/main.lua -o "$prefix/runtime" --max-deps 120
-env -i PATH=/usr/bin:/bin "$prefix/runtime/runtime" source-install
+luarocks install luainstaller
+luai -v
+luainstaller version
 ----
 
-The installer checks `_VERSION` before creating the prefix and requires exactly
-Lua 5.4. Installed wrappers repeat that check for `LUAI_LUA`; include a negative
-LuaJIT or older-Lua probe when changing installation code.
+The release test installs into an isolated tree, invokes both installed command
+names from outside the checkout, builds an outside-checkout application, then
+runs the generated executable with `LUA_PATH`, `LUA_CPATH`, and Lua-bearing
+`PATH` entries cleared. A missing LuaRocks command is a failure, not a skip.
 
-LuaRocks packaging metadata:
+[#testing-version-matrix]
+== Official Lua 5.x matrix
+
+The pinned matrix covers these upstream patch releases:
+
+[cols="1,2",options="header"]
+|===
+|ABI |Tested patch release
+|Lua 5.1 |5.1.5
+|Lua 5.2 |5.2.4
+|Lua 5.3 |5.3.6
+|Lua 5.4 |5.4.8
+|Lua 5.5 |5.5.0
+|===
+
+The runners verify SHA-256 before extracting any source archive. Per version,
+they check production-source syntax, version rejection (including LuaJIT), CLI
+behavior, LuaRocks installation, native toolchain ABI, onedir, onefile,
+reproducibility, and clean-target execution.
+
+On Linux or macOS:
 
 [source,sh]
 ----
-luarocks lint luainstaller-1.0.0-1.rockspec
-luarocks make luainstaller-1.0.0-1.rockspec --tree /tmp/luainstaller-rocktree
+HOST_LABEL=my-physical-host sh tools/test-lua-versions.sh
 ----
 
-Before tagging, confirm that the rockspec version, module version, CLI version,
-manual page, and intended Git tag agree.
+On Windows:
 
-[#testing-linux]
-== Linux x86_64 and ARM64
+[source,powershell]
+----
+powershell.exe -NoLogo -NoProfile -NonInteractive `
+  -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1 `
+  -HostLabel my-physical-windows-host
+----
+
+`VersionFilter` may shorten a diagnostic rerun, but a release requires all five
+pins. Evidence is written as one log per host and Lua patch version below a
+guarded `luainstaller-*` temporary directory.
+
+[#testing-physical]
+== Physical host matrix
+
+[cols="2,2,1,3",options="header"]
+|===
+|Device |Tested system |Architecture |Required coverage
+
+|Local `WATERRUN`
+|Windows 11 Pro for Workstations
+|x86_64
+|PowerShell matrix, MSVC/Windows SDK, runtime discovery, LuaRocks commands,
+native DLL launcher, onedir, onefile, clean target
+
+|`yynicepc`
+|Debian 13
+|x86_64
+|Five-version GNU matrix and clean target
+
+|`localhost.localdomain`
+|Rocky Linux 10.2
+|x86_64
+|Five-version matrix plus full local contract and sample suites
+
+|NVIDIA DGX Spark `spark-49c8`
+|Ubuntu 24.04 LTS
+|ARM64
+|Five-version native ARM64 matrix and native-module samples
+
+|`yymac06` Mac mini
+|macOS 26.5
+|ARM64
+|Five-version Apple toolchain matrix, static Lua, onedir, onefile
+
+|`yymacstudio` Mac Studio
+|macOS 26.5.1
+|ARM64
+|Independent five-version reproduction and sample coverage
+|===
+
+This table lists tested devices only. It must not be read as a restriction to
+those distributions, versions, or computer models.
+
+[#testing-orchestration]
+== Lab orchestration
+
+Linux physical hosts:
 
 [source,sh]
 ----
 sh tools/remote-test-linux.sh
 ----
 
-The script copies the checkout to both targets. On x86_64 it runs the complete
-local suite (including `test/production_edges.lua`), source install, onedir
-build, and a clean-environment execution. Smoke output containing `skipped` is
-a gate failure.
-
-The ARM64 target does not depend on system Lua development packages. The script
-stages isolated Lua 5.4.8 and LuaRocks prefixes under `/tmp`, installs pinned
-cjson, LuaFileSystem, LuaSocket, mimetypes, Pegasus, and lsqlite3, and runs the
-complete smoke and documentation suites. It also verifies a real ARM64 onedir
-launcher through its path and a symlink, a onefile launcher in a clean
-environment, 12 concurrent cache users, and executable-mode repair. A
-`ToolchainError` is a failure, not an accepted ARM result.
-
-Defaults can be overridden with `LINUX_X64`, `LINUX_X64_PORT`, `LINUX_ARM64`,
-`REMOTE_ROOT`, `SOURCE_CACHE`, `ARM_LUA_PREFIX`, `ARM_LUAROCKS_PREFIX`, and
-`ARM_ROCKTREE`.
-
-Every destructive override must be a normalized, conservatively named
-`/tmp/luainstaller-*` path. `/`, traversal such as `/../`, symbolic-link source
-caches, foreign-owned caches, and unsafe characters abort before SSH or
-deletion. Repository transfer is built from `git ls-files -z`, so untracked
-credentials and local artifacts are not archived.
-
-[#testing-macos]
-== macOS ARM64
+macOS physical hosts (run once for each alias):
 
 [source,sh]
 ----
+MAC_HOST=yymac06 sh tools/remote-test-macos.sh
 MAC_HOST=yymacstudio sh tools/remote-test-macos.sh
 ----
 
-The script reaches the Mac through `BASTION`/`BASTION_PORT`, stages source
-archives, and builds isolated Lua 5.4.8 and LuaRocks prefixes under `/tmp`. It
-installs or builds pinned `cjson`, LuaFileSystem, LuaSocket, mimetypes, Pegasus,
-and `lsqlite3`, then verifies:
+Windows runs directly on the Windows machine with
+`tools/test-lua-versions.ps1`. `tools/remote-test-windows.sh` is only a small
+compatibility launcher for a POSIX environment that already provides `pwsh`;
+it contains no SSH or cross-build workflow.
 
-* `test/cli_split_smoke.lua`, `test/contract_docs.lua`, and
-  `test/smoke_all.lua` with the isolated Lua 5.4 runtime and pinned rocks;
-* pure-Lua and JSON applications as onedir;
-* runtime and student applications as onefile;
-* SQLite storage;
-* filesystem statistics;
-* authenticated Web status endpoint.
-
-The test also compiles the macOS-specific executable-path code and exercises the
-system `/tmp` symlink through onefile extraction.
-
-`REMOTE_ROOT`, `LUA_PREFIX`, `LUAROCKS_PREFIX`, `ROCKTREE`, `PREFIX`, and
-`SOURCE_CACHE` use the same normalized `/tmp/luainstaller-*` guard as Linux.
-
-[#testing-windows]
-== Windows x86_64
-
-[source,sh]
-----
-# Add the lab host key through a verified channel, then confirm it is present.
-ssh-keygen -F 192.168.69.130
-sh tools/remote-test-windows.sh
-
-# Password mode is optional when key authentication is unavailable.
-WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
-----
-
-The Windows gate also exercises an ACP-representable non-ASCII filesystem path,
-logger state below a home path containing legal shell metacharacters, and a
-onefile child kept alive while attempts to rename its payload root, module
-directory, and manifest must fail because the extractor retains
-no-delete/no-write handles.
-
-The script builds a Windows Lua 5.4.8 toolchain and native dependencies with
-MinGW. It first executes the bundle matrix under Wine, then uploads the same
-archive and PowerShell runner to each entry in `WINDOWS_TARGETS`.
-`REMOTE_TEMP` selects the same validated directory for upload and extraction;
-the runner refuses reparse-point or non-directory components in that staging
-path before recursive cleanup.
-
-Coverage includes runtime, student management, SQLite, filesystem statistics,
-and the Web service. Both onedir and onefile run with `LUA_PATH` and `LUA_CPATH`
-cleared on Windows. The onefile runtime also verifies that an argument
-containing Windows backslashes and a space survives child-process forwarding.
-The clean-environment probe also distinguishes regular files from directories,
-junctions, and device names, then performs a persistent logger write/read/clear
-cycle without relying on PowerShell being present in `PATH`.
-
-Every SSH and SCP invocation supplies `StrictHostKeyChecking=yes`. Arbitrary
-`SSH_OPTS` and `SSH_KEY_OPTS` lists are rejected completely so an SSH config,
-known-hosts command, or other trust-policy option cannot bypass that setting.
-Use the typed `SSH_PORT` and optional non-symlink `SSH_IDENTITY_FILE` variables
-when the defaults are unsuitable. The script never accepts a new or changed
-host key automatically. With no `WINDOWS_PASSWORD`, SSH and SCP use direct key
-authentication plus batch mode. Password mode wraps only those commands with
-`sshpass -e`, keeping the secret out of command arguments.
-
-To run the local MinGW/Wine half without claiming a remote pass:
-
-[source,sh]
-----
-WINDOWS_LOCAL_ONLY=1 sh tools/remote-test-windows.sh
-----
-
-The command prints `windows local Wine gate ok` and exits before SSH. It does
-not require `WINDOWS_TARGETS`, SSH/SCP tools, an identity, or `sshpass`. A
-release still requires a second run without `WINDOWS_LOCAL_ONLY=1` against
-every entry in nonempty `WINDOWS_TARGETS`.
-
-The default target is the lab Windows 10 VM. Start the VM and wait for SSH
-before running the script; restore its original power state afterward. Wine is
-required but does not replace the VM result.
-
-[#testing-source-pins]
-== Remote source integrity
-
-Linux, macOS, and Windows scripts verify every cached file and every fresh
-download with SHA-256 before atomic rename. The pinned upstream digests are:
-
-[cols="2,3,4",options="header"]
-|===
-|Archive |Official URL |SHA-256
-
-|Lua 5.4.8
-|`https://www.lua.org/ftp/lua-5.4.8.tar.gz`
-|`4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae`
-
-|LuaRocks 3.12.2
-|`https://luarocks.org/releases/luarocks-3.12.2.tar.gz`
-|`b0e0c85205841ddd7be485f53d6125766d18a81d226588d2366931e9a1484492`
-
-|lsqlite3 v0.9.6 source archive
-|`https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6`
-|`ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82`
-
-|SQLite 3.53.2 amalgamation
-|`https://www.sqlite.org/2026/sqlite-amalgamation-3530200.zip`
-|`8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32`
-|===
-
-When an upstream version changes, obtain the archive from the documented
-official URL, verify it independently, update the filename, version pin, and
-digest together, then rerun every affected architecture. Never “fix” a mismatch
-by replacing only the digest of an unexplained cached file.
-
-[#testing-generated-c]
-== Generated C review
-
-When changing `src/launcher.lua` or the extractor template in `src/onefile.lua`:
-
-* compile on Linux with `-std=c11 -Wall -Wextra -Werror -pedantic` where the
-  platform headers permit it;
-* compile the Windows form with the configured MinGW compiler;
-* compile the macOS form on macOS, not by inspection alone;
-* run argument forwarding and executable-location tests;
-* rerun the full remote matrix because preprocessor branches differ.
-
-Warnings emitted by third-party sources should be identified by source path and
-kept separate from warnings in generated project code.
+Linux and macOS orchestration transfer `git archive --format=tar HEAD`, not an
+untracked working tree. Temporary and cache roots must be normalized children
+of `/tmp/luainstaller-*`, and archive downloads must match their pinned digest.
 
 [#testing-release]
 == Release checklist
 
-. Worktree contents are understood; unrelated user changes are preserved.
-. Lua and Shell syntax checks pass.
-. CLI, documentation, production-edge, and full smoke suites pass unfiltered
-  without unexplained skips.
-. The rockspec lints and installs into an empty tree.
-. Linux x86_64 and ARM64 compile and execute.
-. macOS ARM64 native, onedir, onefile, and Web probes pass.
-. Windows final binaries pass under Wine and Windows VM.
-. A native bundle runs with Lua environment variables cleared.
-. Failed rebuild leaves the previous onedir runnable.
-. Onefile cache permission and symlink defenses are exercised.
-. Repeated onefile builds are byte-identical and logger contention passes three
-  consecutive runs.
-. Generated C is warning-clean under strict flags and sanitizer execution has no
-  findings.
-. Remote source hashes, tracked-tree archives, safe temporary roots, and strict
-  SSH host keys are verified.
-. Documentation commands match the final CLI and output layout.
-. Version strings, tag, license, and release notes agree.
-
-Save the command output used for the release decision. A green result from an
-older commit is not evidence for the current tree.
+. LuaRocks lint passes and installation from the rockspec works in an isolated
+  tree.
+. Production Lua source parses on every pinned official Lua version.
+. Full local contract suites pass without a required skip.
+. All five Lua versions pass on every listed physical host.
+. Each native onedir and onefile output runs with no Lua command or Lua module
+  paths available on the target.
+. Repeated onefile builds and repeated extraction checks pass.
+. Copied native modules and external system libraries are inspected on their
+  actual target.
+. Documentation contains no instruction that requires source installation,
+  cross-building, Wine, a VM, MinGW, or a device allowlist.
+. `git diff --check` and the final clean-checkout verification pass before the
+  release commit is pushed.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

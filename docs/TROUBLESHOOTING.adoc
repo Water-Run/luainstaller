@@ -90,10 +90,11 @@ replacement.
 
 `ToolchainError`::
 A required compiler, Lua prefix, shared runtime, or `pkg-config` record is
-missing or does not identify Lua 5.4. Check both `pkg-config --modversion lua`
+missing or does not identify the active Lua major/minor ABI. Check both
+`pkg-config --modversion lua`
 and the header's `LUA_VERSION_NUM`; a plausible library filename is not enough.
-The linked-runtime probe must also report `Lua 5.4`. Windows builds require Wine
-to run this probe before publication.
+The linked-runtime probe must report the same `Lua 5.x` result as the build
+interpreter. It runs directly on the native build host.
 
 `CompilationFailedError`::
 The compiler ran but failed. Read the captured command and output from the first
@@ -157,8 +158,8 @@ profiles or add manual includes for modules loaded on later branches.
 A missing module caught by the application's `pcall` is not treated as a
 dependency. A different runtime error inside a module still fails tracing.
 
-Lua 5.4 returns loader data from a successful `require`. The tracer uses that
-real selected file path when available, including after the entry changes
+When a supported Lua runtime returns loader data from a successful `require`,
+the tracer uses that real selected file path when available, including after the entry changes
 `package.path`, and snapshots Lua source at the loader boundary. Native loader
 paths are rejected because reads around `dlopen` cannot identify the exact
 mapped bytes; use static discovery for literal native dependencies. A preloaded
@@ -201,16 +202,17 @@ file "$LUA_PREFIX/lib/liblua.a"
 The prefix and native Lua modules must contain the target architecture. An
 x86_64 archive does not satisfy an ARM64 build.
 
-=== Windows profile
+=== Windows
 
-[source,sh]
+[source,powershell]
 ----
-x86_64-w64-mingw32-gcc --version
-find "$LUA_PREFIX" -type f -name 'lua54.dll' -print
+cl.exe
+Get-ChildItem $env:LUAI_LUA_PREFIX -Recurse -Filter 'lua*.dll'
 ----
 
-The current profile requires a Linux host, MinGW x86_64 compiler, headers, and
-a compatible Lua DLL.
+Run from a native developer environment with MSVC, the Windows SDK, matching
+Lua headers/import library, and the ABI-specific Lua DLL. Cross-compilation,
+MinGW, and Wine are not part of the build path.
 
 [#troubleshooting-native]
 == Bundle starts, then a native module fails

@@ -13,7 +13,8 @@ luarocks install lsqlite3
 lua -e 'require("cjson"); require("lsqlite3"); print("dependencies ok")'
 ----
 
-Both native modules must match Lua 5.4 and the target ABI.
+Both native modules must match the Lua major/minor ABI used for the build and
+the target's native ABI.
 
 == Use
 

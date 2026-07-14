@@ -18,7 +18,7 @@ manifests, bundled searcher order, logs, and documentation navigation.
 `production_edges.lua`::
 Checks production failure boundaries: syntax and lexer edge cases, checked I/O,
 source snapshots, recursive SHA-256 ownership, target paths and Lua ABI,
-deterministic onefile extraction, concurrent logs, source installation, and
+deterministic onefile extraction, concurrent logs, LuaRocks installation, and
 remote-script safety.
 
 `smoke_all.lua`::
@@ -26,18 +26,44 @@ Runs the comprehensive local audit: syntax, samples, API, generated C,
 installation layouts, onedir, onefile, native dependencies, safety regressions,
 and clean-environment execution.
 
+`version_contract.lua` and native integration tests::
+Verify the official Lua 5.1 through 5.5 contract, the selected native compiler
+and Lua ABI, onedir and onefile output, deterministic extraction, installed
+LuaRocks commands, and execution on a target whose `PATH` contains no Lua.
+
 `support/`::
 Shared fixture, process, loader, and assertion helpers for the contract suites.
 
-Run all four from the repository root:
+Run the local contract suites from the repository root with the Lua interpreter
+being tested (shown as `$LUA` below):
 
 [source,sh]
 ----
-lua test/cli_split_smoke.lua
-lua test/contract_docs.lua
-lua test/production_edges.lua
-lua test/smoke_all.lua
+$LUA test/cli_split_smoke.lua
+$LUA test/contract_docs.lua
+$LUA test/production_edges.lua
+$LUA test/smoke_all.lua
 ----
+
+Run the pinned compatibility matrix with the native toolchain on the current
+physical host:
+
+[source,sh]
+----
+HOST_LABEL=my-linux-or-mac sh tools/test-lua-versions.sh
+----
+
+[source,powershell]
+----
+powershell.exe -NoLogo -NoProfile -NonInteractive `
+  -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1 `
+  -HostLabel my-windows
+----
+
+Both matrix runners download the official Lua 5.1.5, 5.2.4, 5.3.6, 5.4.8,
+and 5.5.0 sources, verify pinned SHA-256 digests, and write per-version evidence
+logs below a guarded `luainstaller-*` temporary directory. These are tested
+versions, not a platform or patch-version allowlist.
 
 == Packaging targets
 
@@ -70,8 +96,9 @@ Run the source before packaging it:
 
 [source,sh]
 ----
-lua test/runtime_bundle/main.lua direct
-lua test/student_management_system/main.lua --help
+LUA=${LUA:-lua}
+$LUA test/runtime_bundle/main.lua direct
+$LUA test/student_management_system/main.lua --help
 ----
 
 Then analyze and build:
@@ -89,18 +116,21 @@ Remote coverage is driven by:
 [source,sh]
 ----
 sh tools/remote-test-linux.sh
+MAC_HOST=yymac06 sh tools/remote-test-macos.sh
 MAC_HOST=yymacstudio sh tools/remote-test-macos.sh
-sh tools/remote-test-windows.sh
-# Or, when verified key authentication is unavailable:
-WINDOWS_PASSWORD=... sh tools/remote-test-windows.sh
+----
+
+[source,powershell]
+----
+powershell.exe -NoLogo -NoProfile -NonInteractive `
+  -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1
 ----
 
 Remote scripts accept destructive paths only below normalized
-`/tmp/luainstaller-*` roots, transfer Git-tracked files, and verify pinned source
-archives. Windows defaults to `StrictHostKeyChecking=yes`; provision and verify
-the host key before running it. `WINDOWS_LOCAL_ONLY=1` runs MinGW/Wine coverage
-without requiring remote targets or SSH tooling, but is not a substitute for
-the required Windows lab.
+`/tmp/luainstaller-*` roots, transfer a `git archive` snapshot, and verify pinned
+source archives. Linux and macOS orchestration targets physical lab machines.
+Windows runs locally on the physical Windows host with PowerShell, MSVC, and the
+Windows SDK; it does not use SSH, Wine, MinGW, a VM, or cross-compilation.
 
 == Adding coverage
 

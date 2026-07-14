@@ -10,9 +10,10 @@ This guide covers day-to-day packaging. Platform toolchains and native ABI
 constraints are documented separately in
 xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
 
-Lua 5.4 is the only supported interpreter ABI. LuaRocks accepts Lua `>= 5.4`
-and `< 5.5`; source-installed commands and `LUAI_LUA` overrides reject anything
-that does not report exactly `Lua 5.4`.
+luainstaller supports official Lua `>= 5.1` and `< 6.0`; LuaJIT is rejected.
+The interpreter that runs luainstaller defines the bundle's Lua major/minor
+ABI. Headers, libraries, runtime discovery, copied native modules, and the
+linked runtime must match it.
 
 toc::[]
 
@@ -158,7 +159,8 @@ applications should set an explicit, reviewed limit.
 `--lua PATH`::
 Select the interpreter used to execute the tracer. Resolution order is this
 option, `LUAI_LUA`, the current interpreter, then `lua` from `PATH`.
-The selected command must report exactly Lua 5.4.
+The selected command must be official Lua 5.1 or newer and must use the ABI
+expected by the analysis and build.
 
 `-- ARGS...`::
 Pass arguments to the entry script during runtime discovery. These arguments
@@ -167,16 +169,16 @@ are not saved as defaults for the finished executable.
 === Target profile
 
 `--target-os OS`::
-Select `linux`, `macos`, or `windows`. This selects a build profile; it does not
-convert native machine code.
+Assert the detected native host OS. Omit it for normal use. A value different
+from the current host is rejected; this option does not enable cross-building.
 
 `--lua-prefix PATH`::
 Provide the Lua headers and runtime required by macOS and Windows profiles.
 `LUAI_LUA_PREFIX` is used when the option is absent.
-All generated launchers compile only with Lua 5.4 headers; Linux also rejects a
-`pkg-config` Lua version other than 5.4 before invoking the compiler. Every
-profile then compiles and executes a linked-runtime ABI probe before publishing
-the bundle; the Windows probe runs under Wine.
+Generated launchers compile only with headers for the active Lua major/minor
+ABI. Linux also rejects a mismatched `pkg-config` Lua version before invoking
+the compiler. Every native backend compiles and executes a linked-runtime ABI
+probe on the build host before publishing the bundle.
 
 `--verbose`::
 Print additional trace or manifest counts.
@@ -227,7 +229,8 @@ luai -a app/main.lua -d runtime -- profile_a input.json
 
 Only code paths executed by that run are observed. Successful module loads are
 recorded; missing modules caught by the application's `pcall` remain optional.
-On Lua 5.4, runtime discovery records the real `require` loader data path, so an
+On supported official Lua versions, runtime discovery records the real
+`require` loader data path, so an
 entry that changes `package.path` is traced to the file actually loaded. The
 tracer snapshots Lua loader bytes. It rejects native loader paths because file
 reads around `dlopen` cannot prove which bytes were mapped, and rejects a
@@ -264,8 +267,8 @@ used by the source program:
 
 [source,sh]
 ----
-LUA_PATH='/opt/app/share/lua/5.4/?.lua;;' \
-LUA_CPATH='/opt/app/lib/lua/5.4/?.so;;' \
+LUA_PATH='/opt/app/share/lua/5.x/?.lua;;' \
+LUA_CPATH='/opt/app/lib/lua/5.x/?.so;;' \
 luainstaller build --dir app/main.lua -o build/app --max-deps 250
 ----
 
@@ -278,8 +281,7 @@ ldd build/app/app
 find build/app/.luai/native -type f -name '*.so' -exec ldd {} \;
 ----
 
-Replace `ldd` with `otool -L` on macOS. Test Windows output on Windows even if
-it already passed under Wine.
+Replace `ldd` with `otool -L` on macOS. Test Windows output natively on Windows.
 
 [#usage-logs]
 == Logs

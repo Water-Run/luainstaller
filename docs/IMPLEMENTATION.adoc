@@ -65,8 +65,8 @@ adding it to API normalization and documentation contracts.
 == Module responsibilities
 
 `src/cli.lua`::
-Parses the two CLI grammars and renders results. Source-tree preloads allow the
-checkout to run without installation.
+Parses the two CLI grammars, loads the installed Lua modules, and renders
+results. Repository tests provide their own source-module loader.
 
 `src/init.lua`::
 Validates the API options, obtains a dependency plan, creates the manifest, and
@@ -152,9 +152,9 @@ Runtime mode creates a private `0700` work directory and writes a generated Lua
 tracer. The tracer patches global `require`, extends search paths relative to
 the entry, then executes the entry with the supplied run arguments.
 
-A require record is provisional until the real `require` succeeds. Lua 5.4's
-second successful `require` return is loader data; when that loader data names a
-readable `.lua`, runtime discovery records that actual selected path. The Lua
+A require record is provisional until the real `require` succeeds. When a
+supported Lua runtime returns loader data naming a readable `.lua`, runtime
+discovery records that actual selected path. The Lua
 source is snapshotted at the loader boundary and compared with the stripped
 loader bytecode, so a later rewrite cannot become the accepted build input.
 The loader must also have exactly the source chunk's `_ENV` upvalue bound to the
@@ -177,8 +177,8 @@ before `os.exit`.
 
 The trace ends with one completion marker. Missing, repeated, malformed, or
 post-completion records are `DiscoveryError`, so a killed tracer cannot be
-mistaken for a complete dependency plan. The discovery interpreter must report
-exactly Lua 5.4.
+mistaken for a complete dependency plan. The discovery interpreter must be an
+official Lua 5.1 or newer runtime; LuaJIT is rejected.
 
 After execution, ordinary filesystem loader records are checked against
 `ModuleResolver`; custom loader-data paths are verified directly against the
@@ -203,11 +203,11 @@ must match those discovery hashes; bundling compares again before generation,
 embedding, and copying. Any mismatch returns `SourceChangedError`. Output
 ownership hashes use the same checked SHA-256 implementation.
 
-Every launcher has both a compile-time Lua 5.4 header guard and a runtime
-`_VERSION` check. Before publication, the bundler compiles and executes a tiny
-program linked with the same inputs as the launcher. Windows runs this probe
-under Wine, so a mislabeled DLL or library cannot pass on filename or
-`pkg-config` metadata alone.
+Every launcher has a compile-time guard generated from the active Lua
+major/minor ABI and a matching runtime `_VERSION` check. Before publication,
+the bundler compiles and executes a tiny program linked with the same inputs as
+the launcher. The probe runs on the native build host, so a mislabeled DLL or
+library cannot pass on filename or `pkg-config` metadata alone.
 
 `manifest.compatibility` is a packaging requirement list, not a snapshot of the
 build host. The v2 platform section has distinct `host` and `target` records;
@@ -227,7 +227,8 @@ with `lua_pcall`. The bootstrap prepends native search paths, installs the
 embedded module searcher at index 2, and runs the entry. Both the entry and
 modules are loaded in text mode.
 
-The C translation unit refuses headers unless `LUA_VERSION_NUM == 504`.
+The C translation unit refuses headers unless `LUA_VERSION_NUM` matches the
+major/minor ABI recorded by the build interpreter.
 Embedded lookup has precedence but retains same-environment fallback to later
 host searchers for undeclared modules; clean-environment tests detect accidental
 reliance on that fallback.
