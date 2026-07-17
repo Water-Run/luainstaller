@@ -503,6 +503,11 @@ local function check_documentation_contract()
     assert_contains(testing, "Mac mini")
     assert_contains(testing, "Mac Studio")
     assert_contains(testing, "SHA-256")
+    assert_contains(testing, "push directly to `main`")
+
+    local readme = read_file("README.adoc")
+    assert_contains(readme, "`main` is the only branch")
+    assert_contains(readme, "committed directly to `main`")
 
     local platform_limits = read_file("docs/PLATFORMS-NATIVE-LIMITS.adoc")
     assert_contains(platform_limits, "official Lua `>= 5.1` and `< 6.0`")
@@ -526,7 +531,7 @@ local function check_documentation_contract()
     assert_contains(direct_output, "hello docs")
 
     local all_docs = table.concat({
-        read_file("README.adoc"),
+        readme,
         read_file("docs/TESTING.adoc"),
         read_file("test/README.adoc"),
     }, "\n")

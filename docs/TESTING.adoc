@@ -179,6 +179,12 @@ of `/tmp/luainstaller-*`, and archive downloads must match their pinned digest.
 [#testing-release]
 == Release checklist
 
+The candidate must be the tip of `main`.
+After the gates pass, push directly to `main`; do not publish a topic,
+development, or release branch. Before pushing,
+verify both local and remote branch refs and remove every branch other than
+`main`. Tags are release identifiers, not development branches.
+
 . LuaRocks lint passes and installation from the rockspec works in an isolated
   tree.
 . Production Lua source parses on every pinned official Lua version.

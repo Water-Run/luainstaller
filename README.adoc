@@ -184,6 +184,13 @@ The installed manual page is available as `luai(1)` and `luainstaller(1)`.
 [#development]
 == Development baseline
 
+The repository follows a strict single-branch contract.
+`main` is the only branch. Development work is committed directly to `main`
+and pushed directly to `main`; persistent topic, development, release, and
+pull-request merge branches are not part of the project workflow.
+A temporary local worktree used by automation must be fast-forwarded into
+`main` and removed before release.
+
 From the repository root:
 
 [source,sh]
