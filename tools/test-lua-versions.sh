@@ -106,7 +106,8 @@ build_lua() {
     source_dir=$source_dir/lua-$version
     case "$(uname -s):$version" in
         Linux:*)
-            make -C "$source_dir" linux MYCFLAGS=-fPIC MYLIBS='-Wl,-E -ldl' >&2
+            make -C "$source_dir/src" all \
+                MYCFLAGS='-fPIC -DLUA_USE_LINUX' MYLIBS='-Wl,-E -ldl' >&2
             ;;
         Darwin:*)
             make -C "$source_dir" macosx MYCFLAGS=-fPIC >&2

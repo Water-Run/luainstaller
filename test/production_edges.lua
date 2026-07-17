@@ -3342,6 +3342,10 @@ test("remote scripts are pinned and non-destructive", function()
     assert(posix_matrix:find("LUAROCKS_VERSION=3.13.0", 1, true))
     assert(posix_matrix:find("MYLIBS='-Wl,-E -ldl'", 1, true),
         "POSIX matrix does not disable Lua's optional readline dependency")
+    assert(posix_matrix:find('make -C "$source_dir/src" all', 1, true),
+        "POSIX matrix still delegates to Lua's interactive Linux make target")
+    assert(not posix_matrix:find('make -C "$source_dir" linux', 1, true),
+        "POSIX matrix invokes Lua's readline-enabled Linux make target")
     assert(not posix_matrix:lower():find("readline", 1, true),
         "POSIX matrix requires the optional readline development headers")
     assert(posix_matrix:find(
