@@ -105,11 +105,14 @@ build_lua() {
     tar -xzf "$SOURCE_CACHE/lua-$version.tar.gz" -C "$source_dir"
     source_dir=$source_dir/lua-$version
     case "$(uname -s):$version" in
-        Linux:*) make_target=linux ;;
-        Darwin:*) make_target=macosx ;;
+        Linux:*)
+            make -C "$source_dir" linux MYCFLAGS=-fPIC MYLIBS='-Wl,-E -ldl' >&2
+            ;;
+        Darwin:*)
+            make -C "$source_dir" macosx MYCFLAGS=-fPIC >&2
+            ;;
         *) echo "unsupported POSIX build host: $(uname -s)" >&2; return 1 ;;
     esac
-    make -C "$source_dir" "$make_target" MYCFLAGS=-fPIC >&2
     make -C "$source_dir" INSTALL_TOP="$prefix" install >&2
     test "$("$lua" -e 'io.write(_VERSION)')" = "Lua ${version%.*}"
     printf '%s\n' "$prefix"

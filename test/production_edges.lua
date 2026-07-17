@@ -3340,6 +3340,10 @@ test("remote scripts are pinned and non-destructive", function()
         assert(windows_matrix:find(version, 1, true), "Windows matrix omits Lua " .. version)
     end
     assert(posix_matrix:find("LUAROCKS_VERSION=3.13.0", 1, true))
+    assert(posix_matrix:find("MYLIBS='-Wl,-E -ldl'", 1, true),
+        "POSIX matrix does not disable Lua's optional readline dependency")
+    assert(not posix_matrix:lower():find("readline", 1, true),
+        "POSIX matrix requires the optional readline development headers")
     assert(posix_matrix:find(
         "245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37",
         1,
