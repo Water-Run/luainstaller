@@ -274,10 +274,9 @@ function M.outputPowerShell(script)
         end
         local write_script = table.concat({
             "$ErrorActionPreference='Stop';$p=", decodeExpression(temporary), ";",
-            "$i=[Console]::OpenStandardInput();",
             "$s=New-Object IO.FileStream($p,[IO.FileMode]::CreateNew,",
             "[IO.FileAccess]::Write,[IO.FileShare]::None);",
-            "try{$i.CopyTo($s);$s.Flush($true)}finally{$s.Dispose()}",
+            "try{$LuaiInput.CopyTo($s);$s.Flush($true)}finally{$s.Dispose()}",
         })
         local wrote, write_err = M.inputPowerShell(write_script, script)
         if not wrote then return false, write_err end
@@ -307,11 +306,19 @@ function M.inputPowerShell(script, input)
         return false, "PowerShell script must be nonempty ASCII without NUL bytes"
     end
     if type(input) ~= "string" then return false, "PowerShell input must be a string" end
-    local invocation, invocation_err = powershellInvocation(script, "None")
+    local wrapped_script = table.concat({
+        "$ErrorActionPreference='Stop';",
+        "$LuaiEncoded=[Console]::In.ReadToEnd();",
+        "$LuaiBytes=[Convert]::FromBase64String($LuaiEncoded);",
+        "$LuaiInput=New-Object IO.MemoryStream(,$LuaiBytes);try{",
+        script,
+        "}finally{$LuaiInput.Dispose()}",
+    })
+    local invocation, invocation_err = powershellInvocation(wrapped_script, "None")
     if not invocation then return false, invocation_err end
-    local opened, pipe = pcall(io.popen, invocation .. " >NUL 2>&1", "wb")
+    local opened, pipe = pcall(io.popen, invocation .. " >NUL 2>&1", "w")
     if not opened or not pipe then return false, tostring(pipe) end
-    local wrote, write_result = pcall(pipe.write, pipe, input)
+    local wrote, write_result = pcall(pipe.write, pipe, base64Encode(input))
     local flushed, flush_result = pcall(pipe.flush, pipe)
     local closed, close_result = pcall(pipe.close, pipe)
     if not wrote or not write_result then return false, "cannot write PowerShell input" end

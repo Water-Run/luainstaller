@@ -197,10 +197,9 @@ function M.writeFile(path, content)
             "if($null -ne $Existing -and ",
             "(($Existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))",
             "{throw 'destination is a reparse point'};",
-            "$Input=[Console]::OpenStandardInput();",
             "$Stream=New-Object IO.FileStream($Path,[IO.FileMode]::Create,",
             "[IO.FileAccess]::Write,[IO.FileShare]::None);",
-            "try{$Input.CopyTo($Stream);$Stream.Flush($true)}finally{$Stream.Dispose()}",
+            "try{$LuaiInput.CopyTo($Stream);$Stream.Flush($true)}finally{$Stream.Dispose()}",
             "}catch{exit 1}",
         }), content)
         if not ok then return nil, operationError("write", path, output) end

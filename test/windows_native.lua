@@ -20,6 +20,13 @@ local fs = require("luainstaller.fs")
 local path = require("luainstaller.path")
 local process = require("luainstaller.process")
 
+local binary_stdin = "\0\255A\nB"
+local stdin_ok, stdin_error = process.inputPowerShell(table.concat({
+    "$Bytes=$LuaiInput.ToArray();",
+    "if([Convert]::ToBase64String($Bytes) -ne 'AP9BCkI='){exit 9}",
+}), binary_stdin)
+assert(stdin_ok, stdin_error)
+
 local lua = harness.lua_command()
 local runtime_analysis = require("luainstaller").analyze({
     entry = "test/runtime_bundle/main.lua",
