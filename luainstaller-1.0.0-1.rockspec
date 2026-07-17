@@ -18,6 +18,7 @@ description = {
         names over the same Lua API: compact luai and full-word luainstaller.
     ]],
     homepage = "https://github.com/Water-Run/luainstaller",
+    issues_url = "https://github.com/Water-Run/luainstaller/issues",
     license = "LGPL-3.0-or-later",
     maintainer = "WaterRun <linzhangrun49@gmail.com>",
     labels = {

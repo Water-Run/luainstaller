@@ -6,15 +6,14 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This document describes generated output and its safety rules. For commands and
-options, see xref:USAGE.adoc[Using luainstaller].
+Generated layout and related rules. Commands: xref:USAGE.adoc[Using luainstaller].
 
 toc::[]
 
 [#bundling-onedir]
-== Onedir layout
+== Directory layout
 
-A Linux or macOS onedir bundle has this shape:
+Linux / macOS:
 
 [source,text]
 ----
@@ -26,97 +25,56 @@ app/
     ├── generated-output.txt
     ├── manifest.lua
     └── native/
-        ├── liblua-5.x.so        # active shared-Lua ABI
-        └── module.so            # when required
+        ├── liblua-5.x.so    # shared-Lua profiles; name follows ABI
+        └── module.so
 ----
 
-Windows also places the Lua DLL beside the executable so the Windows loader can
-start the launcher. A second copy lives in `.luai/native/` for dependent native
-modules.
+Windows places the Lua DLL beside the executable and a second copy under
+`.luai/native/` for dependent modules.
 
-The entry script and pure-Lua dependencies are encoded into the generated C
-launcher. They are listed in the manifest but are not copied as loose source
-files.
+The entry and pure-Lua modules are compiled into the C launcher and listed in
+the manifest; they are not left as loose `.lua` files in the tree.
 
 [#bundling-build]
-== Build transaction
+== Build placement
 
-`bundleOnedir` validates the target profile and final output before creating any
-generated files. It then builds in a private sibling staging directory:
+Generation, copy, compile, and manifest write happen in a private staging
+directory, then rename into the final path. When replacing a generated bundle,
+the old tree is backed up and revalidated; on failure the previous bundle is
+restored when possible.
 
-. generate the Lua bootstrap and C launcher;
-. copy Lua C modules;
-. compile the launcher;
-. copy the shared Lua runtime where required;
-. write `manifest.lua` and the generated-output marker;
-. rename the completed staging directory into place.
-
-When replacing an existing generated bundle, the old directory is renamed to a
-backup immediately before the final switch. The moved backup is revalidated
-against the pre-build recursive snapshot before publication and again before
-deletion. Concurrent content aborts the switch and is restored or retained at a
-reported backup path. Cleanup never recursively removes the old tree: declared
-files are atomically moved to unpredictable quarantine names, rehashed there,
-and removed individually before empty directories are removed bottom-up. If the
-switch fails, the backup is restored. A compiler or copy failure therefore
-leaves the previous bundle available instead of replacing it with partial
-output.
-
-The pathname transaction cannot revoke a write-capable POSIX file descriptor
-that another process opened before the backup rename. Such a descriptor still
-refers to the quarantined inode and can modify it after the final rehash. No
-portable POSIX primitive can both revoke that descriptor and delete the inode.
-Stop arbitrary writers before rebuilding; the output lock serializes
-luainstaller builders, not unrelated processes holding pre-existing file
-descriptors. Build to a new output path when that condition cannot be ensured.
+The output lock only coordinates `luainstaller` itself. On POSIX, another
+process holding a writable descriptor opened before rename may still mutate
+that inode after verification. Use a new output path when that cannot be
+ruled out.
 
 [#bundling-launcher]
-== Launcher startup
+== Startup
 
-The native launcher performs four tasks:
+. Create a Lua state and open standard libraries
+. Set `arg`
+. Load the embedded bootstrap as text-only Lua
+. Run the entry with a traceback handler
 
-. create a Lua state and open the standard libraries;
-. set `arg` from the process arguments;
-. load the embedded bootstrap as text-only Lua code;
-. execute the entry with a traceback handler.
-
-The launcher obtains its process image path from the operating system rather
-than trusting the spelling of `argv[0]`. Native modules therefore remain
-locatable when the executable is reached through `PATH` or a symbolic link.
-
-Platform path sources are `/proc/self/exe` on Linux,
-`_NSGetExecutablePath` plus `realpath` on macOS, and `GetModuleFileNameA` on
-Windows.
+The process image path comes from the OS (not the spelling of `argv[0]`), so
+launch via `PATH` or a symlink still locates `.luai/native`.
 
 [#bundling-lua]
-== Pure-Lua module loading
+== Pure-Lua lookup order
 
-The bootstrap installs a package searcher at position 2, immediately after
-`package.preload`. Lookup order is therefore:
+. `package.preload`
+. Modules embedded in the bundle
+. Filesystem Lua searchers
+. Native searchers
 
-. application or host `package.preload` entry;
-. Lua module embedded in the bundle;
-. normal filesystem Lua searchers;
-. native module searchers.
-
-This ordering gives packaged Lua modules precedence without making the bundle
-hermetic. An undeclared name can still fall through to normal host searchers;
-that same-environment behavior is intentional. Release tests clear `LUA_PATH`
-and `LUA_CPATH` so accidental host dependencies are visible.
-
-An embedded module is compiled with `load(..., "t")`, so bytecode is not
-accepted through the generated source payload. A UTF-8 BOM and a leading
-shebang are stripped before loading.
-
-Module names come from dependency trace records. If two source files map to the
-same module name or manifest destination, the build stops with
-`DuplicateModuleError`.
+Packaged modules take precedence without a hermetic sandbox: undeclared names
+may fall through to the host. Embedded code uses `load(..., "t")` (no bytecode
+payload). Name collisions → `DuplicateModuleError`.
 
 [#bundling-native]
-== Native module loading
+== Native modules
 
-Native modules are copied under both their file basename and, when known, their
-dotted module path. For `socket.core`, for example, the bundle can contain:
+Copied by basename and, when known, dotted path—for example `socket.core`:
 
 [source,text]
 ----
@@ -124,166 +82,49 @@ dotted module path. For `socket.core`, for example, the bundle can contain:
 .luai/native/socket/core.so
 ----
 
-Static discovery mirrors Lua's C-root searcher and `?/init` templates. Multiple
-literal names such as `pkg` and `pkg.init` may therefore own aliases of the same
-verified source library. Runtime discovery refuses native loaders because path
-reads around `dlopen` cannot prove the exact mapped bytes.
-
-The bootstrap prepends these patterns to `package.cpath`:
-
-[source,text]
-----
-.luai/native/?.so
-.luai/native/?/init.so
-.luai/native/?.dylib
-.luai/native/?/init.dylib
-.luai/native/?.dll
-.luai/native/?/init.dll
-----
-
-The launcher RPATH handles the copied Lua runtime. It does not copy every shared
-library referenced by a Lua C module. Those external dependencies remain a
-release responsibility. The runtime destination is reserved and cannot be
-overwritten by a same-named native module. Before publication, a linked probe
-must report the same `Lua 5.x` ABI as the build interpreter. The probe always
-runs natively on the build host.
+`package.cpath` is prepended with `.luai/native` patterns for `?.so` /
+`?.dylib` / `?.dll` and `?/init.*`. RPATH covers the copied Lua runtime;
+further system libraries of a C module are not auto-packaged. Before publish, a
+native linked probe requires `_VERSION` to match the build interpreter.
 
 [#bundling-manifest]
-== Manifest
+== Manifest and ownership
 
-`.luai/manifest.lua` is readable Lua data prefixed with
-`-- generated by luainstaller`. It records:
+`.luai/manifest.lua` records entry, hashes, mode, Lua ABI, platform, module
+groups, include/exclude, and trace data. Format `version = 2` with
+`hash_algorithm = "sha256"`. Sources are re-read before embed/copy; mismatch →
+`SourceChangedError`.
 
-* entry source and content hash;
-* output mode and requested path;
-* Lua version and ABI;
-* target platform and launcher profile;
-* Lua, native, and external module groups;
-* manual include/exclude settings;
-* dependency trace records;
-* the packaged Lua runtime.
+`.luai/generated-output.txt` is the v2 ownership marker
+(`luainstaller-generated-output-v2`): final directory, every generated
+directory, and every generated regular file with SHA-256. Replacement is
+allowed only when the **recursive** inventory still describes the
+**exact file set** (hashes included). Tree edits, symlinks, or record mismatch refuse
+automatic overwrite. Markers from `luainstaller-generated-output-v1` are never
+auto-upgraded; migration is a **one-time removal** after backup, or a new
+output path.
 
-Manifest format `version = 2` declares `hash_algorithm = "sha256"`. Entry,
-Lua-module, and native-module snapshots use SHA-256. Discovery carries hashes
-of the bytes it actually parsed or selected into manifest construction. Before
-embedding or copying a source, the build reads it again and compares the digest;
-a change after analysis returns `SourceChangedError` instead of producing a
-mixed or stale dependency snapshot.
-These digests detect changes and ownership mismatches; they are not signatures
-and do not authenticate the build host.
+[#bundling-onefile]
+== Single-file
 
-[#bundling-marker]
-== Output ownership marker
+Build a full directory bundle first, then embed runtime files into the
+extractor (path, size, executable bit, bytes). `.luai/build/` and the onedir
+ownership marker are omitted. An existing output path is not overwritten.
 
-`.luai/generated-output.txt` contains:
+POSIX cache: `luainstaller-onefile-<effective-uid>` under the canonical
+temporary root; permission and sticky-ancestor rules are in
+xref:TROUBLESHOOTING.adoc[Troubleshooting]. Windows uses the user temporary
+directory with reparse/DACL constraints.
 
-* marker version `luainstaller-generated-output-v2`;
-* normalized final output directory;
-* every generated directory as a `dir` record;
-* every generated regular file except the marker itself as a `file` record with
-  its SHA-256 digest.
+Cache hits require full-byte equality. After confirming no process uses the
+cache:
 
-An existing directory is replaceable only when all of these checks pass:
-
-* it is empty, or it contains a generated manifest and valid marker;
-* it is not a symbolic link;
-* every recursive entry is a regular file or real directory;
-* the current tree and marker describe the exact file set, including empty
-  directories and nested content;
-* every marked file still has the recorded SHA-256 digest;
-* the marker names the same output directory.
-
-Editing or adding a file or directory anywhere in the tree intentionally
-revokes automatic replacement. Symbolic links, devices, malformed or duplicate
-records, unreadable entries, and incomplete listings fail closed.
-
-Directories created by releases using `luainstaller-generated-output-v1` are
-never upgraded or overwritten automatically. Migration is a one-time removal:
-inspect and back up anything you need, remove the old output explicitly, then
-build again to create a v2 marker. Choose a new output path when ownership is
-uncertain.
-
-[#bundling-onefile-build]
-== Onefile construction
-
-Onefile first builds a normal onedir bundle in a private temporary location.
-Every staged regular file is then embedded in a small extractor with its path,
-size, executable bit, and exact bytes. `.luai/build/` and the onedir ownership
-marker are excluded because they are not needed at runtime. The SHA-256 payload
-ID uses length-framed path, mode, size, and content records in sorted path order.
-With the same checkout, options, compiler, output path, and environment,
-repeated builds are byte-identical on the verified toolchains.
-
-The final extractor is compiled for the selected target. Onefile output refuses
-to replace any existing file or directory; remove or rename an old artifact
-explicitly before rebuilding it. Publishing uses a same-filesystem hard link so
-the final path is created atomically without replacing a file that appeared
-during compilation. FAT/exFAT mounts and some network filesystems do not support
-this operation; choose a native filesystem output directory when the build
-returns `FilesystemError` for atomic publication.
-
-[#bundling-onefile-runtime]
-== Onefile extraction and cache
-
-On POSIX, the cache directory is named `luainstaller-onefile-<effective-uid>`
-under the canonical temporary root. The extractor opens the temporary-root
-chain component by component and retains bound directory descriptors through
-parent creation and file writes. Every ancestor must be owned by the effective
-user or root. A group- or other-writable ancestor is accepted only when it also
-has the sticky bit; this permits `/tmp` while rejecting a directory whose owner
-or another writer could rename the cache entry. Both the cache and payload
-directory must:
-
-* be owned by the effective user;
-* deny all group and other permissions;
-* be real directories, not symbolic links.
-
-Windows uses the current user's temporary directory, rejects reparse points,
-verifies that cache directories are owned by the current process token's user
-SID, and applies a protected DACL granting full access only to that user and
-`SYSTEM`. It opens and retains every absolute temporary-path component and
-payload parent with `FILE_FLAG_OPEN_REPARSE_POINT` while denying delete sharing.
-Directory pins also deny write sharing so they cannot be converted into reparse
-points in place. Every verified payload file is retained without write or
-delete sharing until the inner process exits. The extractor reapplies the same
-owner and protected DACL to both new and matching cached files. These pins
-prevent a checked cache
-directory, DLL, or executable from being replaced between extraction and use.
-
-Before writing any file, the extractor rejects absolute paths, drive-qualified
-paths, empty segments, `.` segments, and `..` segments. Existing final-file
-symlinks or reparse points are removed rather than followed. Parent directory
-symlinks are rejected. A cached file is reused only when its complete bytes
-equal the embedded bytes; equal size or a colliding legacy hash is insufficient.
-Executable mode is repaired on POSIX when necessary. Writes use a private
-same-directory temporary file followed by a non-replacing commit or verified
-replacement, so a partial cache file is never accepted. POSIX file operations
-use no-follow, parent-directory-relative descriptors after validating the
-parent chain.
-
-The cache is persistent. Remove it to force extraction after checking that no
-bundle process is using it:
-
-[source,sh]
+[source,bash]
 ----
 rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 ----
 
-[#bundling-debug]
-== Inspect onedir before onefile
-
-If onefile fails, rebuild the same entry as onedir and check:
-
-[source,sh]
-----
-find build/app -type f -print | sort
-sed -n '1,240p' build/app/.luai/manifest.lua
-env -i PATH=/usr/bin:/bin build/app/app
-----
-
-If onedir works but onefile does not, investigate temporary-directory access,
-cache ownership, path length, endpoint security software, and child-process
-creation. Do not begin with dependency discovery; onefile embeds the already
-built onedir result.
+If single-file fails, verify the matching directory bundle for the same entry
+first.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

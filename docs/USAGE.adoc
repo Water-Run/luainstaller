@@ -6,252 +6,162 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This guide covers day-to-day packaging. Platform toolchains and native ABI
-constraints are documented separately in
-xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
+Day-to-day packaging. Platforms and ABI:
+xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules]. Install and
+CLI/library overview: xref:../README.adoc[README].
 
-luainstaller supports official Lua `>= 5.1` and `< 6.0`; LuaJIT is rejected.
-The interpreter that runs luainstaller defines the bundle's Lua major/minor
-ABI. Headers, libraries, runtime discovery, copied native modules, and the
-linked runtime must match it.
-Lua 5.5 installations require LuaRocks 3.13.0 or newer.
+Supports official Lua `>= 5.1` and `< 6.0`. LuaJIT is rejected. The running
+interpreter defines the bundle Lua major/minor ABI; headers, libraries,
+discovery, native modules, and the linked runtime must match. Lua 5.5 needs
+LuaRocks `>= 3.13.0`.
+
+The CLI has two grammars, `luai` and `luainstaller`: same features, different
+input and terminal output; do not mix them. Mapping is in the README.
+**Command-line examples below use `luai`** (use `luainstaller logs` for logs).
 
 toc::[]
 
 [#usage-workflow]
-== Use the source program as the baseline
+== Workflow
 
-Before packaging, run the entry script with the same Lua interpreter and module
-paths that will be used for analysis:
+. Run the entry with the same `lua` and module paths that will be packaged
+. `luai -a` / `luai -t`
+. `luai -b --dir` for a directory bundle
+. Run with `LUA_PATH` and `LUA_CPATH` cleared
+. Optionally `luai -b --file` for a single-file build
 
-[source,sh]
+Directory first, then single-file, separates dependency issues from
+compile/extract issues.
+
+[source,bash]
 ----
 lua app/main.lua --help
 ----
 
-For the repository fixture, the equivalent direct baseline is
-`lua test/runtime_bundle/main.lua direct`; the fixture initializes its own
-directory in `package.path` so this command works from the repository root.
+Repository fixture: `lua test/runtime_bundle/main.lua direct` (from the repo
+root).
 
-Then work in this order:
+[#usage-onedir]
+== Directory bundle
 
-. analyze dependencies;
-. inspect the trace when a resolution is surprising;
-. build an onedir bundle;
-. run it with `LUA_PATH` and `LUA_CPATH` cleared;
-. build onefile only after onedir works.
-
-This order separates dependency errors from compiler, native loader, and
-onefile extraction errors.
-
-[#usage-commands]
-== Two command surfaces
-
-The short and descriptive interfaces are equivalent, but their grammar is not
-interchangeable.
-
-[source,sh]
+[source,bash]
 ----
-luai -a app/main.lua
-luai -t app/main.lua
-luai -b --dir app/main.lua -o build/app
-
-luainstaller analyze app/main.lua
-luainstaller trace app/main.lua
-luainstaller build --dir app/main.lua -o build/app
-----
-
-Use `luai -h` or `luainstaller help` to print the accepted form. A parse error
-returns exit status 1 and writes a short hint to standard error.
-
-[#usage-first-bundle]
-== Build and inspect an onedir bundle
-
-[source,sh]
-----
-luainstaller trace test/runtime_bundle/main.lua --max-deps 120
-luainstaller build --dir test/runtime_bundle/main.lua \
+luai -t test/runtime_bundle/main.lua --max-deps 120
+luai -b --dir test/runtime_bundle/main.lua \
   -o build/runtime-demo --max-deps 120
 
 env -i PATH=/usr/bin:/bin \
   build/runtime-demo/runtime-demo Grace
 ----
 
-The clean environment is important: it prevents a system `LUA_PATH` or
-`LUA_CPATH` from hiding a missing bundled dependency.
-
-Inspect the generated files before distribution:
-
-[source,sh]
+[source,bash]
 ----
 find build/runtime-demo -type f -print | sort
 sed -n '1,220p' build/runtime-demo/.luai/manifest.lua
 ----
 
-The launcher contains the entry script and pure-Lua modules. `.luai/native/`
-contains copied Lua C modules and, on shared-Lua profiles, the Lua runtime.
-The bundle is designed for the same environment, not as a hermetic sandbox:
-packaged modules take precedence, but undeclared names can fall through to the
-host searchers. The clean run above is therefore a required dependency check.
+The entry and pure-Lua modules live in the launcher. `.luai/native/` holds Lua
+C modules (and the runtime library on shared-Lua profiles). Packaged modules
+win; undeclared names may still fall through to host searchers. That is
+**same environment** lookup, not a hermetic sandbox. The clean run exposes
+missing packaged dependencies.
 
 [#usage-onefile]
-== Build onefile
+== Single-file
 
-[source,sh]
+[source,bash]
 ----
-luainstaller build --file test/runtime_bundle/main.lua \
+luai -b --file test/runtime_bundle/main.lua \
   -o build/runtime-demo-onefile --max-deps 120
 build/runtime-demo-onefile Grace
 ----
 
-At runtime, onefile extracts a content-addressed onedir payload below the
-platform temporary directory and starts its inner launcher. POSIX caches are
-isolated by effective user ID and require owner-only permissions. Existing
-files are reused only when their exact bytes match the embedded bytes. The
-payload directory name is a SHA-256 digest over length-framed paths, executable
-bits, sizes, and contents. Repeated builds are deterministic when the checkout,
-options, output path, compiler, and environment are identical.
+At runtime the payload is a content-addressed directory bundle extracted under
+the temporary directory, then the inner launcher starts. POSIX caches are
+keyed by effective UID. Cache reuse requires exact byte match. Layout and
+safety: xref:BUNDLING.adoc[Bundle format].
 
 [#usage-options]
-== Options
+== `luai` options
 
-=== Output selection
+=== Output
 
-`--dir`, `--onedir`::
-Build a directory bundle. This is the default.
+`--dir`::
+Directory bundle (default).
 
-`--file`, `--onefile`::
-Build a self-extracting executable.
+`--file`::
+Single-file executable.
 
-`-o PATH`, `--out PATH`::
-Set the output directory for onedir or executable path for onefile. Existing
-user-owned content is never overwritten. A recognized generated onedir may be
-rebuilt through a private sibling staging directory. The final directory swap
-has a brief path-visibility gap and is not crash-atomic.
+`-o PATH`::
+Output path.
 
-Only recursive v2 ownership markers are recognized. A directory carrying
-`luainstaller-generated-output-v1` requires explicit review and removal once;
-it is never migrated or replaced automatically.
+User-owned content is never overwritten. A recognized generated directory
+bundle may rebuild via private staging. Only recursive v2 ownership markers are
+eligible for automatic replace; v1 requires manual removal once
+(xref:BUNDLING.adoc[one-time removal]).
 
-=== Dependency inputs
+=== Dependencies
 
 `--include PATH`::
-Add a regular Lua source file that automatic discovery did not find. Directories,
-devices, non-Lua files, and files with invalid Lua syntax are rejected. Repeat
-the option for multiple files.
+Add a `.lua` file discovery missed.
 
 `--exclude VALUE`::
-Remove a resolved dependency. `VALUE` may be an exact path, a basename, or a
-path suffix beginning on a `/` boundary. Excludes take precedence over
-automatic discovery and manual includes.
+Drop a dependency (path, basename, or path suffix).
 
-`-d MODE`, `--discovery-mode MODE`::
-Choose `static`, `runtime`, or `manual`.
+`-d MODE`::
+`static`, `runtime`, or `manual` (default `static`).
 
 `--no-depscan`::
-Disable automatic discovery. Equivalent to manual mode.
+Same as `manual`.
 
 `--max-deps N`::
-Limit discovered Lua source dependencies. The default is 36. Larger
-applications should set an explicit, reviewed limit.
+Pure-Lua dependency cap (default 36).
 
-=== Runtime discovery
+=== Other
 
 `--lua PATH`::
-Select the interpreter used to execute the tracer. Resolution order is this
-option, `LUAI_LUA`, the current interpreter, then `lua` from `PATH`.
-The selected command must be official Lua 5.1 or newer and must use the ABI
-expected by the analysis and build.
+Interpreter for runtime discovery (official 5.1+ and matching ABI).
 
 `-- ARGS...`::
-Pass arguments to the entry script during runtime discovery. These arguments
-are not saved as defaults for the finished executable.
-
-=== Target profile
+Arguments only for the entry during discovery.
 
 `--target-os OS`::
-Assert the detected native host OS. Omit it for normal use. A value different
-from the current host is rejected; this option does not enable cross-building.
+Assert the detected host OS; mismatch fails. No cross-build.
 
 `--lua-prefix PATH`::
-Provide the Lua headers and runtime required by macOS and Windows profiles.
-`LUAI_LUA_PREFIX` is used when the option is absent.
-An explicitly selected prefix is authoritative: missing or incompatible
-development files produce `ToolchainError` instead of falling back to another
-installed Lua.
-Generated launchers compile only with headers for the active Lua major/minor
-ABI. Linux also rejects a mismatched `pkg-config` Lua version before invoking
-the compiler. Every native backend compiles and executes a linked-runtime ABI
-probe on the build host before publishing the bundle.
+Headers/runtime prefix; an explicit choice does not fall back to another
+install.
 
 `--verbose`::
-Print additional trace or manifest counts.
+Extra trace/counts.
 
 [#usage-discovery]
-== Choose a discovery mode
+== Dependency discovery
 
-=== Static
+=== static (default)
 
-Static mode is the default. It parses literal forms such as:
+Recognizes literal forms such as `require("x")`, `require 'x'`, and
+`pcall(require, "x")`. String escapes are decoded. `local require = require` is
+followed; other aliases are not.
 
-[source,lua]
-----
-local json = require("cjson")
-local socket = require 'socket'
-local optional_ok, optional = pcall(require, "optional_plugin")
-----
+Resolution is **entry-rooted**: templates under the entry directory first, then
+`package.path` / `package.cpath`. Computed names → `DynamicRequireError`. Native
+module names must be literals.
 
-Lua string escapes are decoded before module resolution. The common same-name
-binding `local require = require` is accepted; an alias such as
-`local load_module = require` is not statically followed.
+=== runtime
 
-Resolution follows luainstaller's entry-rooted convention: templates below the
-entry script directory are tried before the active `package.path` and
-`package.cpath`. Raw Lua does not add that directory automatically, so a source
-program that relies on it should initialize its own search path as the runtime
-fixture does.
-
-Computed module names return `DynamicRequireError`:
-
-[source,lua]
-----
-require(prefix .. ".adapter")
-----
-
-Use runtime mode for a computed Lua module name that can safely execute at build
-time, or manual mode plus `--include` when execution is unsafe. Native module
-names must remain literal so static discovery can bind their exact source bytes.
-
-=== Runtime
-
-Runtime mode runs the entry under a temporary `require` tracer:
-
-[source,sh]
+[source,bash]
 ----
 luai -a app/main.lua -d runtime -- profile_a input.json
 ----
 
-Only code paths executed by that run are observed. Successful module loads are
-recorded; missing modules caught by the application's `pcall` remain optional.
-On supported official Lua versions, runtime discovery records the real
-`require` loader data path, so an
-entry that changes `package.path` is traced to the file actually loaded. The
-tracer snapshots Lua loader bytes. It rejects native loader paths because file
-reads around `dlopen` cannot prove which bytes were mapped, and rejects a
-successful custom/preload loader without `.lua` loader data. Any module cached
-before tracing is rejected before classification, including builtin names,
-because the launcher cannot reproduce its value. Use static discovery for
-literal native dependencies. The tracer flushes records before `os.exit` and
-writes a completion marker; partial or duplicate completion output is rejected.
+Only loads observed on this run are recorded. Do not use on entries that mutate
+data, open the network, or start services at import time. Native loaders and
+pre-trace cache limits: xref:TROUBLESHOOTING.adoc[Troubleshooting].
 
-Do not use runtime discovery for an entry that performs destructive work at
-startup. It is execution, not static inspection.
+=== manual
 
-=== Manual
-
-Manual mode starts with no discovered dependencies:
-
-[source,sh]
+[source,bash]
 ----
 luai -b app/main.lua --no-depscan \
   --include app/core.lua \
@@ -259,57 +169,44 @@ luai -b app/main.lua --no-depscan \
   -o build/app
 ----
 
-Manual includes need to preserve their module path relative to the entry
-directory. For example, include `app/adapters/sqlite.lua`, not a flattened copy
-named `sqlite.lua`.
+`--include` paths must keep structure relative to the entry.
 
 [#usage-native]
 == Native modules
 
-Trace and build a native application with the same `LUA_PATH` and `LUA_CPATH`
-used by the source program:
+Use the same paths as the source program (`5.x` → actual ABI):
 
-[source,sh]
+[source,bash]
 ----
 LUA_PATH='/opt/app/share/lua/5.x/?.lua;;' \
 LUA_CPATH='/opt/app/lib/lua/5.x/?.so;;' \
-luainstaller build --dir app/main.lua -o build/app --max-deps 250
+luai -b --dir app/main.lua -o build/app --max-deps 250
 ----
 
-After building:
-
-[source,sh]
+[source,bash]
 ----
 find build/app/.luai/native -type f | sort
 ldd build/app/app
-find build/app/.luai/native -type f -name '*.so' -exec ldd {} \;
 ----
 
-Replace `ldd` with `otool -L` on macOS. Test Windows output natively on Windows.
+On macOS use `otool -L`. Validate Windows builds on Windows.
 
 [#usage-logs]
 == Logs
 
-The descriptive CLI stores failure records below `~/.luainstaller/`:
+Only `luainstaller` provides this:
 
-[source,sh]
+[source,bash]
 ----
 luainstaller logs
 luainstaller logs --level error --limit 20
-luainstaller logs --asc
 ----
 
-The log is diagnostic context, not a build transcript. Compiler output and
-structured error details returned by the current command remain the primary
-evidence.
-
-Writers use an owner-token lock and atomic primary/backup switch. Concurrent
-commands do not intentionally overwrite each other's entries; a failed
-temporary write leaves the prior loadable log unchanged. A successful
-`clearLogs()` leaves both recovery generations empty.
+Stored under `~/.luainstaller/`. Compiler output and the current command's
+structured errors remain the primary evidence.
 
 [#usage-api]
-== Lua API
+== Library API
 
 [source,lua]
 ----
@@ -320,7 +217,6 @@ local analysis = luainstaller.analyze({
     discovery_mode = "static",
     max_deps = 120,
 })
-
 if not analysis.ok then
     io.stderr:write(analysis.error.type, ": ", analysis.error.message, "\n")
     os.exit(1)
@@ -336,12 +232,10 @@ assert(built.ok, built.error and built.error.message)
 print(built.executable)
 ----
 
-`analyze`, `trace`, `compatibility`, and `bundle` return `{ ok = true, ... }`
-or `{ ok = false, error = { type = ..., message = ... } }`. `getLogs` returns a
-list and `clearLogs` returns a boolean. Invalid or unknown operation-option keys
-return `InvalidOptionsError` rather than being ignored.
-
-Available operations are `analyze`, `trace`, `compatibility`, `bundle`,
-`getLogs`, and `clearLogs`.
+The structured result contract applies to `analyze`, `trace`, `compatibility`,
+and `bundle` only. Success: `ok = true`. Failure: `ok = false` with
+`error.type` / `error.message`. `getLogs` returns a list of log records;
+`clearLogs` returns a boolean. Unknown option keys for the structured operations
+→ `InvalidOptionsError`. Version: `luainstaller.VERSION`.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

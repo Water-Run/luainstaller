@@ -13,8 +13,10 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-11
+    2026-07-17
 ]]
+
+dofile("test/release_docs_contract.lua")
 
 local harness = dofile("test/support/harness.lua")
 harness.install_loader()
@@ -500,14 +502,15 @@ local function check_documentation_contract()
     local testing = read_file("docs/TESTING.adoc")
     assert_contains(testing, "test/production_edges.lua")
     assert_contains(testing, "tools/test-lua-versions.ps1")
-    assert_contains(testing, "Mac mini")
-    assert_contains(testing, "Mac Studio")
+    assert_contains(testing, "Windows 11")
+    assert_contains(testing, "macOS 26.x")
     assert_contains(testing, "SHA-256")
-    assert_contains(testing, "push directly to `main`")
+    assert_contains(testing, "tip of `main`")
 
     local readme = read_file("README.adoc")
-    assert_contains(readme, "`main` is the only branch")
-    assert_contains(readme, "committed directly to `main`")
+    assert_contains(readme, "luai")
+    assert_contains(readme, "require(\"luainstaller\")")
+    assert_contains(readme, "documentation-index")
 
     local platform_limits = read_file("docs/PLATFORMS-NATIVE-LIMITS.adoc")
     assert_contains(platform_limits, "official Lua `>= 5.1` and `< 6.0`")

@@ -4,135 +4,55 @@
 :sectanchors:
 :sectlinks:
 
-`luainstaller` turns a Lua entry script and its `require` dependencies into a
-native executable bundle. It is intended for deployment to a known target
-environment: the target must match the bundle's operating-system family,
-architecture, system ABI, and Lua ABI.
+`luainstaller` packages a Lua script into a standalone executable that does not
+require a system `lua` command at runtime (similar to PyInstaller). The binary
+runs on the same platform family as the build host.
 
-The project provides two command names:
+It supports official Lua 5.1 through 5.5 (LuaJIT is rejected) and is released
+under `LGPL-3.0-or-later` at
+https://github.com/Water-Run/luainstaller[GitHub].
 
-* `luai` is the short, flag-based interface for scripts and quick use.
-* `luainstaller` is the descriptive interface for interactive use and logs.
-
-Both commands call the same Lua API and produce the same bundles.
-
-The supported interpreter range is official Lua `>= 5.1` and `< 6.0`.
-LuaJIT is rejected. Analysis, headers, linked runtime, and native modules must
-all use the same Lua major/minor ABI as the interpreter running luainstaller.
-The project is tested with the upstream patch releases 5.1.5, 5.2.4, 5.3.6,
-5.4.8, and 5.5.0. Those versions and the devices listed below are test
-coverage, not an allowlist.
+The interpreter used for packaging, the headers, the linked runtime, and any
+Lua C modules copied into the bundle must share the **same major.minor** Lua
+ABI.
 
 toc::[]
 
-[#quick-start]
-== Quick start
+[#install]
+== Install
 
-Install from LuaRocks:
+A complete official Lua environment and `luarocks` are required:
 
-[source,sh]
+[source,bash]
 ----
 luarocks install luainstaller
+----
+
+Confirm with:
+
+[source,bash]
+----
 luai -v
 ----
 
-Lua 5.5 requires LuaRocks 3.13.0 or newer; earlier LuaRocks releases do not
-recognize the Lua 5.5 installation ABI.
+NOTE: Lua 5.5 requires LuaRocks 3.13.0 or newer. Older LuaRocks releases do not
+recognize the 5.5 install ABI.
 
-Start with the small runtime sample. Build the directory form first because it
-keeps the manifest, generated C source, and copied native libraries visible.
-In shell examples, set `LUA` to the official interpreter being packaged.
+[#usage]
+== Usage
 
-[source,sh]
-----
-LUA=${LUA:-lua}
-$LUA test/runtime_bundle/main.lua direct
-luai -a test/runtime_bundle/main.lua --max-deps 120
-luai -t test/runtime_bundle/main.lua --max-deps 120
-luai -b --dir test/runtime_bundle/main.lua \
-  -o build/runtime-demo --max-deps 120
-build/runtime-demo/runtime-demo Ada
-----
+`luainstaller` can be used in two ways: as a **command-line tool**, or as a
+**library** from a `.lua` script.
 
-After the directory bundle works, produce a self-extracting executable:
-
-[source,sh]
-----
-luai -b --file test/runtime_bundle/main.lua \
-  -o build/runtime-demo-onefile --max-deps 120
-build/runtime-demo-onefile Ada
-----
-
-Expected output begins with `hello Ada`.
-
-[#compatibility]
-== Compatibility contract
-
-A bundle does not contain an emulator or an ABI translation layer. Build and
-target environments must agree on all four of these boundaries:
-
-* operating-system family;
-* CPU architecture;
-* system and compiler ABI;
-* Lua major/minor ABI.
-
-The generated launcher derives its compile-time guard and module paths from the
-active Lua ABI. Toolchain discovery verifies that headers, library, and linked
-runtime report the same ABI before publication. This is a native-host packager,
-not a cross-compiler or a hermetic sandbox: embedded modules win, but an
-undeclared module may fall through to the target host's normal Lua/native
-searchers. Always run a release candidate once with `LUA_PATH` and `LUA_CPATH`
-cleared and without Lua on `PATH`.
-
-Pure-Lua modules are embedded in the launcher. Lua C modules are copied into the
-bundle, but their dependent system libraries are not discovered recursively.
-Check them with `ldd`, `otool -L`, or a Windows dependency viewer before release.
-
-The following physical devices are in the release test matrix:
+The CLI has two names: `luainstaller` and `luai`. They share the same features
+(analyze, trace, build, and so on) but use **different input syntax and
+different terminal output**. `luainstaller` is the modern subcommand-style
+interface; `luai` is the short-option style closer to traditional Lua tooling.
+The grammars must not be mixed. Mapping:
 
 [cols="1,2,2",options="header"]
 |===
-|Device |Tested system |Architecture
-
-|Local workstation
-|Windows 11 Pro for Workstations
-|x86_64
-
-|`yynicepc`
-|Debian 13
-|x86_64
-
-|`localhost.localdomain`
-|Rocky Linux 10.2
-|x86_64
-
-|NVIDIA DGX Spark (`spark-49c8`)
-|Ubuntu 24.04 LTS
-|ARM64
-
-|`yymac06` Mac mini
-|macOS 26.5
-|ARM64
-
-|`yymacstudio` Mac Studio
-|macOS 26.5.1
-|ARM64
-|===
-
-This matrix records where releases were exercised; it does not say that
-luainstaller can run only on these models, distributions, or OS versions.
-Every bundle is built on the native target OS and architecture. There is no
-cross-build mode.
-
-See xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules] for
-toolchain requirements and unsupported combinations.
-
-[#command-summary]
-== Command summary
-
-[cols="1,2,2",options="header"]
-|===
-|Task |Short command |Descriptive command
+|Action |`luai` |`luainstaller`
 
 |Help
 |`luai -h`
@@ -143,76 +63,145 @@ toolchain requirements and unsupported combinations.
 |`luainstaller version`
 
 |Analyze
-|`luai -a app/main.lua`
-|`luainstaller analyze app/main.lua`
+|`luai -a <entry>`
+|`luainstaller analyze <entry>`
 
-|Trace resolution
-|`luai -t app/main.lua`
-|`luainstaller trace app/main.lua`
+|Trace
+|`luai -t <entry>`
+|`luainstaller trace <entry>`
 
 |Build
-|`luai -b app/main.lua`
-|`luainstaller build app/main.lua`
+|`luai -b <entry>`
+|`luainstaller build <entry>`
 
-|Read logs
+|Logs
 |—
 |`luainstaller logs`
 |===
 
-The syntaxes are deliberately separate. `luai build app.lua` and
-`luainstaller -b app.lua` are rejected.
+Unless noted otherwise, command-line examples use `luai`. Details:
+xref:docs/USAGE.adoc[Usage].
+
+[#usage-cli]
+=== Command line
+
+Suggested order: confirm the source program runs → analyze/trace dependencies →
+build a **directory bundle** (onedir) → run with `LUA_PATH` and `LUA_CPATH`
+cleared → then build a **single-file** (onefile) if needed. The directory form
+exposes the manifest, generated C, and native libraries; onefile is
+self-extracting—if it fails, verify the matching directory bundle first.
+
+Example:
+
+[source,bash]
+----
+lua test/runtime_bundle/main.lua direct
+luai -a test/runtime_bundle/main.lua --max-deps 120
+luai -t test/runtime_bundle/main.lua --max-deps 120
+luai -b --dir test/runtime_bundle/main.lua \
+  -o build/runtime-demo --max-deps 120
+build/runtime-demo/runtime-demo Ada
+----
+
+After the directory bundle works:
+
+[source,bash]
+----
+luai -b --file test/runtime_bundle/main.lua \
+  -o build/runtime-demo-onefile --max-deps 120
+build/runtime-demo-onefile Ada
+----
+
+Expected output begins with `hello Ada`.
+
+Common `luai` options:
+
+* `--dir` — directory bundle (default)
+* `--file` — single-file executable
+* `-o` — output path
+* `--max-deps` — limit on auto-discovered Lua dependencies (default is small;
+  raise it for large apps)
+* `-d static|runtime|manual` — discovery mode (default `static`)
+
+Before release, run the artifact at least once without a system `lua` and
+without `LUA_PATH` / `LUA_CPATH`, so missing dependencies are not hidden by the
+host. Platform limits:
+xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
+Diagnosis: xref:docs/TROUBLESHOOTING.adoc[Troubleshooting].
+
+[#usage-api]
+=== Library use from `.lua`
+
+After install, `require("luainstaller")` uses the same implementation as the
+CLI. The structured result contract applies to `analyze`, `trace`,
+`compatibility`, and `bundle` only. Success sets `ok = true`; failure sets
+`ok = false` and `error` (with `type`, `message`, and related fields).
+`getLogs` returns a list of log records; `clearLogs` returns a boolean. Version
+string: `require("luainstaller").VERSION`.
+
+[source,lua]
+----
+local luainstaller = require("luainstaller")
+
+local analysis = luainstaller.analyze({
+    entry = "app/main.lua",
+    discovery_mode = "static",
+    max_deps = 120,
+})
+if not analysis.ok then
+    io.stderr:write(analysis.error.type, ": ", analysis.error.message, "\n")
+    os.exit(1)
+end
+
+local built = luainstaller.bundle({
+    entry = "app/main.lua",
+    mode = "onedir",
+    out = "build/app",
+    max_deps = 120,
+})
+if not built.ok then
+    io.stderr:write(built.error.type, ": ", built.error.message, "\n")
+    os.exit(1)
+end
+print(built.executable)
+----
+
+Option meaning matches the CLI. Full API notes are in
+xref:docs/USAGE.adoc[Usage].
+
+[#test-environments]
+== Tested environments
+
+`luainstaller` is exercised on systems of these types:
+
+[cols="2,1",options="header"]
+|===
+|System |Architecture
+
+|Windows 11
+|x86_64
+
+|Debian 13
+|x86_64
+
+|Rocky Linux 10
+|x86_64
+
+|Ubuntu 24.04 LTS
+|ARM64
+
+|macOS 26.x
+|ARM64
+|===
+
+Full gates: xref:docs/TESTING.adoc[Testing].
 
 [#documentation-index]
 == Documentation
 
-Choose the guide that matches the work in front of you:
-
-* xref:docs/USAGE.adoc[Usage] — commands, options, discovery modes, and Lua API.
-* xref:docs/BUNDLING.adoc[Bundle format] — onedir/onefile layout, startup, cache,
-  and output replacement.
-* xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules] — ABI
-  rules, compilers, native dependencies, and explicit limits.
-* xref:docs/TROUBLESHOOTING.adoc[Troubleshooting] — diagnosis by symptom and
-  error type.
-* xref:docs/IMPLEMENTATION.adoc[Implementation] — internal data flow and module
-  responsibilities.
-* xref:docs/TESTING.adoc[Testing] — local checks, remote matrix, and release
-  gate.
-
-The installed manual page is available as `luai(1)` and `luainstaller(1)`.
-
-[#development]
-== Development baseline
-
-The repository follows a strict single-branch contract.
-`main` is the only branch. Development work is committed directly to `main`
-and pushed directly to `main`; persistent topic, development, release, and
-pull-request merge branches are not part of the project workflow.
-A temporary local worktree used by automation must be fast-forwarded into
-`main` and removed before release.
-
-From the repository root:
-
-[source,sh]
-----
-LUA=${LUA:-lua}
-LUAC=${LUAC:-luac}
-find src -type f -name '*.lua' -print0 | xargs -0 -n1 "$LUAC" -p
-for script in tools/*.sh; do sh -n "$script"; done
-"$LUA" test/cli_split_smoke.lua
-"$LUA" test/contract_docs.lua
-"$LUA" test/production_edges.lua
-"$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.0.0-1.rockspec
-----
-
-`test/contract_docs.lua` checks promises made by the public documentation.
-`test/production_edges.lua` covers fail-closed filesystem behavior, source
-mutation, SHA-256 ownership, concurrency, ABI rejection, and reproducibility.
-`test/smoke_all.lua` exercises dependency discovery, generated launchers,
-native modules, installed commands, onedir, onefile, and output safety.
-
-Project repository:
-https://github.com/Water-Run/luainstaller[github.com/Water-Run/luainstaller]
-
-License: LGPL-3.0-or-later.
+* xref:docs/USAGE.adoc[Usage] — options, discovery, API
+* xref:docs/BUNDLING.adoc[Bundle format] — layout and runtime
+* xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules]
+* xref:docs/TROUBLESHOOTING.adoc[Troubleshooting]
+* xref:docs/IMPLEMENTATION.adoc[Implementation] (maintainers)
+* xref:docs/TESTING.adoc[Testing] (maintainers)

@@ -286,9 +286,8 @@ exports
 .BR getLogs ,
 and
 .BR clearLogs .
-Successful log clearing empties both the primary and recovery generation.
-Windows logging rejects reparse-point paths.
-Operations return a table with
+The structured result contract applies to analyze, trace, compatibility, and bundle only.
+These operations return a table with
 .B ok=true
 or a structured
 .B error
@@ -296,6 +295,9 @@ table containing at least
 .B type
 and
 .BR message .
+getLogs returns a list of log records; clearLogs returns a boolean.
+Successful log clearing empties both the primary and recovery generation.
+Windows logging rejects reparse-point paths.
 .SH SEE ALSO
 .B lua(1), luarocks(1), cc(1), pkg-config(1), ldd(1), otool(1)
 .PP

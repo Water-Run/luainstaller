@@ -6,18 +6,17 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This guide defines the checks required before a release. All release targets
-are physical native hosts; the project does not use a VM, Wine, MinGW, or a
-cross-compiler as release evidence.
+Checks before release. Evidence is native build and run on physical hosts—not
+VMs, Wine, MinGW, or cross-compilers as substitutes.
 
 toc::[]
 
 [#testing-local]
-== Local contract suites
+== Local
 
-Run from the repository root with the official Lua interpreter under test:
+From the repository root, with the official interpreter under test:
 
-[source,sh]
+[source,bash]
 ----
 LUA=${LUA:-lua}
 "$LUA" test/cli_split_smoke.lua
@@ -27,177 +26,132 @@ LUA=${LUA:-lua}
 luarocks lint luainstaller-1.0.0-1.rockspec
 ----
 
-`cli_split_smoke.lua`::
-Checks that `luai` accepts only its flag grammar and `luainstaller` accepts only
-its descriptive grammar.
+[cols="2,3",options="header"]
+|===
+|Suite |Covers
 
-`contract_docs.lua`::
-Turns public documentation promises into executable contracts.
+|`test/cli_split_smoke.lua`
+|`luai` vs `luainstaller` grammar split
 
-`production_edges.lua`::
-Exercises fail-closed filesystem handling, checked I/O, source snapshots,
-SHA-256 ownership, output transactions, runtime tracing, logs, remote-script
-safety, and deterministic onefile behavior.
+|`test/contract_docs.lua`
+|Public documentation contracts
 
-`smoke_all.lua`::
-Runs the broad API, sample, dependency-discovery, generated-C, onedir, and
-onefile suite.
+|`test/production_edges.lua`
+|Boundary and safety-related behavior
 
-Tests under `test/` may use syntax from the interpreter selected for that
-particular suite. All production files under `src/` must parse on every
-supported Lua major/minor version.
+|`test/smoke_all.lua`
+|Samples, discovery, generated C, directory/single-file, and more
+|===
 
-[#testing-luarocks]
-== Installation contract
+Everything under `src/` must parse on every supported major/minor. Shared test
+helpers live under `test/support/`.
 
-LuaRocks is the only supported installation path:
+[#testing-install]
+== Install
 
-[source,sh]
+[source,bash]
 ----
 luarocks install luainstaller
 luai -v
-luainstaller version
 ----
 
-Use LuaRocks 3.13.0 or newer for Lua 5.5. The release matrix pins 3.13.0 and
-verifies its official source or native Windows archive before use.
-
-The release test installs into an isolated tree, invokes both installed command
-names from outside the checkout, builds an outside-checkout application, then
-runs the generated executable with `LUA_PATH`, `LUA_CPATH`, and Lua-bearing
-`PATH` entries cleared. A missing LuaRocks command is a failure, not a skip.
+Lua 5.5 needs LuaRocks `>= 3.13.0`. Release practice includes isolated tree
+install, invoking commands outside the checkout, and running artifacts with
+`LUA_PATH` / `LUA_CPATH` cleared. Missing `luarocks` is a failure.
 
 [#testing-version-matrix]
-== Official Lua 5.x matrix
-
-The pinned matrix covers these upstream patch releases:
+== Official Lua matrix
 
 [cols="1,2",options="header"]
 |===
-|ABI |Tested patch release
-|Lua 5.1 |5.1.5
-|Lua 5.2 |5.2.4
-|Lua 5.3 |5.3.6
-|Lua 5.4 |5.4.8
-|Lua 5.5 |5.5.0
+|ABI |Pinned patch
+
+|5.1
+|5.1.5
+
+|5.2
+|5.2.4
+
+|5.3
+|5.3.6
+
+|5.4
+|5.4.8
+
+|5.5
+|5.5.0
 |===
 
-The runners verify SHA-256 before extracting any source archive. Per version,
-they check production-source syntax, version rejection (including LuaJIT), CLI
-behavior, LuaRocks installation, native toolchain ABI, onedir, onefile,
-reproducibility, and clean-target execution.
+Archives are verified with SHA-256 before extract.
 
-On Linux or macOS:
-
-[source,sh]
+[source,bash]
 ----
-HOST_LABEL=my-physical-host sh tools/test-lua-versions.sh
+HOST_LABEL=<label> sh tools/test-lua-versions.sh
 ----
 
-On Windows:
+Windows:
 
 [source,powershell]
 ----
 powershell.exe -NoLogo -NoProfile -NonInteractive `
   -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1 `
-  -HostLabel my-physical-windows-host
+  -HostLabel <label>
 ----
 
-`VersionFilter` may shorten a diagnostic rerun, but a release requires all five
-pins. Evidence is written as one log per host and Lua patch version below a
-guarded `luainstaller-*` temporary directory.
+A release requires all five versions.
 
-[#testing-physical]
-== Physical host matrix
+[#testing-systems]
+== Tested system types
 
-[cols="2,2,1,3",options="header"]
+[cols="2,1",options="header"]
 |===
-|Device |Tested system |Architecture |Required coverage
+|System |Architecture
 
-|Local `WATERRUN`
-|Windows 11 Pro for Workstations
+|Windows 11
 |x86_64
-|PowerShell matrix, MSVC/Windows SDK, runtime discovery, LuaRocks commands,
-native DLL launcher, onedir, onefile, clean target
 
-|`yynicepc`
 |Debian 13
 |x86_64
-|Five-version GNU matrix and clean target
 
-|`localhost.localdomain`
-|Rocky Linux 10.2
+|Rocky Linux 10
 |x86_64
-|Five-version matrix plus full local contract and sample suites
 
-|NVIDIA DGX Spark `spark-49c8`
 |Ubuntu 24.04 LTS
 |ARM64
-|Five-version native ARM64 matrix and native-module samples
 
-|`yymac06` Mac mini
-|macOS 26.5
+|macOS 26.x
 |ARM64
-|Five-version Apple toolchain matrix, static Lua, onedir, onefile
-
-|`yymacstudio` Mac Studio
-|macOS 26.5.1
-|ARM64
-|Independent five-version reproduction and sample coverage
 |===
 
-This table lists tested devices only. It must not be read as a restriction to
-those distributions, versions, or computer models.
-
 [#testing-orchestration]
-== Lab orchestration
+== Orchestration (maintainers)
 
-Linux physical hosts:
-
-[source,sh]
+[source,bash]
 ----
 sh tools/remote-test-linux.sh
+MAC_HOST=<host alias from local lab config> sh tools/remote-test-macos.sh
 ----
 
-macOS physical hosts (run once for each alias):
-
-[source,sh]
-----
-MAC_HOST=yymac06 sh tools/remote-test-macos.sh
-MAC_HOST=yymacstudio sh tools/remote-test-macos.sh
-----
-
-Windows runs directly on the Windows machine with
-`tools/test-lua-versions.ps1`. `tools/remote-test-windows.sh` is only a small
-compatibility launcher for a POSIX environment that already provides `pwsh`;
-it contains no SSH or cross-build workflow.
-
-Linux and macOS orchestration transfer `git archive --format=tar HEAD`, not an
-untracked working tree. Temporary and cache roots must be normalized children
-of `/tmp/luainstaller-*`, and archive downloads must match their pinned digest.
+On Windows run `tools/test-lua-versions.ps1` on the target machine. Transfers
+use `git archive`; temporary paths are constrained under patterns such as
+`/tmp/luainstaller-*`. Default SSH targets in scripts are lab-local and are not
+part of the user-facing contract.
 
 [#testing-release]
 == Release checklist
 
-The candidate must be the tip of `main`.
-After the gates pass, push directly to `main`; do not publish a topic,
-development, or release branch. Before pushing,
-verify both local and remote branch refs and remove every branch other than
-`main`. Tags are release identifiers, not development branches.
+. rockspec lint and isolated install
+. Production sources parse on all five pinned versions
+. Four local suites without required skips
+. Five-version matrix on each verified environment class
+. Directory and single-file runs without system `lua` and without
+  `LUA_PATH` / `LUA_CPATH`
+. Repeated single-file build and extract checks
+. Native modules and system libraries inspected on target
+. Documentation does not prescribe cross-build or a device allowlist
+. `git diff --check` and clean-checkout review
 
-. LuaRocks lint passes and installation from the rockspec works in an isolated
-  tree.
-. Production Lua source parses on every pinned official Lua version.
-. Full local contract suites pass without a required skip.
-. All five Lua versions pass on every listed physical host.
-. Each native onedir and onefile output runs with no Lua command or Lua module
-  paths available on the target.
-. Repeated onefile builds and repeated extraction checks pass.
-. Copied native modules and external system libraries are inspected on their
-  actual target.
-. Documentation contains no instruction that requires source installation,
-  cross-building, Wine, a VM, MinGW, or a device allowlist.
-. `git diff --check` and the final clean-checkout verification pass before the
-  release commit is pushed.
+The candidate is the tip of `main`. Save the command output used for the
+decision.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

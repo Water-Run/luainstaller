@@ -6,342 +6,138 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This guide is for maintainers changing dependency discovery, manifests,
-launchers, or bundle assembly. Public behavior belongs in
-xref:USAGE.adoc[Using luainstaller].
+Maintainer notes. Public behavior: xref:USAGE.adoc[Using luainstaller].
 
 toc::[]
 
 [#implementation-flow]
-== Request flow
-
-Every public packaging request follows the same front half:
+== Request path
 
 [source,text]
 ----
-CLI or Lua API
-  -> normalize and validate options
+CLI / Lua API
+  -> validate options
   -> discover dependencies
-  -> build compatibility diagnostics
-  -> construct manifest
-  -> dispatch to onedir or onefile
+  -> compatibility diagnostics
+  -> manifest
+  -> directory or single-file bundle
 ----
 
-`src/init.lua` owns that orchestration. Submodules return structured errors or
-throw internal error tables that are converted at their boundary. CLI rendering
-is kept out of the core modules.
+Orchestration is `src/init.lua`. The CLI only parses and renders.
 
 [#implementation-api]
-== Public API contract
+== API
 
-The main module exports:
-
-* `analyze(opts)`;
-* `trace(opts)`;
-* `compatibility(opts)`;
-* `bundle(opts)`;
-* `getLogs(opts)`;
-* `clearLogs()`.
-
-Success values have `ok = true`. Failures have this shape:
-
-[source,lua]
-----
-{
-    ok = false,
-    error = {
-        type = "InvalidOptionsError",
-        message = "entry is required",
-        option = "entry",
-    },
-}
-----
-
-Option validation rejects unknown keys, wrong scalar types, sparse lists, and
-unsupported modes before discovery begins. Do not add a CLI option without also
-adding it to API normalization and documentation contracts.
+Exports: `analyze`, `trace`, `compatibility`, `bundle`, `getLogs`,
+`clearLogs`. The structured result contract applies to `analyze`, `trace`,
+`compatibility`, and `bundle` only. Success: `ok = true`. Failure: `ok = false`
+and `error`. `getLogs` returns a list of log records; `clearLogs` returns a
+boolean. Unknown options for the structured operations are rejected before
+discovery.
 
 [#implementation-modules]
-== Module responsibilities
+== Modules
 
-`src/cli.lua`::
-Parses the two CLI grammars, loads the installed Lua modules, and renders
-results. Repository tests provide their own source-module loader.
+[cols="2,3",options="header"]
+|===
+|File |Role
 
-`src/init.lua`::
-Validates the API options, obtains a dependency plan, creates the manifest, and
-selects onedir or onefile.
+|`cli.lua`
+|Two CLI grammars
 
-`src/analyzer.lua`::
-Lexes literal `require` calls, resolves Lua/native candidates, records trace
-decisions, detects cycles, and enforces the dependency limit.
+|`init.lua`
+|Options, plan, manifest, dispatch
 
-`src/discovery.lua`::
-Selects static, runtime, or manual discovery and applies include/exclude rules.
-Runtime discovery generates and executes a temporary tracer.
+|`analyzer.lua`
+|Literal require, resolve, cycles, limit
 
-`src/manifest.lua`::
-Maps sources to bundle destinations, hashes inputs, and rejects duplicate
-destinations. Traced aliases remain in trace records and are validated as one
-Lua/native ownership domain at the bundler boundary.
+|`discovery.lua`
+|static / runtime / manual
 
-`src/cgen.lua`, `src/runtime.lua`::
-Create and exercise the embedded Lua payload. They contain parallel runtime
-logic; changes to searcher installation, source stripping, or `arg` handling
-must be made and tested in both places.
+|`manifest.lua`
+|Path mapping, hashes, collisions
 
-`src/launcher.lua`::
-Embeds the bootstrap bytes in the platform-aware C launcher template.
+|`cgen.lua` / `runtime.lua`
+|Embedded payload (keep in sync)
 
-`src/bundler.lua`::
-Builds onedir output transactionally, compiles the launcher, copies native
-files and Lua runtime, and writes the manifest/ownership marker.
+|`launcher.lua`
+|C launcher template
 
-`src/onefile.lua`::
-Stages onedir, generates the extractor, enforces extraction-path safety, and
-starts the cached inner launcher.
+|`bundler.lua`
+|Directory transaction and compile
 
-`src/fs.lua`, `src/hash.lua`, `src/path.lua`, `src/process.lua`, `src/result.lua`::
-Checked reads/writes, SHA-256, normalization, shell execution/quoting, and error
-constructors.
+|`onefile.lua`
+|Extractor and cached launch
 
-`src/platform.lua`, `src/compat.lua`::
-Host detection, target profiles, and user-facing compatibility diagnostics.
+|`fs` / `hash` / `path` / `process` / `result`
+|I/O, SHA-256, paths, commands, errors
 
-`src/logger.lua`::
-Persistent failure logging below the user home directory. A five-second owned
-directory lock serializes updates, a 120-second stale lock may be recovered,
-and checked temporary-file/backup switching preserves the previous generation.
-A successful clear publishes two empty generations so recovery cannot resurrect
-cleared entries. Windows path checks reject junctions and other reparse points.
-Those checks invoke PowerShell from a validated `SystemRoot`/`WINDIR` absolute
-path, so a reduced application `PATH` does not disable logging.
+|`platform` / `compat` / `toolchain`
+|Host, compatibility, toolchain
 
-[#implementation-static]
-== Static discovery
+|`logger.lua`
+|Logs under `~/.luainstaller`
+|===
 
-The lexer tracks identifiers, comments, short strings, long strings, and
-punctuation closely enough to distinguish real calls from commented text;
-`-- require("x")`, for example, is ignored. It recognizes:
+[#implementation-discovery]
+== Discovery
 
-* `require("name")` and `require "name"`;
-* single quotes and long-bracket literals;
-* `pcall(require, "name")` as optional;
-* `local require = require` followed by normal literal calls.
+**static**: lex literal require / optional pcall; entry directory first;
+computed names → `DynamicRequireError`.
 
-Quoted literal contents are decoded with Lua's text parser in an empty
-environment. Concatenation and computed arguments produce
-`DynamicRequireError`.
-
-`ModuleResolver` uses an entry-rooted convention: it searches templates below
-the entry directory first, then the active `package.path` and `package.cpath`
-templates. This is packager behavior; raw `lua path/to/main.lua` does not
-automatically change Lua's search paths. Trace records retain the requesting file,
-requested name, candidates, selected path/type, and resolution reason.
-Native templates include `?/init` forms and Lua's C-root fallback, so literal
-`pkg` and `pkg.init` requests can safely map to one `pkg/init` library.
-
-The recursive analyzer marks a source visited only after its children complete.
-This makes cycles visible and produces dependency-first ordering for the
-manifest.
-
-[#implementation-runtime-discovery]
-== Runtime discovery
-
-Runtime mode creates a private `0700` work directory and writes a generated Lua
-tracer. The tracer patches global `require`, extends search paths relative to
-the entry, then executes the entry with the supplied run arguments.
-
-A require record is provisional until the real `require` succeeds. When a
-supported Lua runtime returns loader data naming a readable `.lua`, runtime
-discovery records that actual selected path. The Lua
-source is snapshotted at the loader boundary and compared with the stripped
-loader bytecode, so a later rewrite cannot become the accepted build input.
-The loader must also have exactly the source chunk's `_ENV` upvalue bound to the
-tracer's original global environment. A custom environment or additional
-captured state is not reproducible from the packaged source and is rejected.
-Runtime mode rejects `.so`, `.dylib`, and `.dll` loader paths: path reads before
-and after `dlopen` cannot prove which bytes the operating system mapped under
-concurrent replacement. It also rejects a successful custom or preload searcher
-that does not return a `.lua` source path. Use static discovery for literal
-native dependencies. Any module already cached before the tracer starts has no
-verifiable loader snapshot, including a substituted builtin name, and is
-rejected before resolver classification. Use static/manual discovery or avoid
-preloading it before the trace.
-After tracing, every successful non-cached require record must carry a verified
-Lua snapshot even if a searcher was inserted while `require` was already walking
-the searcher table.
-If loading fails and the application catches the error with `pcall`, that
-provisional record is removed. Binary-safe hexadecimal records are flushed
-before `os.exit`.
-
-The trace ends with one completion marker. Missing, repeated, malformed, or
-post-completion records are `DiscoveryError`, so a killed tracer cannot be
-mistaken for a complete dependency plan. The discovery interpreter must be an
-official Lua 5.1 or newer runtime; LuaJIT is rejected.
-
-After execution, ordinary filesystem loader records are checked against
-`ModuleResolver`; custom loader-data paths are verified directly against the
-snapshotted file that the tracer observed. Both routes produce the common
-dependency/trace shape consumed by later stages.
-
-The mode cannot observe unexecuted branches or a `require` reference captured
-before the tracer patch. Manual includes are the escape hatch for both cases.
+**runtime**: private directory + tracer; official Lua 5.1+; reject LuaJIT,
+native loader paths, and modules already cached before the trace. When the
+runtime returns **loader data** naming a readable `.lua`, that path is
+recorded. A single complete completion marker is required.
 
 [#implementation-manifest]
-== Manifest mapping
+== Manifest and ABI
 
-Pure-Lua sources preserve paths relative to the entry directory. Files outside
-that tree are placed below a sanitized `external/` path. Native modules start
-with basename destinations; trace information may add a dotted-module
-destination.
+Pure-Lua paths stay relative to the entry; outside the tree goes under
+`external/`. Manifest v2 uses SHA-256; mismatch → `SourceChangedError`.
+Launcher compile-time guards and `_VERSION` probes use the build
+interpreter's major/minor ABI and run on the native host.
 
-Manifest v2 sets `hash_algorithm = "sha256"`. Static discovery hashes the exact
-bytes it selects, runtime discovery carries Lua loader-boundary snapshots, and
-manual discovery retains the initially validated entry bytes. Manifest construction
-must match those discovery hashes; bundling compares again before generation,
-embedding, and copying. Any mismatch returns `SourceChangedError`. Output
-ownership hashes use the same checked SHA-256 implementation.
-
-Every launcher has a compile-time guard generated from the active Lua
-major/minor ABI and a matching runtime `_VERSION` check. Before publication,
-the bundler compiles and executes a tiny program linked with the same inputs as
-the launcher. The probe runs on the native build host, so a mislabeled DLL or
-library cannot pass on filename or `pkg-config` metadata alone.
-
-`manifest.compatibility` is a packaging requirement list, not a snapshot of the
-build host. The v2 platform section has distinct `host` and `target` records;
-structured values are returned by `trace` and `compatibility`.
-
-[#implementation-bootstrap]
-== Generated launcher and bootstrap
-
-`launcher.generateSource` combines three pieces:
-
-. a byte array containing the generated Lua bootstrap;
-. a C launcher template;
-. platform code that resolves the current executable path.
-
-The C launcher sets `arg`, installs a traceback handler, and calls the bootstrap
-with `lua_pcall`. The bootstrap prepends native search paths, installs the
-embedded module searcher at index 2, and runs the entry. Both the entry and
-modules are loaded in text mode.
-
-The C translation unit refuses headers unless `LUA_VERSION_NUM` matches the
-major/minor ABI recorded by the build interpreter.
-Embedded lookup has precedence but retains same-environment fallback to later
-host searchers for undeclared modules; clean-environment tests detect accidental
-reliance on that fallback.
-
-The embedded runtime restores `_G.arg`, its package searcher, and every bundled
-name it temporarily changes in `package.loaded` after an in-process run, on
-both success and failure. It also preserves all entry return values. The native
-process exits immediately afterward, but retaining the cleanup makes
-`src/runtime.lua` safe for nested
-tests and API use.
+Ownership markers use `luainstaller-generated-output-v2` and recursive
+SHA-256 inventories.
 
 [#implementation-onedir]
-== Onedir transaction and ownership
+== Directory transaction
 
-The final output is validated before staging starts. A private sibling directory
-is then created with an unpredictable name and `0700` mode. All potentially
-failing generation, compilation, copy, and hash operations happen there.
-
-At commit time:
-
-. an existing generated output is renamed to a unique backup;
-. the moved backup is revalidated against the pre-build snapshot;
-. the complete staging directory is renamed to the final path;
-. the backup is revalidated once more, then each declared file is atomically
-  quarantined and rehashed before nonrecursive removal;
-. if the second rename fails, the backup is restored.
-
-If either post-move validation detects concurrent content, publication is
-aborted and the previous directory is restored. Unrestorable data remains at a
-reported backup path instead of being deleted.
-
-This transaction protects directory-entry races. POSIX keeps an inode writable
-through a descriptor opened before its rename, so an unrelated process can
-still change a quarantined file after verification. The implementation cannot
-portably revoke that descriptor; callers must quiesce such writers or publish
-to a different output path. The output lock only coordinates luainstaller
-builders.
-
-The marker records the final path even though it is written in staging. This is
-required for later ownership validation.
-
-The overwrite checks intentionally distrust the generated comment alone. A v2
-marker beginning with `luainstaller-generated-output-v2` declares the final
-path and recursively inventories every real directory and regular file except
-the marker itself. Validation requires an exact tree and checks every file with
-SHA-256. v1 markers, symlinks, devices, unreadable entries, malformed paths,
-duplicates, missing entries, and additional nested content are refused.
+Private `0700` staging → backup previous output → rename → revalidate →
+quarantine delete. The marker records the final path. Overwrite decisions use
+the full v2 tree hashes.
 
 [#implementation-onefile]
-== Onefile security boundary
+== Single-file
 
-The extractor accepts only safe relative embedded paths. On POSIX it
-canonicalizes the configured temporary root, opens every root component with
-`openat(..., O_NOFOLLOW)`, creates the UID-specific cache with `mkdirat`, and
-requires every ancestor to be owned by root or the effective user. It rejects
-group/other-writable ancestors unless the sticky bit protects their entries.
-It also checks each bound cache directory descriptor's owner and mode. On
-Windows it opens
-the absolute temporary-path chain and every payload parent without following
-reparse points, omits write and delete sharing, and retains those directory
-handles. It also retains verified files without write or delete sharing until
-the child process exits.
-
-Every existing directory component must be a real directory. A symlink at the
-final file is removed; a symlink in a parent path aborts extraction. Cached
-files are accepted only when their complete bytes equal the embedded bytes.
-POSIX parent traversal, final-file matching, temporary creation, mode repair,
-replacement, and cleanup are all relative to descriptors opened component by
-component without following symlinks.
-Windows temporary creation uses a pinned parent, handle-based writes and flush,
-an atomic same-directory replacement, then a no-follow full-byte verification
-whose handle remains pinned across `CreateProcess` and child completion.
-The deterministic SHA-256 payload ID frames every sorted path, executable bit,
-size, and content. Build-only files and the onedir marker are not embedded.
-
-Windows child command lines use the CRT quoting rule: ordinary backslashes are
-preserved, backslashes before a quote are doubled appropriately, and trailing
-backslashes are doubled before the closing quote.
+Only safe relative paths. POSIX: `openat` / `O_NOFOLLOW` and UID cache.
+Windows: no reparse follow; handles held until the child exits. Payload ID:
+sorted path + mode + size + content SHA-256.
 
 [#implementation-errors]
-== Error boundaries
+== Errors
 
-Use a specific error type when the caller can act on it:
+Prefer actionable types: `ScriptNotFoundError`, `LuaSyntaxError`,
+`SourceChangedError`, `DynamicRequireError`, `ModuleNotFoundError`,
+`DuplicateModuleError`, `InvalidOutputError`, `ToolchainError`,
+`CompilationFailedError`, `FilesystemError`, `DiscoveryError`,
+`UnsupportedPlatformError`, `UnsupportedLuaVersionError`, and related.
 
-* `ScriptNotFoundError` — entry/include/source missing;
-* `LuaSyntaxError` — an entry or included/discovered Lua file does not compile;
-* `SourceChangedError` — source bytes differ from the manifest snapshot;
-* `DynamicRequireError` — static discovery cannot prove the name;
-* `ModuleNotFoundError` — no candidate resolves;
-* `DuplicateModuleError` — destination or module-name collision;
-* `InvalidOutputError` — output ownership/safety check failed;
-* `ToolchainError` — required compiler, headers, prefix, or `pkg-config` missing;
-* `CompilationFailedError` — compiler ran and rejected the source/link;
-* `FilesystemError` — create, copy, hash, rename, or extraction preparation
-  failed;
-* `DiscoveryError` — runtime tracer execution or output failed.
-
-Shell commands must quote every path and reject compiler flag metacharacters.
-Never place an unquoted value derived from `arg`, environment variables, or a
-manifest in a command string.
+Quote every path in shell commands; reject dangerous compiler-flag
+metacharacters.
 
 [#implementation-change-checklist]
-== Before merging an implementation change
+== Before changing code
 
-. Add a test that fails for the old behavior.
-. Run syntax checks and all four local test entry points, including
-  `test/production_edges.lua`.
-. Inspect generated C with warning flags when launcher/extractor code changes.
-. Run every affected remote target; generated C changes affect all targets.
-. Update the usage or format documentation when a public contract changes.
-. Confirm a failed rebuild cannot damage an existing generated output.
-. Confirm clean-environment execution does not fall back to host Lua modules.
+. Add a test that fails on the old behavior
+. Four local suites plus syntax checks
+. Review generated C when launcher/extractor changes
+. Run affected multi-version / multi-platform gates
+. Update docs when public behavior changes
+. Failed rebuild must not damage prior output
+. Clean environment must not rely on host modules
 
-The exact commands are in xref:TESTING.adoc[Testing].
+Commands: xref:TESTING.adoc[Testing].
 
 xref:../README.adoc#documentation-index[Back to documentation index]

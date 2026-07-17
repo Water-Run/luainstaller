@@ -6,196 +6,120 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This document describes the compatibility contract for generated bundles and
-records the physical systems used for release testing. The device table is
-evidence, not a platform allowlist.
+Compatibility contract. No specific hostnames. Tables of systems below are
+**evidence, not a platform allowlist**.
 
 toc::[]
 
 [#platforms-contract]
-== Native-host contract
+== Native host
 
-`luainstaller` removes the deployed program's dependency on a separately
-installed `lua` command. It does not emulate another operating system or
-translate native ABIs. A generated bundle must run on a target compatible with
-the build host in all of these dimensions:
+The product removes the need for a separate system `lua` command. It does not
+translate ABIs, emulate other operating systems, or cross-compile. Build and
+run on the target-class environment.
 
-. operating-system family and loader conventions;
-. CPU architecture;
-. system and compiler ABI;
-. Lua major/minor ABI;
-. native-module dependencies.
+Align: OS family and loader conventions, CPU architecture, system/compiler
+ABI, Lua major/minor ABI, and native modules with their system dependencies.
 
-Build on the target OS and architecture. `--target-os`, when supplied, is an
-assertion about the detected native host; asking for another OS or architecture
-returns `UnsupportedPlatformError`. There is no cross-build mode.
+There is no cross-build mode. `--target-os` only asserts the detected host OS;
+mismatch → `UnsupportedPlatformError`.
 
-The supported interpreter range is official Lua `>= 5.1` and `< 6.0`. LuaJIT
-is rejected. The analysis interpreter, runtime tracer, header set, linked Lua
-runtime, and copied Lua C modules must share one major/minor ABI. Patch versions
-may differ only where the upstream ABI remains compatible; test the exact
-runtime and modules that will be shipped.
+[#platforms-lua]
+== Lua
 
-Launcher C is generated for the active ABI. For example, a build running under
-Lua 5.3 uses a `LUA_VERSION_NUM == 503` compile-time guard, `lua5.3` module
-paths, and an ABI-specific runtime name. Before output is published,
-luainstaller compiles and executes a linked-runtime probe and requires the same
-`Lua 5.x` result as the build interpreter. The launcher repeats the runtime
-check when it starts.
+* official Lua `>= 5.1` and `< 6.0`
+* LuaJIT is rejected
+* analysis interpreter, tracer, headers, linked library, and bundled C modules:
+  one major/minor
+* launchers are generated for the active ABI; a native linked-runtime probe
+  before publish requires `_VERSION` to match the build interpreter
 
 [#platforms-toolchains]
-== Native toolchain discovery
-
-Toolchain selection is capability-based on the current host. The tested native
-paths are:
+== Toolchains
 
 [cols="1,2,3",options="header"]
 |===
-|Host family |Lua runtime strategy |Required build capability
+|Host |Runtime strategy |Typical requirements
 
 |Linux
-|Shared Lua runtime copied into `.luai/native`
-|Native C compiler plus a matching `pkg-config` Lua record and shared library
+|Shared library copied into `.luai/native`
+|C compiler, matching-ABI `pkg-config` and shared liblua
 
 |macOS
-|Lua static library linked into the launcher
-|Native Apple compiler plus a matching prefix containing headers and
-`lib/liblua.a`
+|Static `liblua.a` linked into the launcher
+|Apple compiler, prefix with `lua.h` and `lib/liblua.a`
 
 |Windows
-|ABI-specific Lua DLL copied beside the executable and into `.luai/native`
-|Native MSVC toolchain, Windows SDK, headers, import library, and matching DLL
+|ABI-specific DLL beside the executable and under `.luai/native`
+|MSVC, Windows SDK, headers, import library, matching DLL
 |===
 
-These rows explain the backends exercised by this repository. They do not
-restrict luainstaller to particular distribution names, computer models, or OS
-versions. A host that supplies the required native capability still needs its
-own release test.
+When automatic discovery is insufficient, use `--lua-prefix` or
+`LUAI_LUA_PREFIX`. An explicit prefix is authoritative; discovery does not
+silently substitute another install. The prefix is for the current host and
+ABI, not a cross SDK.
 
-Use `--lua-prefix PATH` or `LUAI_LUA_PREFIX` when automatic discovery cannot
-identify the intended Lua installation. The prefix must belong to the current
-host and the interpreter's major/minor ABI. It is not a cross-compilation SDK.
-Once selected explicitly, that prefix is authoritative and discovery does not
-silently substitute another installed Lua.
+A static-only Lua install without a shared library cannot satisfy the
+shared-runtime Linux profile. Custom installs may set `PKG_CONFIG_PATH`.
 
-On Linux, `pkg-config --modversion` and compiler/linker flags are checked
-against the active Lua ABI. A static-only Lua installation is insufficient for
-the shared-runtime profile. For a custom installation, expose its matching
-`.pc` file:
-
-[source,sh]
-----
-PKG_CONFIG_PATH=/opt/lua/lib/pkgconfig \
-  luainstaller build --dir app/main.lua -o build/app
-----
-
-On macOS, a typical prefix contains:
-
-[source,text]
-----
-/opt/lua/
-├── include/lua.h
-└── lib/liblua.a
-----
-
-The launcher and onefile extractor retain the linker's content-derived
-`LC_UUID`. Lua C modules remain Mach-O bundles with their own architecture and
-deployment-target requirements. Inspect them with `file` and `otool -L`.
-
-On Windows, use the ABI-specific runtime and import library selected by the
-native toolchain, such as `lua51.dll`/`lua51.lib` or
-`lua55.dll`/`lua55.lib`. The build and linked-runtime probe run directly on
-Windows; Wine and MinGW are neither required nor used by the release gate.
-Windows paths are checked without following reparse points. Generated runtime
-code currently uses narrow Win32 path/process APIs, so release tests must cover
-every non-ASCII path and argument repertoire the application promises.
+macOS does not produce universal binaries, code-sign, or notarize. Windows
+builds and probes run natively; Wine/MinGW are not part of the release path.
+Generated runtime code currently uses narrow Win32 path/process APIs.
 
 [#platforms-native]
 == Native Lua C modules
 
-Discovery copies the module selected from `package.cpath`. It does not:
+Discovery copies the file selected from `package.cpath`. It does not rebuild
+for another OS/arch/ABI, rewrite RPATH, recursively package system libraries,
+or audit licenses.
 
-* rebuild the module for another OS, architecture, or Lua ABI;
-* rewrite RPATH or install names;
-* recursively copy OpenSSL, database, C++ runtime, or vendor libraries;
-* verify license or redistribution terms.
-
-Use the source program's actual module paths during analysis. In these examples,
-replace `5.x` with the ABI being built:
-
-[source,sh]
+[source,bash]
 ----
 LUA_PATH='/srv/app/share/lua/5.x/?.lua;;' \
 LUA_CPATH='/srv/app/lib/lua/5.x/?.so;;' \
 luai -t app/main.lua --max-deps 250
 ----
 
-Inspect copied native files and their dependent libraries before release. Use
-`ldd` on Linux, `otool -L` on macOS, and a native PE dependency viewer on
-Windows. A successful launcher compile proves the Lua runtime link, not closure
-of every application module dependency.
+A successful launcher compile only proves the Lua runtime link, not closure of
+every application module's system dependencies.
 
 [#platforms-matrix]
-== Physical release-test matrix
+== Tested system types
 
-Every listed device runs the pinned official Lua 5.1.5, 5.2.4, 5.3.6, 5.4.8,
-and 5.5.0 compatibility matrix. Release coverage includes LuaRocks installation,
-native onedir and onefile builds, repeated-build checks, and execution with Lua
-removed from the target `PATH`.
-Lua 5.5 installation coverage uses LuaRocks 3.13.0 or newer.
-
-[cols="2,2,1,3",options="header"]
+[cols="2,1",options="header"]
 |===
-|Device |Tested system |Architecture |Role
+|System |Architecture
 
-|Local workstation (`WATERRUN`)
-|Windows 11 Pro for Workstations
+|Windows 11
 |x86_64
-|Native PowerShell, MSVC, Windows SDK, DLL and clean-target coverage
 
-|`yynicepc`
 |Debian 13
 |x86_64
-|Native GNU toolchain and oldest tested Lua patch line
 
-|`localhost.localdomain`
-|Rocky Linux 10.2
+|Rocky Linux 10
 |x86_64
-|Full Linux contract and sample suites
 
-|NVIDIA DGX Spark (`spark-49c8`)
 |Ubuntu 24.04 LTS
 |ARM64
-|Native ARM64 launcher, onefile, and module coverage
 
-|`yymac06` Mac mini
-|macOS 26.5
+|macOS 26.x
 |ARM64
-|Native Apple toolchain and static-Lua coverage
-
-|`yymacstudio` Mac Studio
-|macOS 26.5.1
-|ARM64
-|Independent Apple Silicon reproduction
 |===
 
-Passing this matrix does not claim that these are the only usable systems. It
-states exactly what was tested for this release.
+Systems not listed may still work when native capability and ABI align; verify
+yourself. Full gates: xref:TESTING.adoc[Testing].
 
 [#platforms-limits]
-== Product boundaries
+== Out of scope
 
-The current release does not provide:
+* cross-compilation / one binary for many platforms
+* automatic closure of all native system libraries
+* bytecode-only packaging, encryption, obfuscation
+* loading native modules from single-file without extraction
+* macOS universal / signing / notarization
+* MSI / PKG / DEB / RPM generation
 
-* cross-compilation or universal cross-platform executables;
-* automatic recursive closure of native system-library dependencies;
-* bytecode-only packaging, encryption, or source obfuscation;
-* direct loading of native modules from onefile without extraction;
-* universal macOS binaries, code signing, or notarization;
-* MSI, PKG, DEB, RPM, or other installer generation.
-
-Onefile is an executable packaging form, similar in intent to PyInstaller's
-single-file mode: it extracts a verified native onedir payload before starting
-the inner launcher. It is not an operating-system installer.
+Single-file is an executable distribution form (extract then start), not an OS
+installer.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

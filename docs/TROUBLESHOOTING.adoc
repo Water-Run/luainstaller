@@ -6,15 +6,17 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Diagnose the earliest failing layer. A onefile error is much easier to explain
-after the equivalent onedir bundle has been tested.
+Diagnose the earliest failing step. Confirm the directory bundle before the
+single-file form.
+
+CLI examples use `luai`. Logs use `luainstaller logs`.
 
 toc::[]
 
 [#troubleshooting-first]
-== First five commands
+== First five steps
 
-[source,sh]
+[source,bash]
 ----
 lua app/main.lua --help
 luai -a app/main.lua --max-deps 120
@@ -23,354 +25,182 @@ luai -b --dir app/main.lua -o build/app --max-deps 120
 env -i PATH=/usr/bin:/bin build/app/app
 ----
 
-Record the first command that fails. Do not move to onefile until all five pass.
+Record the first failure.
 
 [#troubleshooting-cli]
-== The command is rejected immediately
+== Command rejected immediately
 
-Symptoms::
-`unknown luai command`, `unknown luainstaller command`, or `unknown option`.
+Messages such as `unknown luai command` / `unknown option`:
 
-Checks::
+* `luai` uses `-a` / `-t` / `-b` — not `luai build`
+* options that take values must be followed by a value
+* runtime arguments for the entry go after `--`
 
-* `luai` uses `-a`, `-t`, and `-b`.
-* `luainstaller` uses `analyze`, `trace`, and `build`.
-* Options that take values must be followed by a value.
-* Entry-script arguments for runtime discovery follow `--`.
-
-[source,sh]
+[source,bash]
 ----
 luai -b app/main.lua -- --profile staging
-luainstaller build app/main.lua -- --profile staging
 ----
 
 [#troubleshooting-errors]
-== Structured error types
+== Error types
 
-`ScriptNotFoundError`::
-The entry or a manual include cannot be opened. Check the working directory,
-case, and whether the path names a regular file.
+[cols="2,3",options="header"]
+|===
+|Type |Meaning
 
-`LuaSyntaxError`::
-An entry, discovered dependency, or manual include failed Lua's text compiler.
-The error reports the source path and syntax detail. Fix it before discovery;
-invalid source is never embedded as a deferred runtime surprise.
+|`ScriptNotFoundError`
+|Entry or include cannot be opened
 
-`SourceChangedError`::
-A source file no longer matches the bytes captured during dependency discovery
-or the later manifest SHA-256 snapshot. Stop concurrent generators or editors,
-restore a stable source tree, and rebuild from analysis. Do not retry copying a
-stale manifest into a different output.
+|`LuaSyntaxError`
+|Source fails the text compiler
 
-`DynamicRequireError`::
-Static discovery found a computed name or unsupported alias. Use runtime mode
-for a safe executable path, or manual mode with reviewed includes.
+|`SourceChangedError`
+|Source bytes changed after discovery
 
-`ModuleNotFoundError`::
-No Lua or native candidate exists in the active search templates. Compare the
-trace candidates with the source program's `package.path` and `package.cpath`.
+|`DynamicRequireError`
+|Static mode cannot prove a computed `require`
 
-`DependencyLimitExceededError`::
-The number of discovered Lua files exceeded `--max-deps`. Inspect the trace for
-an unexpectedly broad module tree before raising the limit.
+|`ModuleNotFoundError`
+|No candidate under search templates
 
-`DuplicateModuleError`::
-Two sources map to one module name or bundle destination. Preserve directory
-structure for manual includes and remove ambiguous copies from search paths.
+|`DependencyLimitExceededError`
+|Exceeded `--max-deps`
 
-`InvalidOptionsError`::
-An API value has the wrong type, a list is sparse, a mode is unknown, or a key
-is unsupported. CLI spelling errors are usually caught before the API call.
+|`DuplicateModuleError`
+|Module name or bundle path collision
 
-`InvalidOutputError`::
-The output already contains user data, has been modified since generation, is a
-symlink, or does not match its ownership marker. Inspect it; do not bypass the
-check blindly. Only `luainstaller-generated-output-v2` is eligible for automatic
-replacement.
+|`InvalidOptionsError`
+|Illegal options
 
-`ToolchainError`::
-A required compiler, Lua prefix, shared runtime, or `pkg-config` record is
-missing or does not identify the active Lua major/minor ABI. Check both
-`pkg-config --modversion lua`
-and the header's `LUA_VERSION_NUM`; a plausible library filename is not enough.
-If `--lua-prefix` or `LUAI_LUA_PREFIX` is set, fix or remove that selection;
-an invalid explicit prefix is not replaced by an automatically discovered one.
-The linked-runtime probe must report the same `Lua 5.x` result as the build
-interpreter. It runs directly on the native build host.
+|`InvalidOutputError`
+|Output cannot be safely replaced (only v2 auto-rebuild)
 
-`CompilationFailedError`::
-The compiler ran but failed. Read the captured command and output from the first
-diagnostic line, not only the final linker status.
+|`UnsupportedPlatformError`
+|`--target-os` disagrees with the host
 
-`LuaRuntimeNotFoundError`::
-The Linux launcher linked without a discoverable shared Lua library. Confirm
-that `pkg-config --libs lua` selects shared Lua and that `ldd` can resolve it.
+|`UnsupportedLuaVersionError`
+|Not a supported official 5.x (including LuaJIT)
 
-`DiscoveryError`::
-The runtime tracer entry failed, exited nonzero, could not create its private
-work directory, or did not produce parseable output.
+|`ToolchainError`
+|Compiler / prefix / `pkg-config` / ABI mismatch; bad explicit prefix is not
+auto-replaced
 
-`FilesystemError`::
-A write, copy, hash, staging rename, cache validation, or cleanup failed. Check
-the `path`, `backup_path`, and `restore_error` fields when present.
+|`CompilationFailedError`
+|Compiler ran and failed
+
+|`LuaRuntimeNotFoundError`
+|Linux cannot find shared liblua
+
+|`DiscoveryError`
+|Runtime discovery failed or incomplete
+
+|`FilesystemError`
+|Write, rename, cache, or similar failure
+|===
 
 [#troubleshooting-static]
-== Analysis does not match runtime
+== Analysis disagrees with runtime
 
-Print the interpreter's real search paths:
-
-[source,sh]
+[source,bash]
 ----
 lua -e 'print(package.path); print(package.cpath)'
 ----
 
-Run analysis with those same environment variables. A common mismatch is using
-one Lua installation to run the source and a different installation to run
-`luai`.
+Analyze with the same environment. Do not run the source under one Lua and
+`luai` under another.
 
-luainstaller resolution is entry-rooted before it consults active Lua search
-templates. Raw `lua app/main.lua` does not add `app/` by itself. If direct source
-execution needs that convention, initialize `package.path` explicitly rather
-than relying on the packager.
+Resolution is entry-rooted before `package.path`. Bare `lua app/main.lua` does
+not add the entry directory by itself.
 
-For static discovery, check whether the source uses:
-
-* a computed module name;
-* a different-name alias of `require`;
-* module path setup performed before the entry runs;
-* escaped characters in a module name;
-* optional loads other than `pcall(require, "name")`.
-
-Use `-t --verbose` to see the requested name, candidates, and selected path.
+For static mode, watch concatenated names, require aliases, path setup before
+the entry, and non-standard optional loads. `luai -t --verbose` shows
+candidates.
 
 [#troubleshooting-runtime]
-== Runtime discovery fails or misses a module
+== Runtime discovery
 
-Run the entry manually with the exact discovery arguments first:
-
-[source,sh]
+[source,bash]
 ----
 lua app/main.lua profile_a input.json
 luai -a app/main.lua -d runtime -- profile_a input.json
 ----
 
-Runtime mode observes only the branch taken by this run. Repeat with other
-profiles or add manual includes for modules loaded on later branches.
-
-A missing module caught by the application's `pcall` is not treated as a
-dependency. A different runtime error inside a module still fails tracing.
-
-When a supported Lua runtime returns loader data from a successful `require`,
-the tracer uses that real selected file path when available, including after the entry changes
-`package.path`, and snapshots Lua source at the loader boundary. Native loader
-paths are rejected because reads around `dlopen` cannot identify the exact
-mapped bytes; use static discovery for literal native dependencies. A preloaded
-or custom loader must return a `.lua` source path; missing or non-file loader
-data is rejected. All pre-trace cached requires, including builtin names changed
-by `LUA_INIT`, are rejected with `DiscoveryError`; use static/manual mode or
-avoid loading that module before the tracer. An
-incomplete or duplicate completion record is a `DiscoveryError`, not a partial
-success.
-
-If startup changes data, sends requests, or launches services, do not run it as
-a build-time tracer. Use static/manual discovery or add a harmless discovery
-mode to the application.
+Only this run's branch is observed. Missing modules swallowed by `pcall` are
+not dependencies. Do not use a side-effecting entry as a build-time tracer.
 
 [#troubleshooting-compile]
-== Compiler or linker failure
+== Compile / link
 
-=== Linux
+**Linux**
 
-[source,sh]
+[source,bash]
 ----
 pkg-config --cflags --libs lua
 cc --version
 lua -v
 ----
 
-If `pkg-config` cannot find Lua, install the development package or point
-`PKG_CONFIG_PATH` at a matching `lua.pc`. If the launcher compiles but
-`LuaRuntimeNotFoundError` follows, the selected Lua may be static-only.
+**macOS**: check `include/lua.h`, `lib/liblua.a`, and architecture under
+`--lua-prefix`.
 
-=== macOS
-
-[source,sh]
-----
-test -f "$LUA_PREFIX/include/lua.h"
-test -f "$LUA_PREFIX/lib/liblua.a"
-file "$LUA_PREFIX/lib/liblua.a"
-----
-
-The prefix and native Lua modules must contain the target architecture. An
-x86_64 archive does not satisfy an ARM64 build.
-
-=== Windows
-
-[source,powershell]
-----
-cl.exe
-Get-ChildItem $env:LUAI_LUA_PREFIX -Recurse -Filter 'lua*.dll'
-----
-
-Run from a native developer environment with MSVC, the Windows SDK, matching
-Lua headers/import library, and the ABI-specific Lua DLL. Cross-compilation,
-MinGW, and Wine are not part of the build path.
+**Windows**: in an MSVC + Windows SDK environment, check `cl.exe` and
+`lua*.dll` under the prefix.
 
 [#troubleshooting-native]
-== Bundle starts, then a native module fails
+== Native module fails after start
 
-Typical messages include `module not found`, `undefined symbol`, `image not
-found`, `wrong ELF class`, or `not a valid Win32 application`.
+Confirm `.luai/native`, manifest trace, architecture and system libraries;
+clear Lua environment variables; test on the real target OS.
 
-. Confirm the module is present in `.luai/native`.
-. Inspect the manifest trace for its requested name and selected source.
-. Inspect architecture and external libraries.
-. Run with Lua environment variables cleared.
-. Test on the actual target OS.
-
-[source,sh]
+[source,bash]
 ----
 file build/app/.luai/native/*
-ldd build/app/.luai/native/module.so
+ldd build/app/.luai/native/*.so
 env -i PATH=/usr/bin:/bin build/app/app
 ----
 
-On macOS use `otool -L`; on Windows use a PE dependency viewer or
-`dumpbin /dependents`.
-
-If direct execution works only without the clean environment, the program is
-falling back to host modules rather than using the bundle.
-
-That fallback is permitted by the same-environment lookup contract: embedded
-modules have precedence, but undeclared names continue to later host searchers.
-It is not evidence that the dependency was packaged.
-
-[#troubleshooting-path]
-== Direct path works but PATH/symlink launch fails
-
-This should be covered by the current launcher, which resolves the process
-image path through the operating system. If it regresses, collect:
-
-[source,sh]
-----
-command -v app
-ls -l "$(command -v app)"
-find /real/bundle/.luai/native -type f -print
-env -i PATH=/directory/with/link:/usr/bin:/bin app
-----
-
-Confirm that the executable was produced by the current source tree; older
-launchers derived native paths directly from `argv[0]`.
+If it only works without a clean environment, the process is using host
+modules—that does not prove packaging.
 
 [#troubleshooting-output]
-== Rebuild refuses an existing directory
+== Rebuild refused
 
-Read the marker and list the recursive tree:
-
-[source,sh]
+[source,bash]
 ----
 find build/app -print | sort
 sed -n '1,160p' build/app/.luai/generated-output.txt
 ----
 
-Common causes are a user file added beside the executable, an edited executable,
-a moved output directory, or an incomplete bundle made by an older release.
+The first line must be `luainstaller-generated-output-v2`, and the tree must
+match recorded SHA-256 digests. v1 requires manual delete or a new `-o`.
 
-The first marker line must be `luainstaller-generated-output-v2`. Its directory
-and file records, including SHA-256 digests, must describe the exact recursive
-file set. v1 output is intentionally never overwritten: after inspecting and
-backing it up, perform a one-time explicit removal or select a new output path.
-
-Use a new output path when uncertain. A current failed rebuild should leave the
-previous generated directory runnable because compilation occurs in staging.
-
-Each onedir build holds a fixed-length sibling lock named
-`.luai-lock-<sha256-of-normalized-output-path>`. Its `owner.*` record names the
-exact output. If the builder is killed or the machine loses power, the hidden
-directory can remain. Before removing it, confirm that no `luainstaller`,
-`luai`, compiler, or matching build process is still running, then inspect its
-timestamp and owner record:
-
-[source,sh]
-----
-for lock in build/.luai-lock-*; do
-  test -d "$lock" || continue
-  ls -ld "$lock"
-  sed -n '1,2p' "$lock"/owner.*
-done
-ps aux | grep -E '[l]uainstaller|[l]uai|[c]c|[g]cc|[c]lang'
-# After matching the owner record, remove that one exact lock path:
-rm -rf 'build/.luai-lock-<full-hash>'
-----
-
-Never remove a lock merely because a build is slow; native dependency builds
-can legitimately run for several minutes.
+Lock directory: `build/.luai-lock-<hash>`. After confirming no builder is
+running, remove the lock indicated by `owner.*`.
 
 [#troubleshooting-onefile]
-== Onefile extraction fails
+== Single-file extraction fails
 
-First verify onedir. Then inspect the temporary root:
+Confirm the directory bundle first. Check `TMPDIR` and
+`luainstaller-onefile-<uid>` ownership/mode. Cache hits compare full bytes, not
+size alone.
 
-[source,sh]
-----
-printf 'TMPDIR=%s\n' "${TMPDIR:-/tmp}"
-ls -ld "${TMPDIR:-/tmp}"
-ls -ld "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)" 2>/dev/null
-----
-
-On POSIX the cache must be a real directory owned by the effective user with no
-group/other permissions. Parent-directory symlinks inside the cache are
-rejected. The temporary root itself is canonicalized, so the standard macOS
-`/tmp -> /private/tmp` link is supported. Any group/other-writable ancestor
-must have the sticky bit, and every ancestor must be owned by the effective
-user or root. If a custom `TMPDIR` fails this check, use an owner-only directory
-below trusted ancestors or the system sticky temporary directory.
-
-A cache hit requires an exact byte comparison with the executable's embedded
-payload; matching size is insufficient. The SHA-256 payload directory changes
-when any framed path, mode, size, or content changes. If a matching cache file
-has the wrong executable mode, the extractor repairs it before launch.
-
-Remove a cache only after confirming that no bundle process is using it:
-
-[source,sh]
+[source,bash]
 ----
 rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 ----
 
-On Windows, cache directories must be owned by the current user's SID and must
-accept the protected user-and-`SYSTEM` DACL. Check `%TEMP%`, reparse points,
-path length, antivirus quarantine, domain security policy, and permission to
-create a child process.
-
 [#troubleshooting-logs]
-== Logs and issue data
+== When reporting issues
 
-[source,sh]
+[source,bash]
 ----
-luainstaller version
+luai -v
 luainstaller logs --level error --limit 20
 lua -v
-uname -a
 ----
 
-For a useful report include:
-
-* exact command and exit status;
-* complete structured error, compiler output, or traceback;
-* host and target OS/architecture;
-* Lua version and `pkg-config --cflags --libs lua` where relevant;
-* discovery mode and redacted trace;
-* onedir manifest and marker;
-* `file` plus native dependency inspection;
-* whether clean-environment onedir and onefile differ.
-
-Remove credentials, tokens, home-directory details, and proprietary source
-before sharing logs or manifests.
-
-Concurrent log updates use `logs.lua.lock` and a backup generation. If logging
-returns false, preserve `logs.lua` and `logs.lua.bak` for diagnosis. Do not
-delete an active lock; owner-token release and 120-second stale recovery are
-designed to prevent one process from releasing another writer's lock.
+Include: full command and exit status, error type / compiler output, OS and
+architecture, Lua version, discovery mode, redacted trace, and whether a clean
+environment still fails. Strip secrets and private paths.
 
 xref:../README.adoc#documentation-index[Back to documentation index]
