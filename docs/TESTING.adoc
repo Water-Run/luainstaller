@@ -231,6 +231,42 @@ use `git archive`; temporary paths are constrained under patterns such as
 `/tmp/luainstaller-*`. Default SSH targets in scripts are lab-local and are not
 part of the user-facing contract.
 
+[#testing-real-world-benchmarks]
+== Real-world benchmark matrix (manual)
+
+For realistic shipping scenarios beyond the contract suites, run:
+
+[source,bash]
+----
+sh tools/benchmark-real-world.sh
+----
+
+The matrix covers:
+
+* baseline (hello world)
+* pure Lua multi-module
+* dynamic require (`--require-engine runtime`)
+* native C modules (`lua-cjson`, `LuaSocket`)
+* luafilesystem (`luafilesystem`)
+* `neovim` `runtime/lua` scale stress
+* synthetic large trees (`100`, `1000`, `10000` modules)
+
+Useful options:
+
+* `--skip-external` to skip GitHub network projects (`tinykeep`, `neovim`)
+* `--skip-native` to skip native module install/cases
+* `--fake-scales "100 1000 10000"` to adjust pressure sets
+* `--keep-workspace` to preserve fixtures and logs
+* `--neovim-timeout 30` to cap each neovim command
+
+Default behavior cleans `/tmp/luainstaller-*` workspace after completion.
+Summary and logs are written to:
+
+[source,bash]
+----
+/tmp/luainstaller-benchmark-*/results/summary.txt
+----
+
 [#testing-release]
 == Release checklist
 

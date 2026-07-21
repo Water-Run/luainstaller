@@ -1,0 +1,100 @@
+Real-world project compile commands
+=================================
+
+`Real World` means compiling the real projects tracked by the benchmark flow.
+
+Run all cases in one command (script-managed temp workspace):
+
+KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 sh tools/benchmark-real-world.sh
+
+1) Checkout real projects
+-------------------------
+
+git clone --depth 1 https://github.com/adnzzzzZ/tinykeep.git
+git clone --depth 1 https://github.com/neovim/neovim.git
+git clone --depth 1 https://github.com/mpx/lua-cjson.git
+git clone --depth 1 https://github.com/lunarmodules/luasocket.git
+git clone --depth 1 https://github.com/lunarmodules/luafilesystem.git
+
+If network is not available:
+
+SKIP_EXTERNAL=1 sh tools/benchmark-real-world.sh
+
+2) Manual per-project luai compile commands
+-----------------------------------------
+
+export LUAI_BIN=luai
+export LUA_BIN=lua
+export LUAROCKS_BIN=luarocks
+export WORK_ROOT=/tmp/luainstaller-benchmark
+export WORK=${WORK_ROOT}-manual
+export MAX_DEPS=5000
+mkdir -p "$WORK" "$WORK/rocks"
+export ABI=$($LUA_BIN -e 'io.write(_VERSION:match("%d+%.%d+"))')
+export LUA_PATH="$WORK/rocks/share/lua/$ABI/?.lua;$WORK/rocks/share/lua/$ABI/?/init.lua;;"
+export LUA_CPATH="$WORK/rocks/lib/lua/$ABI/?.so;;"
+
+# lua-cjson
+$LUAROCKS_BIN --tree "$WORK/rocks" --lua-version "$ABI" install lua-cjson 2.1.0.10-1
+cat > "$WORK/cjson-main.lua" <<'EOC'
+local cjson = require("cjson")
+print(cjson.encode({ok = true}))
+EOC
+$LUAI_BIN -a "$WORK/cjson-main.lua" --require-engine static --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --dir "$WORK/cjson-main.lua" --require-engine static -o "$WORK/cjson-dir" --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --file "$WORK/cjson-main.lua" --require-engine static -o "$WORK/cjson-onefile" --max-deps "$MAX_DEPS"
+
+# LuaSocket
+$LUAROCKS_BIN --tree "$WORK/rocks" --lua-version "$ABI" install luasocket 3.1.0-1
+cat > "$WORK/luasocket-main.lua" <<'EOC'
+local socket = require("socket")
+local tp = require("socket.tp")
+local ftp = require("socket.ftp")
+local ltn12 = require("ltn12")
+print(type(socket.gettime()))
+print(type(tp.gettime()))
+print(type(ftp))
+print(type(ltn12.source))
+EOC
+$LUAI_BIN -a "$WORK/luasocket-main.lua" --require-engine static --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --dir "$WORK/luasocket-main.lua" --require-engine static -o "$WORK/luasocket-dir" --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --file "$WORK/luasocket-main.lua" --require-engine static -o "$WORK/luasocket-onefile" --max-deps "$MAX_DEPS"
+
+# LuaFileSystem
+$LUAROCKS_BIN --tree "$WORK/rocks" --lua-version "$ABI" install luafilesystem 1.9.0-1
+cat > "$WORK/luafilesystem-main.lua" <<'EOC'
+local lfs = require("lfs")
+print(type(lfs.currentdir()))
+EOC
+$LUAI_BIN -a "$WORK/luafilesystem-main.lua" --require-engine static --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --dir "$WORK/luafilesystem-main.lua" --require-engine static -o "$WORK/luafilesystem-dir" --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --file "$WORK/luafilesystem-main.lua" --require-engine static -o "$WORK/luafilesystem-onefile" --max-deps "$MAX_DEPS"
+
+# tinykeep (or fallback)
+ENTRY_TINYKEEP=$PWD/tinykeep/main.lua
+[ -f "$ENTRY_TINYKEEP" ] || ENTRY_TINYKEEP=$PWD/test/student_management_system/main.lua
+$LUAI_BIN -a "$ENTRY_TINYKEEP" --require-engine static --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --dir "$ENTRY_TINYKEEP" --require-engine static -o "$WORK/tinykeep-dir" --max-deps "$MAX_DEPS"
+$LUAI_BIN -b --file "$ENTRY_TINYKEEP" --require-engine static -o "$WORK/tinykeep-onefile" --max-deps "$MAX_DEPS"
+
+# Neovim runtime/lua subtree
+# Use the suite to generate wrapper and run (same suite path pattern):
+KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 sh tools/benchmark-real-world.sh
+
+3) Script-generated stress cases
+-------------------------------
+
+# pure Lua multi-module
+/tmp/luainstaller-benchmark-*/pure-modules/main.lua
+# dynamic require
+/tmp/luainstaller-benchmark-*/dynamic-require/main.lua
+# large trees:
+# /tmp/luainstaller-benchmark-*/fake-100/main.lua
+# /tmp/luainstaller-benchmark-*/fake-1000/main.lua
+# /tmp/luainstaller-benchmark-*/fake-10000/main.lua
+
+Each entry can be run with:
+
+$LUAI_BIN -a <entry> --require-engine <static|runtime> --max-deps <N>
+$LUAI_BIN -b --dir <entry> --require-engine <static|runtime> -o <out-dir> --max-deps <N>
+$LUAI_BIN -b --file <entry> --require-engine <static|runtime> -o <out-file> --max-deps <N>
