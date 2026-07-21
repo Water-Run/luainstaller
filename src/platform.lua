@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-11
+    2026-07-18
 ]]
 
 local process = require("luainstaller.process")
@@ -73,6 +73,18 @@ function M.profile(opts)
         return nil, result.error(
             "UnsupportedPlatformError",
             "luainstaller only builds for the native host OS and architecture",
+            {
+                host_os = host.os,
+                host_arch = host_arch,
+                target_os = target_os,
+                target_arch = target_arch,
+            }
+        )
+    end
+    if target_os == "windows" and target_arch ~= "x86_64" then
+        return nil, result.error(
+            "UnsupportedPlatformError",
+            "luainstaller 1.0 supports native Windows x86_64 builds only",
             {
                 host_os = host.os,
                 host_arch = host_arch,

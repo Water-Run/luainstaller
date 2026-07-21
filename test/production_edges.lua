@@ -447,6 +447,103 @@ test("native platform and toolchain reject cross targets", function()
     assert(type(resolved.cc) == "string" and resolved.cc ~= "")
 end)
 
+test("native runtime profiles reject incompatible Lua library kinds", function()
+    local native_profile = require("luainstaller.native_profile")
+
+    assert(native_profile.acceptsLibrary(
+        { target_os = "linux", launcher_profile = "shared-lua" },
+        "/prefix/lib/liblua.so"
+    ))
+    assert(native_profile.acceptsLibrary(
+        { target_os = "linux", launcher_profile = "shared-lua" },
+        "/prefix/lib/liblua.so.5.4"
+    ))
+    assert(not native_profile.acceptsLibrary(
+        { target_os = "linux", launcher_profile = "shared-lua" },
+        "/prefix/lib/liblua.a"
+    ))
+    assert(native_profile.acceptsLibrary(
+        { target_os = "macos", launcher_profile = "static-lua" },
+        "/prefix/lib/liblua.a"
+    ))
+    assert(not native_profile.acceptsLibrary(
+        { target_os = "macos", launcher_profile = "static-lua" },
+        "/prefix/lib/liblua.dylib"
+    ))
+    assert(native_profile.acceptsLibrary(
+        { target_os = "windows", launcher_profile = "windows-shared-lua" },
+        "C:/prefix/lua54.dll"
+    ))
+    assert(native_profile.acceptsLibrary(
+        { target_os = "windows", launcher_profile = "windows-shared-lua" },
+        "C:/prefix/lua54.lib"
+    ))
+    assert(not native_profile.acceptsLibrary(
+        { target_os = "windows", launcher_profile = "windows-shared-lua" },
+        "C:/prefix/liblua.a"
+    ))
+end)
+
+test("Windows 1.0 platform profile is x86_64 only", function()
+    local platform = require("luainstaller.platform")
+    local supported = assert(platform.profile({
+        host = { os = "windows", arch = "x86_64" },
+        target_os = "windows",
+    }))
+    assertEqual(supported.target_arch, "x86_64", "Windows supported architecture")
+
+    for _, arch in ipairs({ "x86", "arm64" }) do
+        local profile, profile_err = platform.profile({
+            host = { os = "windows", arch = arch },
+            target_os = "windows",
+        })
+        assert(profile == nil, "Windows profile accepted unsupported " .. arch)
+        assert(profile_err and profile_err.error.type == "UnsupportedPlatformError")
+    end
+end)
+
+test("Windows release toolchains close the CRT on x86_64", function()
+    local toolchain_source = readFile("src/toolchain.lua")
+    local matrix_source = readFile("tools/test-lua-versions.ps1")
+
+    assert(toolchain_source:find('"/MT"', 1, true),
+        "product MSVC commands do not select the static CRT")
+    assert(not toolchain_source:find('"/MD"', 1, true),
+        "product MSVC commands retain the dynamic CRT")
+    assert(toolchain_source:find('"/MACHINE:X64"', 1, true),
+        "product MSVC linker commands do not pin x86_64")
+    assert(matrix_source:find("'/MT'", 1, true),
+        "Windows Lua matrix does not select the static CRT")
+    assert(not matrix_source:find("'/MD'", 1, true),
+        "Windows Lua matrix retains the dynamic CRT")
+    assert(matrix_source:find("Assert-PeClosure", 1, true),
+        "Windows matrix does not audit PE dependencies")
+    assert(matrix_source:find("VCRUNTIME", 1, true),
+        "Windows matrix does not reject the VC runtime DLL")
+    assert(not matrix_source:find("Hostx64\\ARM64", 1, true),
+        "Windows matrix contains an ARM64 compiler path")
+end)
+
+test("Linux explicit prefixes reject static-only liblua before compilation", function()
+    if commandOutputTrimmed("uname -s") ~= "Linux" then return end
+
+    local root = makeTempDir("linux-static-profile")
+    makeDirectory(root .. "/include")
+    makeDirectory(root .. "/lib")
+    writeFile(root .. "/include/lua.h", "/* profile filter fixture */\n")
+    writeFile(root .. "/lib/liblua.a", "not consulted by the compiler\n")
+
+    local config, config_err = require("luainstaller.toolchain").resolve({
+        lua_prefix = root,
+        lua_version = require("luainstaller.compat").luaVersion(),
+    })
+    assert(config == nil, "Linux accepted a static-only explicit Lua prefix")
+    assert(config_err and config_err.error.type == "ToolchainError")
+    assert(tostring(config_err.error.cause):find("shared liblua", 1, true),
+        tostring(config_err.error.cause))
+    removeTree(root)
+end)
+
 test("API rejects unsafe string and manual include inputs", function()
     local luainstaller = require("luainstaller")
     local root = makeTempDir("input-validation")
@@ -2401,6 +2498,99 @@ test("an explicit Lua prefix never falls back to another toolchain", function()
     removeTree(root)
 end)
 
+test("Linux explicit prefixes support lib64 and contained runtime links", function()
+    if commandOutputTrimmed("uname -s") ~= "Linux" then return end
+
+    local fs = require("luainstaller.fs")
+    local path = require("luainstaller.path")
+    local compat = require("luainstaller.compat")
+    local toolchain = require("luainstaller.toolchain")
+    local lua_info = compat.luaVersion()
+    local abi = string.format("%d.%d", lua_info.major, lua_info.minor)
+    local include_source = commandOutputTrimmed(
+        "pkg-config --variable=includedir lua"
+    )
+    local lua_binary = commandOutputTrimmed("command -v lua")
+    local runtime_source = commandOutputTrimmed(
+        "ldd " .. shellQuote(lua_binary)
+            .. " | awk '/[Ll]ua/{print $3; exit}'"
+    )
+    assert(include_source ~= "" and fs.isRegularFile(include_source .. "/lua.h"))
+    assert(runtime_source ~= "" and fs.isRegularFile(runtime_source), runtime_source)
+
+    local root = makeTempDir("linux-prefix-layouts")
+    local function makePrefix(name, library_dir_name)
+        local prefix = root .. "/" .. name
+        makeDirectory(prefix)
+        makeDirectory(prefix .. "/include")
+        makeDirectory(prefix .. "/" .. library_dir_name)
+        for _, header in ipairs({
+            "lua.h", "luaconf.h", "lauxlib.h", "lualib.h", "lua.hpp",
+        }) do
+            local source = include_source .. "/" .. header
+            if fs.isRegularFile(source) then
+                assert(fs.copyFile(source, prefix .. "/include/" .. header))
+            end
+        end
+        return prefix, prefix .. "/" .. library_dir_name
+    end
+
+    local lib64_prefix, lib64 = makePrefix("lib64-prefix", "lib64")
+    local runtime_name = path.basename(runtime_source)
+    assert(fs.copyFile(runtime_source, lib64 .. "/" .. runtime_name))
+    local lib64_config, lib64_err = toolchain.resolve({
+        lua_prefix = lib64_prefix,
+        lua_version = lua_info,
+    })
+    assert(lib64_config, lib64_err and lib64_err.error.message)
+    assertEqual(lib64_config.link_mode, "shared", "lib64 link mode")
+    assert(lib64_config.runtime_path:sub(1, #lib64 + 1) == lib64 .. "/",
+        "loader inspection escaped the explicit lib64 prefix: "
+            .. tostring(lib64_config.runtime_path))
+
+    local linked_prefix, linked_lib = makePrefix("linked-prefix", "lib")
+    assert(fs.copyFile(runtime_source, linked_lib .. "/runtime-blob"))
+    local linked_name = "liblua-" .. abi .. ".so"
+    runCommand("ln -s runtime-blob "
+        .. shellQuote(linked_lib .. "/" .. linked_name))
+    local linked_config, linked_err = toolchain.resolve({
+        lua_prefix = linked_prefix,
+        lua_version = lua_info,
+    })
+    assert(linked_config, linked_err and linked_err.error.message)
+    assert(linked_config.runtime_path:sub(1, #linked_lib + 1) == linked_lib .. "/")
+    assertEqual(linked_config.runtime_name, linked_name, "linked runtime identity")
+
+    local linked_out = root .. "/linked-output"
+    local linked_bundle = require("luainstaller").bundle({
+        entry = "test/runtime_bundle/main.lua",
+        out = linked_out,
+        lua_prefix = linked_prefix,
+    })
+    assert(linked_bundle.ok, linked_bundle.error and linked_bundle.error.message)
+    assert(fileExists(linked_out .. "/.luai/native/" .. linked_name),
+        "bundle did not preserve the linked runtime loader name")
+    local linked_ran, linked_output = require("luainstaller.process").outputCommand(
+        linked_bundle.executable,
+        { "linked-prefix" },
+        { PATH = "/usr/bin:/bin", LUA_PATH = "", LUA_CPATH = "" }
+    )
+    assert(linked_ran and linked_output:find("hello linked-prefix", 1, true),
+        linked_output)
+
+    local escaped_prefix, escaped_lib = makePrefix("escaped-prefix", "lib")
+    runCommand("ln -s " .. shellQuote(runtime_source) .. " "
+        .. shellQuote(escaped_lib .. "/liblua-" .. abi .. ".so"))
+    local escaped, escaped_err = toolchain.resolve({
+        lua_prefix = escaped_prefix,
+        lua_version = lua_info,
+    })
+    assert(escaped == nil, "explicit prefix accepted an escaping runtime symlink")
+    assert(escaped_err and escaped_err.error.type == "ToolchainError")
+
+    removeTree(root)
+end)
+
 test("onedir rejects an executable collision with metadata directory", function()
     local root = makeTempDir("metadata-executable-collision")
     local result = require("luainstaller").bundle({
@@ -3413,6 +3603,12 @@ test("remote scripts are pinned and non-destructive", function()
         "POSIX matrix invokes Lua's readline-enabled Linux make target")
     assert(not posix_matrix:lower():find("readline", 1, true),
         "POSIX matrix requires the optional readline development headers")
+    assert(posix_matrix:find('cc -shared -Wl,-soname,"liblua.so.$abi"', 1, true),
+        "POSIX matrix does not build an ABI-versioned shared liblua")
+    assert(posix_matrix:find('readelf -d "$runtime"', 1, true),
+        "POSIX matrix does not verify the shared liblua SONAME")
+    assert(posix_matrix:find('ln -s "liblua.so.$abi"', 1, true),
+        "POSIX matrix does not use relative shared-liblua links")
     assert(posix_matrix:find('"$lua" test/lua_abi.lua', 1, true),
         "POSIX matrix omits the ABI capability contract")
     assert(windows_matrix:find("'lua_abi.lua'", 1, true),

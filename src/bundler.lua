@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -444,13 +444,13 @@ local function copyFile(source, destination, expected_hash, hash_algorithm)
     return nil
 end
 
-local function copyLuaRuntime(lua_path, native_dir)
+local function copyLuaRuntime(lua_path, native_dir, runtime_name)
     if not lua_path then
         return makeError("LuaRuntimeNotFoundError", "Cannot locate linked Lua shared library", {
             output = "verified toolchain did not report a runtime path",
         })
     end
-    local lua_name = basename(lua_path)
+    local lua_name = runtime_name or basename(lua_path)
     local destination = normalizePath(native_dir .. "/" .. lua_name)
     if pathExists(destination) or isSymlink(destination) then
         return makeError("DuplicateModuleError", "Lua runtime destination collides with a native module", {
@@ -1395,8 +1395,9 @@ function M.bundleOnedir(opts)
         [".luai"] = true,
         [exe_name] = true,
     }
-    local runtime_name = native_toolchain.runtime_path
-        and basename(native_toolchain.runtime_path) or nil
+    local runtime_name = native_toolchain.runtime_name
+        or (native_toolchain.runtime_path
+            and basename(native_toolchain.runtime_path) or nil)
     if profile.target_os == "windows" and runtime_name then
         allowed_generated_entries[runtime_name] = true
     end
@@ -1554,7 +1555,11 @@ function M.bundleOnedir(opts)
         }
     else
         local runtime_record
-        err, runtime_record = copyLuaRuntime(native_toolchain.runtime_path, native_dir)
+        err, runtime_record = copyLuaRuntime(
+            native_toolchain.runtime_path,
+            native_dir,
+            runtime_name
+        )
         if err then
             return abandon(err)
         end

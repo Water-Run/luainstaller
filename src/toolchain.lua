@@ -8,11 +8,12 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local compat = require("luainstaller.compat")
 local fs = require("luainstaller.fs")
+local native_profile = require("luainstaller.native_profile")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
@@ -251,9 +252,85 @@ local function findFirst(paths)
     return nil
 end
 
+local function hasReparseAncestor(candidate, root)
+    candidate = normalizePath(path.absolute(candidate))
+    root = normalizePath(path.absolute(root))
+    if not path.isWithin(candidate, root) or fs.pathType(root) == "reparse" then
+        return true
+    end
+    if candidate == root then return false end
+    local prefix = root == "/" and "/" or (root .. "/")
+    local relative = candidate:sub(#prefix + 1)
+    local current = root
+    for segment in relative:gmatch("[^/]+") do
+        current = path.join(current, segment)
+        if current ~= candidate and fs.pathType(current) == "reparse" then
+            return true
+        end
+    end
+    return false
+end
+
+local function resolveContainedRegularFile(candidate, root)
+    candidate = normalizePath(path.absolute(candidate))
+    root = normalizePath(path.absolute(root))
+    local current = candidate
+    local seen = {}
+    for _ = 1, 16 do
+        if seen[current] or not path.isWithin(current, root)
+            or hasReparseAncestor(current, root) then
+            return nil, "library link escapes its declared prefix or forms a cycle"
+        end
+        seen[current] = true
+        local kind = fs.pathType(current)
+        if kind == "file" then return current end
+        if kind ~= "reparse" or IS_WINDOWS then
+            return nil, "library candidate is not a contained regular file"
+        end
+        local ok, target = process.outputCommand("readlink", { current })
+        target = ok and tostring(target):gsub("[\r\n]+$", "") or nil
+        if not target or target == ""
+            or target:find("\0", 1, true)
+            or target:find("\r", 1, true)
+            or target:find("\n", 1, true) then
+            return nil, "library link target is invalid"
+        end
+        current = path.isAbsolute(target)
+            and normalizePath(target)
+            or path.join(path.dirname(current), target)
+        current = normalizePath(path.absolute(current))
+    end
+    return nil, "library link chain exceeds the safety limit"
+end
+
+local function findFirstAccepted(profile, paths, root)
+    local rejection
+    for _, candidate in ipairs(paths) do
+        local usable = regularFile(candidate)
+        if not usable and root and fs.pathType(candidate) == "reparse" then
+            local resolved, resolve_err = resolveContainedRegularFile(candidate, root)
+            usable = resolved ~= nil
+            rejection = rejection or resolve_err
+        elseif usable and root then
+            usable = path.isWithin(path.absolute(candidate), path.absolute(root))
+                and not hasReparseAncestor(candidate, root)
+            if not usable then
+                rejection = rejection
+                    or "library candidate escapes its declared prefix"
+            end
+        end
+        if usable then
+            local accepted, reason = native_profile.acceptsLibrary(profile, candidate)
+            if accepted then return normalizePath(candidate) end
+            rejection = rejection or reason
+        end
+    end
+    return nil, rejection
+end
+
 local function prefixCandidate(prefix, lua_version, source, config)
     if type(prefix) ~= "string" or prefix == "" then return nil end
-    prefix = normalizePath(prefix)
+    prefix = normalizePath(path.absolute(prefix))
     local version = string.format("%d.%d", lua_version.major, lua_version.minor)
     local include_dir
     for _, candidate in ipairs({
@@ -277,15 +354,29 @@ local function prefixCandidate(prefix, lua_version, source, config)
     else
         extensions = { ".so", ".a", ".dylib" }
     end
-    for _, directory in ipairs({ prefix .. "/lib", prefix }) do
+    for _, directory in ipairs({ prefix .. "/lib", prefix .. "/lib64", prefix }) do
         for _, name in ipairs(names) do
             for _, extension in ipairs(extensions) do
                 library_paths[#library_paths + 1] = directory .. "/lib" .. name .. extension
                 library_paths[#library_paths + 1] = directory .. "/" .. name .. extension
+                if extension == ".so" then
+                    library_paths[#library_paths + 1] = directory .. "/lib"
+                        .. name .. extension .. "." .. version
+                    library_paths[#library_paths + 1] = directory .. "/"
+                        .. name .. extension .. "." .. version
+                    library_paths[#library_paths + 1] = directory .. "/lib"
+                        .. name .. extension .. "." .. lua_version.major
+                    library_paths[#library_paths + 1] = directory .. "/"
+                        .. name .. extension .. "." .. lua_version.major
+                end
             end
         end
     end
-    local library_path = findFirst(library_paths)
+    local library_path, policy_err = findFirstAccepted(
+        config.profile,
+        library_paths,
+        prefix
+    )
 
     local runtime_path
     if config.host.os == "windows" then
@@ -296,9 +387,11 @@ local function prefixCandidate(prefix, lua_version, source, config)
             end
         end
         runtime_path = findFirst(runtime_paths)
-        if not runtime_path then return nil end
+        if not runtime_path then return nil, "Windows prefix does not contain a matching Lua DLL" end
+        local runtime_ok, runtime_err = native_profile.acceptsLibrary(config.profile, runtime_path)
+        if not runtime_ok then return nil, runtime_err end
     elseif not library_path then
-        return nil
+        return nil, policy_err or "Lua prefix does not contain a library for the required runtime profile"
     end
     return {
         source = source,
@@ -336,7 +429,7 @@ local function luarocksCandidate(lua_version, config)
             paths[#paths + 1] = normalizePath(library_dir .. "/" .. name .. extension)
         end
     end
-    local library_path = findFirst(paths)
+    local library_path = findFirstAccepted(config.profile, paths, prefix)
     if not library_path then return nil end
     return {
         source = "luarocks",
@@ -346,7 +439,7 @@ local function luarocksCandidate(lua_version, config)
     }
 end
 
-local function pkgConfigCandidate(lua_version)
+local function pkgConfigCandidate(lua_version, config)
     if not commandAvailable("pkg-config", "cc") then return nil end
     for _, module_name in ipairs(luaNames(lua_version)) do
         local version_ok, module_version = process.outputCommand(
@@ -360,18 +453,54 @@ local function pkgConfigCandidate(lua_version)
             if tokens then
                 local include_dir
                 local library_dir
+                local library_names = {}
+                local absolute_libraries = {}
                 for _, token in ipairs(tokens) do
                     include_dir = include_dir or token:match("^-I(.+)$")
                     library_dir = library_dir or token:match("^-L(.+)$")
+                    local library_name = token:match("^-l(.+)$")
+                    if library_name then library_names[#library_names + 1] = library_name end
+                    if token:match("^[/\\]") or token:match("^%a:[/\\]") then
+                        absolute_libraries[#absolute_libraries + 1] = token
+                    end
                 end
-                return {
-                    source = "pkg-config",
-                    pkg_config_module = module_name,
-                    pkg_config_version = trimmed(module_version),
-                    flags = tokens,
-                    include_dir = include_dir and normalizePath(include_dir) or nil,
-                    library_dir = library_dir and normalizePath(library_dir) or nil,
-                }
+                if not library_dir then
+                    local libdir_ok, libdir = process.outputCommand(
+                        "pkg-config", { "--variable=libdir", module_name }
+                    )
+                    if libdir_ok and trimmed(libdir) ~= "" then
+                        library_dir = trimmed(libdir)
+                    end
+                end
+                local library_paths = copyList(absolute_libraries)
+                if library_dir then
+                    for _, library_name in ipairs(library_names) do
+                        for _, extension in ipairs({ ".so", ".a", ".dylib", ".lib" }) do
+                            library_paths[#library_paths + 1] = normalizePath(
+                                library_dir .. "/lib" .. library_name .. extension
+                            )
+                            library_paths[#library_paths + 1] = normalizePath(
+                                library_dir .. "/" .. library_name .. extension
+                            )
+                        end
+                    end
+                end
+                local library_path = findFirstAccepted(
+                    config.profile,
+                    library_paths,
+                    library_dir
+                )
+                if library_path then
+                    return {
+                        source = "pkg-config",
+                        pkg_config_module = module_name,
+                        pkg_config_version = trimmed(module_version),
+                        flags = tokens,
+                        include_dir = include_dir and normalizePath(include_dir) or nil,
+                        library_dir = normalizePath(path.dirname(library_path)),
+                        library_path = library_path,
+                    }
+                end
             end
             if token_err then return nil end
         end
@@ -379,7 +508,36 @@ local function pkgConfigCandidate(lua_version)
     return nil
 end
 
-local function probeSource(lua_version)
+local function cStringLiteral(value)
+    value = tostring(value or "")
+        :gsub("\\", "\\\\")
+        :gsub('"', '\\"')
+        :gsub("\r", "\\r")
+        :gsub("\n", "\\n")
+    return '"' .. value .. '"'
+end
+
+local function nativeModuleProbeSource()
+    return [[
+#include <lua.h>
+#include <lauxlib.h>
+
+#if defined(_WIN32)
+#define LUAI_EXPORT __declspec(dllexport)
+#else
+#define LUAI_EXPORT
+#endif
+
+LUAI_EXPORT int luaopen_luai_native_probe(lua_State *state) {
+    lua_pushliteral(state, "native-probe-ok");
+    return 1;
+}
+]]
+end
+
+local function probeSource(lua_version, module_pattern)
+    local module_script = "package.cpath = " .. string.format("%q", module_pattern)
+        .. "; assert(require('luai_native_probe') == 'native-probe-ok')"
     local source = [[
 #include <stdio.h>
 #include <string.h>
@@ -395,18 +553,27 @@ int main(void) {
     lua_State *state = luaL_newstate();
     const char *version;
     int matches;
+    int module_status;
     if (!state) return 70;
     luaL_openlibs(state);
     lua_getglobal(state, "_VERSION");
     version = lua_tostring(state, -1);
     matches = version != NULL && strcmp(version, "@LUA_VERSION@") == 0;
     if (!matches) fprintf(stderr, "expected @LUA_VERSION@, got %s\n", version ? version : "unknown");
+    module_status = matches ? luaL_dostring(state, @MODULE_SCRIPT@) : 1;
+    if (module_status != 0) {
+        const char *message = lua_tostring(state, -1);
+        if (message) fprintf(stderr, "%s\n", message);
+    }
     lua_close(state);
-    return matches ? 0 : 42;
+    return matches && module_status == 0 ? 0 : 42;
 }
 ]]
-    return (source:gsub("@LUA_VERSION_NUM@", tostring(lua_version.num))
-        :gsub("@LUA_VERSION@", lua_version.version))
+    source = source:gsub("@LUA_VERSION_NUM@", tostring(lua_version.num))
+        :gsub("@LUA_VERSION@", lua_version.version)
+    return (source:gsub("@MODULE_SCRIPT@", function()
+        return cStringLiteral(module_script)
+    end))
 end
 
 local function makeProbeDirectory()
@@ -479,7 +646,7 @@ local function generateMsvcImportLibrary(config, work_dir)
         "/nologo",
         "/def:" .. definition_path:gsub("/", "\\"),
         "/out:" .. output_path:gsub("/", "\\"),
-        config.host.arch == "x86" and "/machine:X86" or "/machine:X64",
+        "/MACHINE:X64",
     }, config.environment)
     if not made or not regularFile(output_path) then
         return nil, makeError("ToolchainError", "Cannot generate the Lua import library", {
@@ -493,7 +660,7 @@ function M.compile(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs({ "/nologo", "/std:c11", "/W4", "/WX" }) do
+        for _, value in ipairs({ "/nologo", "/std:c11", "/W4", "/WX", "/MT" }) do
             arguments[#arguments + 1] = value
         end
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
@@ -519,6 +686,8 @@ function M.compile(config, source_path, output_path, opts)
         end
         arguments[#arguments + 1] = "/link"
         arguments[#arguments + 1] = "/INCREMENTAL:NO"
+        arguments[#arguments + 1] = "/Brepro"
+        arguments[#arguments + 1] = "/MACHINE:X64"
     else
         for _, value in ipairs({ "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic" }) do
             arguments[#arguments + 1] = value
@@ -537,6 +706,72 @@ function M.compile(config, source_path, output_path, opts)
     return ok, output, descriptor
 end
 
+function M.nativeModuleExtension(config)
+    return config.host.os == "windows" and "dll" or "so"
+end
+
+function M.compileNativeModule(config, source_path, output_path, opts)
+    opts = opts or {}
+    local arguments = {}
+    if config.compiler_family == "msvc" then
+        for _, value in ipairs({
+            "/nologo", "/std:c11", "/W4", "/WX", "/MT", "/LD",
+        }) do
+            arguments[#arguments + 1] = value
+        end
+        local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
+        local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
+        arguments[#arguments + 1] = "/I" .. config.include_dir:gsub("/", "\\")
+        arguments[#arguments + 1] = source_path:gsub("/", "\\")
+        arguments[#arguments + 1] = "/Fo" .. normalizePath(
+            object_dir .. "/" .. object_name
+        ):gsub("/", "\\")
+        arguments[#arguments + 1] = "/Fe:" .. output_path:gsub("/", "\\")
+        local linked = false
+        for _, value in ipairs(config.link_args or {}) do
+            arguments[#arguments + 1] = value:gsub("/", "\\")
+            linked = true
+        end
+        if not linked then
+            local import, import_err = generateMsvcImportLibrary(config, object_dir)
+            if not import then
+                return false, import_err.error.message, nil, import_err
+            end
+            arguments[#arguments + 1] = import:gsub("/", "\\")
+        end
+        arguments[#arguments + 1] = "/link"
+        arguments[#arguments + 1] = "/DLL"
+        arguments[#arguments + 1] = "/INCREMENTAL:NO"
+        arguments[#arguments + 1] = "/Brepro"
+        arguments[#arguments + 1] = "/MACHINE:X64"
+    else
+        for _, value in ipairs({ "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic" }) do
+            arguments[#arguments + 1] = value
+        end
+        if config.host.os == "macos" then
+            arguments[#arguments + 1] = "-bundle"
+            arguments[#arguments + 1] = "-undefined"
+            arguments[#arguments + 1] = "dynamic_lookup"
+        else
+            arguments[#arguments + 1] = "-shared"
+            if config.host.os ~= "windows" then
+                arguments[#arguments + 1] = "-fPIC"
+            end
+        end
+        arguments[#arguments + 1] = "-I" .. config.include_dir
+        arguments[#arguments + 1] = source_path
+        arguments[#arguments + 1] = "-o"
+        arguments[#arguments + 1] = output_path
+        if config.host.os == "windows" then
+            for _, value in ipairs(config.link_args or {}) do
+                arguments[#arguments + 1] = value
+            end
+        end
+    end
+    local ok, output = process.outputCommand(config.cc, arguments, config.environment)
+    return ok, output, process.command(config.cc, arguments)
+end
+
 function M.resolveCompiler(opts)
     opts = opts or {}
     local host = platform.detectHost()
@@ -550,7 +785,7 @@ function M.compileStandalone(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs({ "/nologo", "/std:c11", "/W4", "/WX", "/Brepro" }) do
+        for _, value in ipairs({ "/nologo", "/std:c11", "/W4", "/WX", "/MT" }) do
             arguments[#arguments + 1] = value
         end
         if config.host and config.host.os == "windows" then
@@ -565,6 +800,8 @@ function M.compileStandalone(config, source_path, output_path, opts)
         arguments[#arguments + 1] = "/Fe:" .. output_path:gsub("/", "\\")
         arguments[#arguments + 1] = "/link"
         arguments[#arguments + 1] = "/INCREMENTAL:NO"
+        arguments[#arguments + 1] = "/Brepro"
+        arguments[#arguments + 1] = "/MACHINE:X64"
         if config.host and config.host.os == "windows" then
             arguments[#arguments + 1] = "Advapi32.lib"
         end
@@ -585,11 +822,13 @@ function M.compileStandalone(config, source_path, output_path, opts)
     return ok, output, process.command(config.cc, arguments)
 end
 
-local function findLinkedRuntime(config, executable)
-    if config.host.os == "windows" then return config.runtime_path end
+local function findLinkedRuntime(config, executable, environment)
+    if config.host.os == "windows" then
+        return config.runtime_path, nil, config.runtime_path
+    end
     local tool = config.host.os == "macos" and "otool" or "ldd"
     local arguments = config.host.os == "macos" and { "-L", executable } or { executable }
-    local ok, output = process.outputCommand(tool, arguments)
+    local ok, output = process.outputCommand(tool, arguments, environment)
     if not ok then return nil, output end
     for line in tostring(output):gmatch("[^\r\n]+") do
         local candidate
@@ -597,11 +836,25 @@ local function findLinkedRuntime(config, executable)
             candidate = line:match("^%s*(/[^%s]*[Ll]ua[^%s]*%.dylib)")
         else
             candidate = line:match("=>%s+([^%s]+)") or line:match("^%s*(/[^%s]+)")
-            if candidate and not path.basename(candidate):lower():find("lua", 1, true) then
+            if candidate and candidate ~= "not"
+                and not path.basename(candidate):lower():find("lua", 1, true) then
                 candidate = nil
             end
         end
-        if candidate and regularFile(candidate) then return normalizePath(candidate) end
+        if candidate and regularFile(candidate) then
+            candidate = normalizePath(candidate)
+            return candidate, nil, candidate
+        end
+        if candidate and config.library_dir
+            and fs.pathType(candidate) == "reparse" then
+            local resolved = resolveContainedRegularFile(
+                candidate,
+                config.library_dir
+            )
+            if resolved then
+                return normalizePath(resolved), nil, normalizePath(candidate)
+            end
+        end
     end
     return nil, output
 end
@@ -611,11 +864,20 @@ local function verifyCandidate(config, candidate)
     if not directory then return nil, directory_err end
     local source_path = normalizePath(directory .. "/probe.c")
     local executable_path = normalizePath(directory .. "/probe" .. config.executable_suffix)
-    local wrote, write_err = fs.writeFile(source_path, probeSource(config.lua_version))
+    local module_source_path = normalizePath(directory .. "/native-probe.c")
+    local module_extension = M.nativeModuleExtension(config)
+    local module_path = normalizePath(
+        directory .. "/luai_native_probe." .. module_extension
+    )
+    local module_pattern = normalizePath(directory .. "/?." .. module_extension)
+    local wrote, write_err = fs.writeFile(
+        module_source_path,
+        nativeModuleProbeSource()
+    )
     if not wrote then
         cleanupProbeDirectory(directory)
-        return nil, makeError("FilesystemError", "Cannot write the toolchain probe", {
-            path = source_path,
+        return nil, makeError("FilesystemError", "Cannot write the native-module probe", {
+            path = module_source_path,
             cause = write_err,
         })
     end
@@ -626,6 +888,31 @@ local function verifyCandidate(config, candidate)
     config.link_args = candidateLinkArgs(config, candidate)
     config.pkg_config_module = candidate.pkg_config_module
     config.discovery_source = candidate.source
+    local module_compiled, module_output, module_command = M.compileNativeModule(
+        config,
+        module_source_path,
+        module_path,
+        { work_dir = directory }
+    )
+    if not module_compiled then
+        cleanupProbeDirectory(directory)
+        return nil, makeError("ToolchainError", "Lua C-module capability probe did not compile", {
+            command = module_command,
+            output = module_output,
+            source = candidate.source,
+        })
+    end
+    wrote, write_err = fs.writeFile(
+        source_path,
+        probeSource(config.lua_version, module_pattern)
+    )
+    if not wrote then
+        cleanupProbeDirectory(directory)
+        return nil, makeError("FilesystemError", "Cannot write the toolchain probe", {
+            path = source_path,
+            cause = write_err,
+        })
+    end
     local compiled, compile_output, command = M.compile(config, source_path, executable_path, {
         work_dir = directory,
     })
@@ -658,23 +945,49 @@ local function verifyCandidate(config, candidate)
     local ran, run_output = process.outputCommand(executable_path, {}, environment)
     if not ran then
         cleanupProbeDirectory(directory)
-        return nil, makeError("ToolchainError", "Linked Lua runtime probe did not match the selected ABI", {
+        return nil, makeError("ToolchainError", "Linked Lua runtime or C-module probe failed", {
             output = run_output,
             expected = config.lua_version.version,
         })
     end
-    local runtime_path, runtime_output = findLinkedRuntime(config, executable_path)
-    local static_candidate = candidate.library_path
-        and candidate.library_path:lower():match("%.a$") ~= nil
-    if not runtime_path and not static_candidate then
+    local runtime_path, runtime_output, runtime_identity = findLinkedRuntime(
+        config,
+        executable_path,
+        environment
+    )
+    local expected_link_mode = native_profile.expectedLinkMode(config.profile)
+    if runtime_path then
+        local runtime_ok, runtime_err = native_profile.acceptsLibrary(
+            config.profile,
+            runtime_identity or runtime_path
+        )
+        if not runtime_ok then
+            cleanupProbeDirectory(directory)
+            return nil, makeError("ToolchainError", runtime_err, {
+                runtime_path = runtime_path,
+            })
+        end
+    end
+    if expected_link_mode == "shared" and not runtime_path then
         cleanupProbeDirectory(directory)
-        return nil, makeError("ToolchainError", "Cannot identify the linked Lua runtime", {
+        return nil, makeError("ToolchainError", "The native profile requires a linked shared liblua runtime", {
             output = runtime_output,
         })
     end
-    if runtime_path then config.runtime_path = runtime_path end
-    config.link_mode = runtime_path and "shared" or "static"
-    config.static_library_path = not runtime_path and candidate.library_path or nil
+    if expected_link_mode == "static" and runtime_path then
+        cleanupProbeDirectory(directory)
+        return nil, makeError("ToolchainError", "The native profile requires static liblua.a", {
+            runtime_path = runtime_path,
+        })
+    end
+    if runtime_path then
+        config.runtime_path = runtime_path
+        config.runtime_name = path.basename(runtime_identity or runtime_path)
+    end
+    config.link_mode = expected_link_mode
+    config.static_library_path = expected_link_mode == "static"
+        and candidate.library_path or nil
+    config.native_module_verified = true
     if not cleanupProbeDirectory(directory) then
         return nil, makeError("FilesystemError", "Cannot remove the completed toolchain probe", {
             path = directory,
@@ -708,7 +1021,7 @@ function M.resolve(opts)
     local candidates = {}
     local requested_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX")
     if type(requested_prefix) == "string" and requested_prefix ~= "" then
-        local explicit = prefixCandidate(
+        local explicit, prefix_err = prefixCandidate(
             requested_prefix,
             lua_version,
             "explicit-prefix",
@@ -721,6 +1034,7 @@ function M.resolve(opts)
                 {
                     lua_prefix = normalizePath(requested_prefix),
                     lua_abi = lua_version.abi,
+                    cause = prefix_err,
                 }
             )
         end
@@ -736,7 +1050,7 @@ function M.resolve(opts)
         local rock = luarocksCandidate(lua_version, config)
         if rock then candidates[#candidates + 1] = rock end
         if host.os ~= "windows" then
-            local pkg = pkgConfigCandidate(lua_version)
+            local pkg = pkgConfigCandidate(lua_version, config)
             if pkg then candidates[#candidates + 1] = pkg end
         end
     end

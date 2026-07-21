@@ -272,7 +272,10 @@ if [ ! -f "$ARM_LUA_PREFIX/lib/liblua.so.5.4" ] \
     cp src/lua.h src/luaconf.h src/lualib.h src/lauxlib.h src/lua.hpp "$ARM_LUA_PREFIX/include/"
     cp src/lua src/luac "$ARM_LUA_PREFIX/bin/"
     cp src/liblua.so.5.4 "$ARM_LUA_PREFIX/lib/"
+    ln -s liblua.so.5.4 "$ARM_LUA_PREFIX/lib/liblua.so.5"
     ln -s liblua.so.5.4 "$ARM_LUA_PREFIX/lib/liblua.so"
+    readelf -d "$ARM_LUA_PREFIX/lib/liblua.so.5.4" \
+        | grep -F 'Library soname: [liblua.so.5.4]' >/dev/null
     cat >"$ARM_LUA_PREFIX/lib/pkgconfig/lua.pc" <<PC
 prefix=$ARM_LUA_PREFIX
 exec_prefix=\${prefix}

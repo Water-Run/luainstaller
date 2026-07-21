@@ -78,9 +78,12 @@ done
 case "$HOST_LABEL" in
     ''|*[!A-Za-z0-9._-]*) echo "unsafe host label: $HOST_LABEL" >&2; exit 2 ;;
 esac
-for command in cc curl git make sha256sum tar; do
+for command in ar cc curl git grep make readlink sha256sum tar; do
     command -v "$command" >/dev/null 2>&1 || { echo "missing command: $command" >&2; exit 1; }
 done
+if [ "$(uname -s)" = Linux ]; then
+    command -v readelf >/dev/null 2>&1 || { echo "missing command: readelf" >&2; exit 1; }
+fi
 
 umask 077
 mkdir -p "$SOURCE_CACHE" "$WORK_ROOT" "$EVIDENCE_DIR"
@@ -95,7 +98,19 @@ build_lua() {
     version=$1
     prefix=$WORK_ROOT/lua-$version
     lua=$prefix/bin/lua
-    if [ -x "$lua" ] && [ "$("$lua" -e 'io.write(_VERSION)')" = "Lua ${version%.*}" ]; then
+    abi=${version%.*}
+    complete=0
+    if [ -x "$lua" ] && [ "$("$lua" -e 'io.write(_VERSION)')" = "Lua $abi" ]; then
+        complete=1
+    fi
+    if [ "$(uname -s)" = Linux ] && {
+        [ ! -f "$prefix/lib/liblua.so.$abi" ] \
+            || [ ! -L "$prefix/lib/liblua.so" ] \
+            || [ "$(readlink "$prefix/lib/liblua.so" 2>/dev/null || true)" != "liblua.so.$abi" ];
+    }; then
+        complete=0
+    fi
+    if [ "$complete" -eq 1 ]; then
         printf '%s\n' "$prefix"
         return
     fi
@@ -116,6 +131,26 @@ build_lua() {
         *) echo "unsupported POSIX build host: $(uname -s)" >&2; return 1 ;;
     esac
     make -C "$source_dir" INSTALL_TOP="$prefix" install >&2
+    if [ "$(uname -s)" = Linux ]; then
+        archive=$source_dir/src/liblua.a
+        runtime=$prefix/lib/liblua.so.$abi
+        members=$(ar t "$archive")
+        if [ -z "$members" ] || printf '%s\n' "$members" \
+            | grep -Ev '^[A-Za-z0-9_.-]+$' | grep . >/dev/null; then
+            echo "unsafe or empty liblua archive member list" >&2
+            return 1
+        fi
+        # Archive members are source-pinned and validated above; intentional splitting.
+        # shellcheck disable=SC2086
+        (cd "$source_dir/src" && cc -shared -Wl,-soname,"liblua.so.$abi" \
+            -o "$runtime" $members -lm -ldl)
+        rm -f "$prefix/lib/liblua.so.${version%%.*}" "$prefix/lib/liblua.so"
+        ln -s "liblua.so.$abi" "$prefix/lib/liblua.so.${version%%.*}"
+        ln -s "liblua.so.$abi" "$prefix/lib/liblua.so"
+        readelf -d "$runtime" | grep -F "Library soname: [liblua.so.$abi]" >/dev/null
+        LD_LIBRARY_PATH="$prefix/lib" "$lua" -e \
+            "assert(_VERSION == 'Lua $abi')"
+    fi
     test "$("$lua" -e 'io.write(_VERSION)')" = "Lua ${version%.*}"
     printf '%s\n' "$prefix"
 }
@@ -149,6 +184,12 @@ run_version() {
     luarocks=$luarocks_prefix/bin/luarocks
     expected="Lua ${version%.*}"
     test "$("$lua" -e 'io.write(_VERSION)')" = "$expected"
+    if [ "$(uname -s)" = Linux ]; then
+        abi=${version%.*}
+        test -f "$lua_prefix/lib/liblua.so.$abi"
+        test -L "$lua_prefix/lib/liblua.so"
+        test "$(readlink "$lua_prefix/lib/liblua.so")" = "liblua.so.$abi"
+    fi
     export PATH="$luarocks_prefix/bin:$lua_prefix/bin:/usr/bin:/bin"
     export LUAI_TEST_LUA="$lua"
     export LUAI_LUA_PREFIX="$lua_prefix"

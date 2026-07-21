@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -40,8 +40,18 @@ assert(config, table.concat(diagnostic, "\n"))
 assert(type(config.cc) == "string" and config.cc ~= "")
 assert(type(config.include_dir) == "string" and config.include_dir ~= "")
 assert(config.lua_version.abi == compat.luaVersion().abi)
-assert(config.link_mode == "static"
-    or (config.link_mode == "shared" and type(config.runtime_path) == "string"))
+local expected_link_mode = config.host.os == "macos" and "static" or "shared"
+assert(config.link_mode == expected_link_mode, string.format(
+    "%s requires %s liblua, got %s",
+    tostring(config.host.os),
+    expected_link_mode,
+    tostring(config.link_mode)
+))
+if expected_link_mode == "shared" then
+    assert(type(config.runtime_path) == "string" and config.runtime_path ~= "")
+end
+assert(config.native_module_verified == true,
+    "toolchain did not verify an ordinary Lua C module")
 assert(fs.pathType(working_probe_object) == "missing",
     "MSVC toolchain probe leaked probe.obj into the working directory")
 

@@ -8,10 +8,11 @@ File:
 Date:
     2026-06-24
 Updated:
-    2026-07-11
+    2026-07-18
 ]]
 
 package.preload["luainstaller.lua_abi"] = function() return dofile("src/lua_abi.lua") end
+package.preload["luainstaller.native_profile"] = function() return dofile("src/native_profile.lua") end
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
 package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end

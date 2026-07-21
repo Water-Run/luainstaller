@@ -9,7 +9,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-11
+    2026-07-18
 ]]
 
 local M = {}
@@ -53,6 +53,7 @@ local PRELOADS = {
     { "luainstaller.toolchain", "src/toolchain.lua" },
     { "luainstaller.result", "src/result.lua" },
     { "luainstaller.lua_abi", "src/lua_abi.lua" },
+    { "luainstaller.native_profile", "src/native_profile.lua" },
     { "luainstaller.logger", "src/logger.lua" },
     { "luainstaller.analyzer", "src/analyzer.lua" },
     { "luainstaller.discovery", "src/discovery.lua" },
@@ -203,6 +204,26 @@ function M.assert_error(result, error_type, option)
     if option then
         assert(result.error.option == option,
             "expected option " .. option .. ", got " .. tostring(result.error.option))
+    end
+end
+
+function M.assert_pe_closure(config, artifacts)
+    if not IS_WINDOWS then return end
+    assert(config and config.dumpbin, "dumpbin is required for PE closure checks")
+    local process = require("luainstaller.process")
+    for _, artifact in ipairs(artifacts or {}) do
+        local ok, output = process.outputCommand(config.dumpbin, {
+            "/nologo", "/dependents", artifact,
+        }, config.environment)
+        assert(ok, tostring(output))
+        for line in tostring(output):gmatch("[^\r\n]+") do
+            local dependency = line:match("^%s*([^%s]+%.dll)%s*$")
+            local upper = dependency and dependency:upper() or ""
+            assert(not upper:match("^VCRUNTIME%d*%.DLL$")
+                and not upper:match("^MSVCP%d*%.DLL$")
+                and upper ~= "UCRTBASE.DLL",
+                "unexpected dynamic CRT dependency in " .. artifact .. ": " .. upper)
+        end
     end
 end
 

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -22,6 +22,20 @@ assert(info.minor >= 1, "Lua 5.1 or newer is required")
 assert(info.official == true, "the matrix must run an official Lua interpreter")
 assert(info.abi == string.format("lua%d.%d", info.major, info.minor))
 assert(info.num == info.major * 100 + info.minor)
+
+local matrix_prefix = os.getenv("LUAI_LUA_PREFIX")
+if type(matrix_prefix) == "string" and matrix_prefix ~= ""
+    and package.config:sub(1, 1) == "/"
+    and require("luainstaller.platform").detectHost().os == "linux" then
+    local runtime = string.format(
+        "%s/lib/liblua.so.%d.%d",
+        matrix_prefix,
+        info.major,
+        info.minor
+    )
+    assert(require("luainstaller.fs").isRegularFile(runtime),
+        "Linux matrix prefix is missing its ABI-versioned shared liblua: " .. runtime)
+end
 
 local interpreter = harness.lua_command()
 assert(type(interpreter) == "string" and interpreter ~= "")
@@ -90,6 +104,7 @@ local product_files = {
     "src/launcher.lua",
     "src/logger.lua",
     "src/lua_abi.lua",
+    "src/native_profile.lua",
     "src/manifest.lua",
     "src/onefile.lua",
     "src/path.lua",

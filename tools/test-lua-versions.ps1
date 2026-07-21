@@ -120,7 +120,19 @@ function Initialize-Msvc {
         (Join-Path $sdkRoot "Lib\$sdkVersion\ucrt\x64"),
         (Join-Path $sdkRoot "Lib\$sdkVersion\um\x64")
     ) -join ';'
-    return @{ Cl=(Join-Path $binary 'cl.exe'); Link=(Join-Path $binary 'link.exe') }
+    return @{
+        Cl=(Join-Path $binary 'cl.exe')
+        Link=(Join-Path $binary 'link.exe')
+        Dumpbin=(Join-Path $binary 'dumpbin.exe')
+    }
+}
+
+function Assert-PeClosure([string]$Dumpbin, [string]$Artifact) {
+    $dependencies = & $Dumpbin /nologo /dependents $Artifact | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "dumpbin failed for $Artifact" }
+    if ($dependencies -match '(?im)^\s*(VCRUNTIME\d+|MSVCP\d+|ucrtbase)\.dll\s*$') {
+        throw "unexpected dynamic CRT dependency in ${Artifact}: $dependencies"
+    }
 }
 
 function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
@@ -143,7 +155,15 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     }).Count -eq 0
     if ($complete) {
         $reported = (& $lua -e 'io.write(_VERSION)')
-        if ($reported -eq "Lua $abi") { return $prefix }
+        if ($reported -eq "Lua $abi") {
+            try {
+                Assert-PeClosure $Msvc.Dumpbin (Join-Path $prefix "lua$compact.dll")
+                Assert-PeClosure $Msvc.Dumpbin $lua
+                return $prefix
+            } catch {
+                $complete = $false
+            }
+        }
     }
     $sourceParent = Join-Path $WorkRoot "source-lua-$version"
     Remove-SafeTree $prefix $WorkRoot
@@ -158,7 +178,7 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     foreach ($file in Get-ChildItem -LiteralPath $source -Filter '*.c' -File |
         Where-Object { $_.Name -notin @('lua.c', 'luac.c') }) {
         $object = Join-Path $objects ($file.BaseName + '.obj')
-        Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MD','/DLUA_BUILD_AS_DLL',
+        Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MT','/DLUA_BUILD_AS_DLL',
             "/I$source", "/Fo$object", $file.FullName) | Out-Host
         $objectFiles += $object
     }
@@ -167,12 +187,12 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     $null = New-Item -ItemType Directory -Path (Join-Path $prefix 'include')
     $dll = Join-Path $prefix "lua$compact.dll"
     $library = Join-Path $prefix "lua$compact.lib"
-    Invoke-Native $Msvc.Link (@('/nologo','/DLL','/INCREMENTAL:NO','/Brepro',
+    Invoke-Native $Msvc.Link (@('/nologo','/DLL','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
         "/OUT:$dll", "/IMPLIB:$library") + $objectFiles) | Out-Host
     $luaObject = Join-Path $objects 'lua.obj'
-    Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MD',"/I$source",
+    Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MT',"/I$source",
         "/Fo$luaObject",(Join-Path $source 'lua.c')) | Out-Host
-    Invoke-Native $Msvc.Link @('/nologo','/INCREMENTAL:NO','/Brepro',
+    Invoke-Native $Msvc.Link @('/nologo','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
         "/OUT:$lua",$luaObject,$library) | Out-Host
     Copy-Item -LiteralPath $dll -Destination (Join-Path $prefix "bin\lua$compact.dll")
     foreach ($header in @('lua.h','luaconf.h','lualib.h','lauxlib.h','lua.hpp')) {
@@ -182,6 +202,8 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
         }
     }
     if ((& $lua -e 'io.write(_VERSION)') -ne "Lua $abi") { throw "Lua $version build mismatch" }
+    Assert-PeClosure $Msvc.Dumpbin $dll
+    Assert-PeClosure $Msvc.Dumpbin $lua
     return $prefix
 }
 

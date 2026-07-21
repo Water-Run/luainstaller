@@ -42,6 +42,7 @@ build = {
         ["luainstaller.hash"]     = "src/hash.lua",
         ["luainstaller.logger"]   = "src/logger.lua",
         ["luainstaller.lua_abi"]  = "src/lua_abi.lua",
+        ["luainstaller.native_profile"] = "src/native_profile.lua",
         ["luainstaller.analyzer"] = "src/analyzer.lua",
         ["luainstaller.compat"]   = "src/compat.lua",
         ["luainstaller.manifest"] = "src/manifest.lua",

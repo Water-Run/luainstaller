@@ -51,7 +51,7 @@ mismatch → `UnsupportedPlatformError`.
 
 |Windows
 |ABI-specific DLL beside the executable and under `.luai/native`
-|MSVC, Windows SDK, headers, import library, matching DLL
+|x86_64 host, MSVC, Windows SDK, headers, import library, matching DLL
 |===
 
 When automatic discovery is insufficient, use `--lua-prefix` or
@@ -59,8 +59,23 @@ When automatic discovery is insufficient, use `--lua-prefix` or
 silently substitute another install. The prefix is for the current host and
 ABI, not a cross SDK.
 
+Explicit prefixes are searched in `lib`, `lib64`, and the prefix root.
+ABI-versioned shared files and relative links contained by the prefix are
+supported; links that escape it are rejected. Compiler/run probes and loader
+inspection use the same `LD_LIBRARY_PATH` or `DYLD_LIBRARY_PATH`, so a probe
+cannot validate one runtime and record a different system runtime.
+
 A static-only Lua install without a shared library cannot satisfy the
 shared-runtime Linux profile. Custom installs may set `PKG_CONFIG_PATH`.
+Candidate filtering happens before the compiler probe: Linux/generic POSIX
+rejects static archives, macOS rejects shared liblua, and Windows rejects
+static archives. luainstaller 1.0 rejects Windows x86 and ARM64 with
+`UnsupportedPlatformError`; its Windows native profile is x86_64 only.
+
+MSVC builds use the static multithreaded CRT (`/MT`) for the Lua DLL, launcher,
+native capability module, and onefile extractor. Release tests inspect PE
+dependencies and reject `VCRUNTIME*.dll`, `MSVCP*.dll`, or `ucrtbase.dll`, then
+run the artifact in a clean Windows VM without a VC Redistributable.
 
 macOS does not produce universal binaries, code-sign, or notarize. Windows
 builds and probes run natively; Wine/MinGW are not part of the release path.
@@ -80,8 +95,10 @@ LUA_CPATH='/srv/app/lib/lua/5.x/?.so;;' \
 luai -t app/main.lua --max-deps 250
 ----
 
-A successful launcher compile only proves the Lua runtime link, not closure of
-every application module's system dependencies.
+Toolchain acceptance compiles an ordinary `luaopen_*` C module, deliberately
+without linking liblua on Linux, and loads it through the same host/runtime
+profile. This proves Lua-symbol visibility for normal modules. It does not
+prove closure of every application module's additional system dependencies.
 
 [#platforms-matrix]
 == Tested system types

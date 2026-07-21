@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -19,6 +19,11 @@ assert(package.config:sub(1, 1) == "\\", "windows_native.lua must run on Windows
 local fs = require("luainstaller.fs")
 local path = require("luainstaller.path")
 local process = require("luainstaller.process")
+local platform = require("luainstaller.platform")
+local windows_host = platform.detectHost()
+assert(windows_host.arch == "x86_64",
+    "luainstaller 1.0 Windows tests require native x86_64")
+assert(platform.profile({ target_os = "windows" }))
 
 local binary_stdin = "\0\255A\nB"
 local stdin_ok, stdin_error = process.inputPowerShell(table.concat({

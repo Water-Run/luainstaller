@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local function localFileExists(path)
@@ -56,6 +56,7 @@ local function installSourcePreloads()
         "luainstaller.path",
         "luainstaller.result",
         "luainstaller.lua_abi",
+        "luainstaller.native_profile",
         "luainstaller.analyzer",
         "luainstaller.logger",
         "luainstaller.manifest",
@@ -90,6 +91,9 @@ local function installSourcePreloads()
     end
     package.preload["luainstaller.lua_abi"] = package.preload["luainstaller.lua_abi"] or function()
         return dofile(sourcePath("lua_abi.lua"))
+    end
+    package.preload["luainstaller.native_profile"] = package.preload["luainstaller.native_profile"] or function()
+        return dofile(sourcePath("native_profile.lua"))
     end
     package.preload["luainstaller.analyzer"] = package.preload["luainstaller.analyzer"] or function()
         return dofile(sourcePath("analyzer.lua"))
