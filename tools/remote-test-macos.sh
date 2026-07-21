@@ -96,12 +96,13 @@ EOF
 create_tracked_tree_archive() {
     TRACKED_ARCHIVE=$SOURCE_CACHE/tracked-tree.$$.tar
     rm -f "$TRACKED_ARCHIVE"
-    (cd "$PROJECT_ROOT" && git archive --format=tar HEAD) >"$TRACKED_ARCHIVE"
+    (cd "$PROJECT_ROOT" && git -c tar.umask=0022 archive --format=tar HEAD) \
+        >"$TRACKED_ARCHIVE"
 }
 
 copy_tree_macos() {
     remote_root=$(quote_remote "$REMOTE_ROOT")
-    remote_command="rm -rf $remote_root && mkdir -m 700 -p $remote_root && tar -xf - -C $remote_root"
+    remote_command="rm -rf $remote_root && mkdir -m 700 -p $remote_root && tar -xpf - -C $remote_root"
     remote_sh "$remote_command" <"$TRACKED_ARCHIVE"
 }
 

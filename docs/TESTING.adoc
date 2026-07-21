@@ -150,11 +150,18 @@ module from that ABI's isolated tree:
 The native-dependency cache identity binds both this source list and its exact
 installation order. The runner extracts lsqlite3 and the pinned SQLite
 amalgamation into distinct roots, rejects any selected source outside its
-expected root, and records both exact C source paths in the evidence log.
-Linux matrix runs additionally set
-`LUAI_REQUIRE_FULL_EDGE_COVERAGE=1`, so missing sanitizer, alternate compiler,
-LuaJIT, PE cross-inspection, `/dev/full`, or permission probes fail the gate
-instead of appearing as a pass.
+expected root, and records each archive name, SHA-256, internal C source member,
+cache identity, and cache hit/rebuild result in every evidence log. A cold
+compile additionally records both exact extraction paths; a cache hit never
+pretends that its already-removed build directory still exists.
+Direct Linux matrix runs default to the strict `full` edge-coverage mode and
+set `LUAI_REQUIRE_FULL_EDGE_COVERAGE=1`, so missing sanitizer, alternate
+compiler, LuaJIT, PE cross-inspection, `/dev/full`, or permission probes fail
+the local release gate instead of appearing as a pass. Physical-host runners
+set `LUAI_MATRIX_EDGE_COVERAGE_MODE=available`: they still run the complete
+production edge suite and every probe supported by that host, while each
+evidence log explicitly lists unavailable strict prerequisites. A physical
+host that has every prerequisite automatically runs the same strict gate.
 
 Each source-built Lua prefix publishes its own `lua.pc`, and the runner pins
 `PKG_CONFIG_PATH` to that file. Native fixtures therefore compile against the

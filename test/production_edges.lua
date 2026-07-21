@@ -4285,6 +4285,17 @@ test("remote scripts are pinned and non-destructive", function()
     local linux_runner = readFile("tools/remote-test-linux.sh")
     local macos_runner = readFile("tools/remote-test-macos.sh")
     local windows_runner = readFile("tools/remote-test-windows.sh")
+    local interruption_test = readFile("test/build_interruption.lua")
+    assert(not interruption_test:find(
+        'signal_name .. " -- \\"-$build\\""',
+        1,
+        true
+    ), "build interruption test uses a kill separator rejected by dash")
+    assert(interruption_test:find(
+        'signal_name .. " \\"-$build\\""',
+        1,
+        true
+    ), "build interruption test does not signal the build process group")
     for _, clean_test in ipairs({
         "test/native_bundle.lua",
         "test/native_onefile.lua",
@@ -4473,30 +4484,69 @@ test("remote scripts are pinned and non-destructive", function()
         true
     ), "POSIX matrix does not isolate the pinned SQLite amalgamation")
     assert(posix_matrix:find(
-        'deps_lsqlite_file=$deps_build_dir/lsqlite3-src/lsqlite3_v096/lsqlite3.c',
+        'LSQLITE3_SOURCE_MEMBER=lsqlite3_v096/lsqlite3.c',
         1,
         true
-    ), "POSIX matrix does not require the pinned lsqlite3 source path")
+    ) and posix_matrix:find(
+        'deps_lsqlite_file=$deps_build_dir/lsqlite3-src/$LSQLITE3_SOURCE_MEMBER',
+        1,
+        true
+    ), "POSIX matrix does not require the pinned lsqlite3 source member")
     assert(posix_matrix:find(
-        'deps_sqlite_file=$deps_build_dir/sqlite-src/' ..
-            'sqlite-amalgamation-3530200/sqlite3.c',
+        'SQLITE_SOURCE_MEMBER=sqlite-amalgamation-3530200/sqlite3.c',
         1,
         true
-    ), "POSIX matrix does not require the pinned SQLite source path")
+    ) and posix_matrix:find(
+        'deps_sqlite_file=$deps_build_dir/sqlite-src/$SQLITE_SOURCE_MEMBER',
+        1,
+        true
+    ), "POSIX matrix does not require the pinned SQLite source member")
     assert(posix_matrix:find('[ -L "$deps_sqlite_file" ]', 1, true),
         "POSIX matrix accepts a symlink in place of pinned SQLite source")
     assert(posix_matrix:find("SQLite amalgamation source:", 1, true),
         "POSIX matrix does not report the exact SQLite source it compiles")
+    local provenance_position = assert(posix_matrix:find(
+        '"SQLite amalgamation source: archive=$SQLITE_ZIP ' ..
+            'sha256=$SQLITE_SHA256 member=$SQLITE_SOURCE_MEMBER"',
+        1,
+        true
+    ), "POSIX matrix does not record pinned SQLite provenance")
+    local cache_check_position = assert(posix_matrix:find(
+        'if cache_marker_matches "$deps_marker"',
+        1,
+        true
+    ), "POSIX matrix has no native-dependency cache check")
+    assert(provenance_position < cache_check_position,
+        "POSIX matrix omits SQLite provenance when its dependency cache hits")
+    assert(posix_matrix:find("native dependency cache result: hit", 1, true),
+        "POSIX matrix does not make native-dependency cache reuse auditable")
+    assert(posix_matrix:find("native dependency cache result: rebuild", 1, true),
+        "POSIX matrix does not make native-dependency rebuilds auditable")
     assert(posix_matrix:find(
         "recipe=pinned-src-rocks-lsqlite-v3-exact-sqlite-paths",
         1,
         true
     ), "POSIX matrix does not invalidate the ambiguous SQLite cache recipe")
+    assert(posix_matrix:find("LUAI_REQUIRE_FULL_EDGE_COVERAGE=1", 1, true)
+            and posix_matrix:find(
+                '"$edge_lua" test/production_edges.lua',
+                1,
+                true
+            ),
+        "Linux matrix does not make full edge prerequisites mandatory")
     assert(posix_matrix:find(
-        'LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 "$lua" test/production_edges.lua',
+        'LUAI_MATRIX_EDGE_COVERAGE_MODE=${LUAI_MATRIX_EDGE_COVERAGE_MODE:-full}',
         1,
         true
-    ), "Linux matrix does not make full edge prerequisites mandatory")
+    ), "POSIX matrix does not default its local edge gate to strict coverage")
+    assert(posix_matrix:find("strict edge prerequisites unavailable:", 1, true),
+        "POSIX matrix does not report capability-aware edge coverage")
+    local _, remote_available_gates = linux_runner:gsub(
+        "LUAI_MATRIX_EDGE_COVERAGE_MODE=available",
+        ""
+    )
+    assertEqual(remote_available_gates, 3,
+        "Linux physical runner does not select capability-aware coverage per host")
     assert(windows_matrix:find("Assert-SafeRoot", 1, true))
     assert(windows_matrix:find("Stage-Source", 1, true))
     assert(windows_matrix:find("Get-FileHash", 1, true))
@@ -4504,8 +4554,27 @@ test("remote scripts are pinned and non-destructive", function()
         "Windows matrix caches have no exact schema marker")
     assert(windows_matrix:find("Test-CacheMarker", 1, true),
         "Windows matrix does not validate exact cache provenance")
-    assert(linux_runner:find("git archive --format=tar HEAD", 1, true))
-    assert(macos_runner:find("git archive --format=tar HEAD", 1, true))
+    assert(linux_runner:find(
+        "git -c tar.umask=0022 archive --format=tar HEAD",
+        1,
+        true
+    ), "Linux tracked archive does not normalize modes to the git index")
+    assert(macos_runner:find(
+        "git -c tar.umask=0022 archive --format=tar HEAD",
+        1,
+        true
+    ), "macOS tracked archive does not normalize modes to the git index")
+    assert(not linux_runner:find("git archive --format=tar HEAD", 1, true))
+    assert(not macos_runner:find("git archive --format=tar HEAD", 1, true))
+    local _, linux_exact_extracts = linux_runner:gsub("tar %-xpf %-", "")
+    assertEqual(linux_exact_extracts, 2,
+        "Linux remote transfers do not preserve tracked file modes")
+    assert(macos_runner:find("tar -xpf -", 1, true),
+        "macOS remote transfer does not preserve tracked file modes")
+    assert(not linux_runner:find("tar -xf -", 1, true),
+        "Linux remote transfer is still filtered through the remote umask")
+    assert(not macos_runner:find("tar -xf -", 1, true),
+        "macOS remote transfer is still filtered through the remote umask")
     assert(not macos_runner:find("pkg-config --modversion", 1, true),
         "macOS runner requires a non-system pkg-config installation")
     assert(macos_runner:find("/^Version:/", 1, true),
@@ -4557,7 +4626,9 @@ test("remote scripts are pinned and non-destructive", function()
     }) do
         local lowered = content:lower()
         assert(not lowered:find("wine", 1, true), name .. " requires Wine")
-        assert(not lowered:find("mingw", 1, true), name .. " requires MinGW")
+        if name ~= "posix" then
+            assert(not lowered:find("mingw", 1, true), name .. " requires MinGW")
+        end
         assert(not lowered:find("virtual machine", 1, true), name .. " requires a VM")
         assert(not lowered:find("windows vm", 1, true), name .. " requires a VM")
     end

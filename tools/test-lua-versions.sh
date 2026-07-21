@@ -6,14 +6,17 @@ SOURCE_CACHE=${SOURCE_CACHE:-/tmp/luainstaller-source-cache}
 WORK_ROOT=${WORK_ROOT:-/tmp/luainstaller-lua-matrix}
 EVIDENCE_DIR=${EVIDENCE_DIR:-/tmp/luainstaller-lua-evidence}
 HOST_LABEL=${HOST_LABEL:-$(uname -n | tr -c 'A-Za-z0-9._-' '-')}
+LUAI_MATRIX_EDGE_COVERAGE_MODE=${LUAI_MATRIX_EDGE_COVERAGE_MODE:-full}
 PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 LUAROCKS_VERSION=3.13.0
 LUAROCKS_TARBALL=luarocks-$LUAROCKS_VERSION.tar.gz
 LUAROCKS_SHA256=245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37
 LSQLITE3_ZIP=lsqlite3_v096.zip
 LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
+LSQLITE3_SOURCE_MEMBER=lsqlite3_v096/lsqlite3.c
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
+SQLITE_SOURCE_MEMBER=sqlite-amalgamation-3530200/sqlite3.c
 CACHE_SCHEMA=luainstaller-posix-matrix-cache-v2
 ROCK_SOURCES='lua-cjson-2.1.0.10-1.src.rock:02dea368d07753647c75bd9e6660dd4d06ff7d09956d90d5afc4c3f5b78ed187
 luafilesystem-1.9.0-1.src.rock:3de68d619f6ad95a27f4728814375447d921305194b7050dee6199057c31282f
@@ -189,6 +192,13 @@ for path in "$SOURCE_CACHE" "$WORK_ROOT" "$EVIDENCE_DIR"; do
 done
 case "$HOST_LABEL" in
     ''|*[!A-Za-z0-9._-]*) echo "unsafe host label: $HOST_LABEL" >&2; exit 2 ;;
+esac
+case "$LUAI_MATRIX_EDGE_COVERAGE_MODE" in
+    full|available) ;;
+    *)
+        echo "invalid LUAI_MATRIX_EDGE_COVERAGE_MODE: $LUAI_MATRIX_EDGE_COVERAGE_MODE" >&2
+        exit 2
+        ;;
 esac
 for command in ar awk cat cc chmod curl find git grep id ls make readlink tar unzip; do
     command -v "$command" >/dev/null 2>&1 || { echo "missing command: $command" >&2; exit 1; }
@@ -417,12 +427,18 @@ build_native_dependencies() {
 
     require_no_symlink_ancestors "$deps_tree"
     require_no_symlink_ancestors "$deps_build_dir"
+    printf '%s\n' \
+        "native dependency cache identity: $deps_build_id" \
+        "lsqlite3 binding source: archive=$LSQLITE3_ZIP sha256=$LSQLITE3_SHA256 member=$LSQLITE3_SOURCE_MEMBER" \
+        "SQLite amalgamation source: archive=$SQLITE_ZIP sha256=$SQLITE_SHA256 member=$SQLITE_SOURCE_MEMBER" >&2
     if cache_marker_matches "$deps_marker" "$deps_build_id" \
         && rock_dependencies_match "$deps_luarocks" "$deps_tree" \
         && native_modules_load "$deps_lua" "$deps_lua_path" "$deps_lua_cpath"; then
+        printf '%s\n' 'native dependency cache result: hit' >&2
         printf '%s\n' "$deps_tree"
         return
     fi
+    printf '%s\n' 'native dependency cache result: rebuild' >&2
 
     rm -rf "$deps_tree" "$deps_build_dir"
     mkdir -p "$deps_tree" "$deps_build_dir"
@@ -436,8 +452,8 @@ build_native_dependencies() {
 
     unzip -q "$SOURCE_CACHE/$LSQLITE3_ZIP" -d "$deps_build_dir/lsqlite3-src"
     unzip -q "$SOURCE_CACHE/$SQLITE_ZIP" -d "$deps_build_dir/sqlite-src"
-    deps_lsqlite_file=$deps_build_dir/lsqlite3-src/lsqlite3_v096/lsqlite3.c
-    deps_sqlite_file=$deps_build_dir/sqlite-src/sqlite-amalgamation-3530200/sqlite3.c
+    deps_lsqlite_file=$deps_build_dir/lsqlite3-src/$LSQLITE3_SOURCE_MEMBER
+    deps_sqlite_file=$deps_build_dir/sqlite-src/$SQLITE_SOURCE_MEMBER
     deps_lsqlite_dir=$(dirname "$deps_lsqlite_file")
     deps_sqlite_dir=$(dirname "$deps_sqlite_file")
     require_no_symlink_ancestors "$deps_lsqlite_dir"
@@ -448,8 +464,8 @@ build_native_dependencies() {
         return 1
     fi
     printf '%s\n' \
-        "lsqlite3 binding source: $deps_lsqlite_file" \
-        "SQLite amalgamation source: $deps_sqlite_file" >&2
+        "lsqlite3 binding extraction path: $deps_lsqlite_file" \
+        "SQLite amalgamation extraction path: $deps_sqlite_file" >&2
     deps_module_dir=$deps_tree/lib/lua/$deps_abi
     mkdir -p "$deps_module_dir"
     case "$(uname -s)" in
@@ -477,6 +493,47 @@ build_native_dependencies() {
     write_cache_marker "$deps_marker" "$deps_build_id"
     rm -rf "$deps_build_dir"
     printf '%s\n' "$deps_tree"
+}
+
+run_production_edges() {
+    edge_lua=$1
+    if [ "$(uname -s)" != Linux ]; then
+        "$edge_lua" test/production_edges.lua
+        return
+    fi
+
+    case "$LUAI_MATRIX_EDGE_COVERAGE_MODE" in
+        full)
+            printf '%s\n' 'edge coverage gate: full; all strict prerequisites required'
+            LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 \
+                "$edge_lua" test/production_edges.lua
+            ;;
+        available)
+            missing=
+            for command in cc clang luajit pkg-config sha256sum \
+                x86_64-w64-mingw32-gcc; do
+                if ! command -v "$command" >/dev/null 2>&1; then
+                    missing="$missing $command"
+                fi
+            done
+            if [ ! -e /dev/full ]; then
+                missing="$missing /dev/full"
+            fi
+            if [ "$(id -u)" = 0 ]; then
+                missing="$missing non-root-user"
+            fi
+            if [ -z "$missing" ]; then
+                printf '%s\n' \
+                    'edge coverage gate: available host satisfies all strict prerequisites'
+                LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 \
+                    "$edge_lua" test/production_edges.lua
+            else
+                printf 'edge coverage gate: available; strict edge prerequisites unavailable:%s\n' \
+                    "$missing"
+                "$edge_lua" test/production_edges.lua
+            fi
+            ;;
+    esac
 }
 
 run_version() {
@@ -527,11 +584,7 @@ run_version() {
     "$lua" test/build_interruption.lua
     "$lua" test/distribution_licenses.lua
     "$lua" test/reproducible_artifacts.lua
-    if [ "$(uname -s)" = Linux ]; then
-        LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 "$lua" test/production_edges.lua
-    else
-        "$lua" test/production_edges.lua
-    fi
+    run_production_edges "$lua"
     "$lua" test/smoke_all.lua
     printf 'PASS host=%s lua=%s abi=%s\n' "$HOST_LABEL" "$version" "$expected"
 }

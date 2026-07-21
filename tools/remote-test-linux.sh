@@ -124,7 +124,8 @@ EOF
 create_tracked_tree_archive() {
     TRACKED_ARCHIVE=$SOURCE_CACHE/tracked-tree.$$.tar
     rm -f "$TRACKED_ARCHIVE"
-    (cd "$PROJECT_ROOT" && git archive --format=tar HEAD) >"$TRACKED_ARCHIVE"
+    (cd "$PROJECT_ROOT" && git -c tar.umask=0022 archive --format=tar HEAD) \
+        >"$TRACKED_ARCHIVE"
 }
 
 copy_tree_ssh() {
@@ -134,7 +135,7 @@ copy_tree_ssh() {
     quoted_root=$(quote_remote "$remote_root")
     # shellcheck disable=SC2029 # quoted_root is validated and shell-quoted locally.
     ssh -p "$port" "$target" \
-        "rm -rf $quoted_root && mkdir -m 700 -p $quoted_root && tar -xf - -C $quoted_root" \
+        "rm -rf $quoted_root && mkdir -m 700 -p $quoted_root && tar -xpf - -C $quoted_root" \
         <"$TRACKED_ARCHIVE"
 }
 
@@ -144,7 +145,7 @@ copy_tree_default_ssh() {
     quoted_root=$(quote_remote "$remote_root")
     # shellcheck disable=SC2029 # quoted_root is validated and shell-quoted locally.
     ssh "$target" \
-        "rm -rf $quoted_root && mkdir -m 700 -p $quoted_root && tar -xf - -C $quoted_root" \
+        "rm -rf $quoted_root && mkdir -m 700 -p $quoted_root && tar -xpf - -C $quoted_root" \
         <"$TRACKED_ARCHIVE"
 }
 
@@ -213,7 +214,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 cd "$REMOTE_ROOT"
-HOST_LABEL=rocky-x86_64 WORK_ROOT="$MATRIX_WORK_ROOT" \
+LUAI_MATRIX_EDGE_COVERAGE_MODE=available \
+    HOST_LABEL=rocky-x86_64 WORK_ROOT="$MATRIX_WORK_ROOT" \
     SOURCE_CACHE="$MATRIX_SOURCE_CACHE" EVIDENCE_DIR="$MATRIX_EVIDENCE_ROOT" \
     sh tools/test-lua-versions.sh
 
@@ -264,7 +266,8 @@ set -eu
 command -v renice >/dev/null 2>&1 && renice 15 -p $$ >/dev/null 2>&1 || true
 command -v ionice >/dev/null 2>&1 && ionice -c 3 -p $$ >/dev/null 2>&1 || true
 cd "$REMOTE_ROOT"
-HOST_LABEL=debian-x86_64 WORK_ROOT="$MATRIX_WORK_ROOT" \
+LUAI_MATRIX_EDGE_COVERAGE_MODE=available \
+    HOST_LABEL=debian-x86_64 WORK_ROOT="$MATRIX_WORK_ROOT" \
     SOURCE_CACHE="$MATRIX_SOURCE_CACHE" EVIDENCE_DIR="$MATRIX_EVIDENCE_ROOT" \
     sh tools/test-lua-versions.sh
 echo "debian x64 remote ok"
@@ -310,7 +313,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 cd "$REMOTE_ROOT"
-HOST_LABEL=dgx-spark-arm64 WORK_ROOT="$MATRIX_WORK_ROOT" \
+LUAI_MATRIX_EDGE_COVERAGE_MODE=available \
+    HOST_LABEL=dgx-spark-arm64 WORK_ROOT="$MATRIX_WORK_ROOT" \
     SOURCE_CACHE="$MATRIX_SOURCE_CACHE" EVIDENCE_DIR="$MATRIX_EVIDENCE_ROOT" \
     sh tools/test-lua-versions.sh
 

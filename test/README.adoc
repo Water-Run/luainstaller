@@ -73,6 +73,11 @@ physical host:
 HOST_LABEL=my-linux-or-mac sh tools/test-lua-versions.sh
 ----
 
+Direct Linux runs use the strict edge-coverage gate. Remote physical-host
+runners use `LUAI_MATRIX_EDGE_COVERAGE_MODE=available`, record any missing
+strict analysis tools in every evidence log, and still execute all applicable
+production-edge probes.
+
 [source,powershell]
 ----
 powershell.exe -NoLogo -NoProfile -NonInteractive `
@@ -94,8 +99,11 @@ tree containing lua-cjson, LuaFileSystem, LuaSocket, mimetypes, lzlib, Pegasus,
 and a directly compiled lsqlite3 plus SQLite amalgamation. LuaRocks dependency
 resolution is disabled, and the cache identity binds the exact source list and
 installation order. The lsqlite3 binding and pinned SQLite amalgamation are
-extracted into separate roots, and each matrix log records both selected C
-source paths so a bundled, stale `sqlite3.c` cannot silently satisfy coverage.
+extracted into separate roots. Every matrix log records both pinned archive
+names, SHA-256 digests, internal C source members, the cache identity, and
+whether the tree was reused or rebuilt; cold builds additionally record the
+exact extraction paths. A bundled, stale `sqlite3.c` therefore cannot silently
+satisfy coverage, even when a later release run reuses the verified cache.
 See xref:../docs/TESTING.adoc#testing-version-matrix[the
 release matrix] for the complete source and digest table.
 

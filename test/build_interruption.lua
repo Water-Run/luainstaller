@@ -96,7 +96,10 @@ exec "$LUAI_REAL_CC" "$@"
             "  attempt=$((attempt + 1))",
             "done",
             "test \"$ready_seen\" -eq 1",
-            "kill -" .. signal_name .. " -- \"-$build\"",
+            -- POSIX kill accepts a negative operand after an explicit signal.
+            -- dash's builtin does not accept the otherwise common `--`
+            -- separator and misparses it as an empty process-group id.
+            "kill -" .. signal_name .. " \"-$build\"",
             "set +e",
             "wait \"$build\"",
             "status=$?",
