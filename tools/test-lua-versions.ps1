@@ -13,6 +13,7 @@ $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $LuaRocksVersion = '3.13.0'
 $LuaRocksArchive = "luarocks-$LuaRocksVersion-windows-64.zip"
 $LuaRocksSha256 = '0897ADE5D459D55CD1962A948153745A6749FEB345403C68AAA9207388557AB9'
+$CacheSchema = 'luainstaller-windows-matrix-cache-v2'
 $Versions = @(
     @{ Version='5.1.5'; Sha256='2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333' },
     @{ Version='5.2.4'; Sha256='b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b' },
@@ -50,6 +51,29 @@ function Remove-SafeTree([string]$Path, [string]$Root) {
         throw "refusing to remove path outside matrix root: $full"
     }
     if (Test-Path -LiteralPath $full) { Remove-Item -LiteralPath $full -Recurse -Force }
+}
+
+function Test-CacheMarker([string]$Marker, [string]$Expected) {
+    $item = Get-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item -or -not ($item -is [IO.FileInfo]) -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        return $false
+    }
+    return [IO.File]::ReadAllText($Marker) -ceq $Expected
+}
+
+function Write-CacheMarker([string]$Marker, [string]$Value) {
+    $temporary = "$Marker.tmp.$PID"
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    [IO.File]::WriteAllText($temporary, $Value, (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temporary -Destination $Marker -Force
+}
+
+function Test-ExactLuaRelease([string]$Lua, [string]$Version) {
+    $banner = (& $Lua -v 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { return $false }
+    return $banner -eq "Lua $Version" -or $banner.StartsWith("Lua $Version ",
+        [StringComparison]::Ordinal)
 }
 
 function Stage-Source([string]$Name, [string]$Uri, [string]$Expected) {
@@ -141,8 +165,13 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     $compact = $abi.Replace('.', '')
     $prefix = Join-Path $WorkRoot "lua-$version"
     $lua = Join-Path $prefix 'lua.exe'
+    $marker = Join-Path $prefix '.luainstaller-matrix-cache'
+    $compilerHash = (Get-FileHash -LiteralPath $Msvc.Cl -Algorithm SHA256).Hash
+    $buildId = "$CacheSchema|component=lua|version=$version|source=$($Spec.Sha256)|host=windows-x86_64|cl=$compilerHash|recipe=official-msvc-v3-luac"
+    $luac = Join-Path $prefix 'luac.exe'
     $required = @(
         $lua,
+        $luac,
         (Join-Path $prefix "lua$compact.dll"),
         (Join-Path $prefix "lua$compact.lib"),
         (Join-Path $prefix 'include\lua.h'),
@@ -150,15 +179,18 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
         (Join-Path $prefix 'include\lualib.h'),
         (Join-Path $prefix 'include\lauxlib.h')
     )
-    $complete = @($required | Where-Object {
+    $complete = (Test-CacheMarker $marker $buildId) -and @($required | Where-Object {
         -not (Test-Path -LiteralPath $_ -PathType Leaf)
     }).Count -eq 0
     if ($complete) {
         $reported = (& $lua -e 'io.write(_VERSION)')
-        if ($reported -eq "Lua $abi") {
+        if ($reported -eq "Lua $abi" -and
+            (Test-ExactLuaRelease $lua $version) -and
+            (Test-ExactLuaRelease $luac $version)) {
             try {
                 Assert-PeClosure $Msvc.Dumpbin (Join-Path $prefix "lua$compact.dll")
                 Assert-PeClosure $Msvc.Dumpbin $lua
+                Assert-PeClosure $Msvc.Dumpbin $luac
                 return $prefix
             } catch {
                 $complete = $false
@@ -194,6 +226,11 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
         "/Fo$luaObject",(Join-Path $source 'lua.c')) | Out-Host
     Invoke-Native $Msvc.Link @('/nologo','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
         "/OUT:$lua",$luaObject,$library) | Out-Host
+    $luacObject = Join-Path $objects 'luac.obj'
+    Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MT',"/I$source",
+        "/Fo$luacObject",(Join-Path $source 'luac.c')) | Out-Host
+    Invoke-Native $Msvc.Link (@('/nologo','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
+        "/OUT:$luac",$luacObject) + $objectFiles) | Out-Host
     Copy-Item -LiteralPath $dll -Destination (Join-Path $prefix "bin\lua$compact.dll")
     foreach ($header in @('lua.h','luaconf.h','lualib.h','lauxlib.h','lua.hpp')) {
         $headerPath = Join-Path $source $header
@@ -201,9 +238,15 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
             Copy-Item -LiteralPath $headerPath -Destination (Join-Path $prefix 'include')
         }
     }
-    if ((& $lua -e 'io.write(_VERSION)') -ne "Lua $abi") { throw "Lua $version build mismatch" }
+    if ((& $lua -e 'io.write(_VERSION)') -ne "Lua $abi" -or
+        -not (Test-ExactLuaRelease $lua $version) -or
+        -not (Test-ExactLuaRelease $luac $version)) {
+        throw "Lua $version build mismatch"
+    }
     Assert-PeClosure $Msvc.Dumpbin $dll
     Assert-PeClosure $Msvc.Dumpbin $lua
+    Assert-PeClosure $Msvc.Dumpbin $luac
+    Write-CacheMarker $marker $buildId
     return $prefix
 }
 
@@ -228,21 +271,27 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
     $abi = ($version -split '\.')[0..1] -join '.'
     $luaPrefix = Build-Lua $Spec $Msvc
     $lua = Join-Path $luaPrefix 'lua.exe'
+    $luac = Join-Path $luaPrefix 'luac.exe'
     $config = Write-LuaRocksConfig $version $luaPrefix
     $env:LUAROCKS_CONFIG = $config
     $env:LUAI_TEST_LUA = $lua
+    $env:LUAI_TEST_LUAC = $luac
     $env:LUAI_LUA_PREFIX = $luaPrefix
+    $env:LUAI_LUA_RELEASE = $version
+    $env:LUAI_LUA_SOURCE_SHA256 = $Spec.Sha256.ToLowerInvariant()
     $env:LUA_PATH = ''
     $env:LUA_CPATH = ''
     $env:PATH = "$(Split-Path -Parent $LuaRocks);$luaPrefix;$luaPrefix\bin;$env:PATH"
     Set-Location $ProjectRoot
-    foreach ($file in Get-ChildItem src -Recurse -Filter '*.lua' -File) {
-        $env:LUAI_SYNTAX_FILE = $file.FullName
-        Invoke-Native $lua @('-e','assert(loadfile(os.getenv([[LUAI_SYNTAX_FILE]])))')
+    foreach ($tree in @('src','test','tools')) {
+        foreach ($file in Get-ChildItem -LiteralPath $tree -Recurse -Filter '*.lua' -File) {
+            Invoke-Native $luac @('-p',$file.FullName)
+        }
     }
-    foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','windows_native.lua','toolchain_native.lua',
+    foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','release_docs_contract.lua',
+        'windows_native.lua','toolchain_native.lua',
         'luarocks_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
-        'onefile_lifecycle.lua')) {
+        'onefile_lifecycle.lua','distribution_licenses.lua','reproducible_artifacts.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
     Invoke-Native $LuaRocks @('lint','luainstaller-1.0.0-1.rockspec')
@@ -261,6 +310,11 @@ Stage-Source $LuaRocksArchive `
 $SelectedVersions = if ($VersionFilter.Count -eq 0) {
     $Versions
 } else {
+    foreach ($requested in $VersionFilter) {
+        if ($requested -notin @($Versions | ForEach-Object { $_.Version })) {
+            throw "VersionFilter contains an unpinned Lua release: $requested"
+        }
+    }
     $Versions | Where-Object { $_.Version -in $VersionFilter }
 }
 if (@($SelectedVersions).Count -eq 0) { throw 'VersionFilter selected no pinned Lua version' }
@@ -269,9 +323,16 @@ foreach ($spec in $SelectedVersions) {
         "https://www.lua.org/ftp/lua-$($spec.Version).tar.gz" $spec.Sha256
 }
 $luaRocksRoot = Join-Path $WorkRoot "luarocks-$LuaRocksVersion-windows-64"
-if (-not (Test-Path -LiteralPath (Join-Path $luaRocksRoot 'luarocks.exe') -PathType Leaf)) {
+$luaRocksMarker = Join-Path $luaRocksRoot '.luainstaller-matrix-cache'
+$luaRocksBuildId = "$CacheSchema|component=luarocks|version=$LuaRocksVersion|source=$LuaRocksSha256|host=windows-x86_64|recipe=official-archive-v2"
+if (-not (Test-CacheMarker $luaRocksMarker $luaRocksBuildId) -or
+    -not (Test-Path -LiteralPath (Join-Path $luaRocksRoot 'luarocks.exe') -PathType Leaf)) {
     Remove-SafeTree $luaRocksRoot $WorkRoot
     Expand-Archive -LiteralPath (Join-Path $SourceCache $LuaRocksArchive) -DestinationPath $WorkRoot
+    if (-not (Test-Path -LiteralPath (Join-Path $luaRocksRoot 'luarocks.exe') -PathType Leaf)) {
+        throw 'LuaRocks archive did not contain luarocks.exe'
+    }
+    Write-CacheMarker $luaRocksMarker $luaRocksBuildId
 }
 $luaRocks = Join-Path $luaRocksRoot 'luarocks.exe'
 $msvc = Initialize-Msvc

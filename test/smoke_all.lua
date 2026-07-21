@@ -11,15 +11,20 @@ Updated:
     2026-07-18
 ]]
 
-local function shell_quote(value)
-    value = tostring(value or "")
-    return "'" .. value:gsub("'", "'\\''") .. "'"
+local harness = dofile("test/support/harness.lua")
+harness.install_loader()
+local shell_quote = harness.shell_quote
+local lua_command = shell_quote(harness.lua_command())
+
+local function lua_eval(source)
+    return lua_command .. " -e " .. shell_quote(source)
 end
 
 local SOURCE_LOADER = [[
 package.preload["luainstaller.fs"] = function() return dofile("src/fs.lua") end
 package.preload["luainstaller.hash"] = function() return dofile("src/hash.lua") end
 package.preload["luainstaller.lock_owner"] = function() return dofile("src/lock_owner.lua") end
+package.preload["luainstaller.distribution_files"] = function() return dofile("src/distribution_files.lua") end
 package.preload["luainstaller.lua_abi"] = function() return dofile("src/lua_abi.lua") end
 package.preload["luainstaller.native_profile"] = function() return dofile("src/native_profile.lua") end
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
@@ -43,9 +48,7 @@ package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli
 
 local function run(command, opts)
     opts = opts or {}
-    local pipe = assert(io.popen(command .. " 2>&1", "r"))
-    local out = pipe:read("*a")
-    local ok = pipe:close()
+    local ok, out, status = harness.command_result(command)
     if opts.expect_failure then
         if ok then
             error("expected command to fail: " .. command .. "\n" .. out, 2)
@@ -53,24 +56,17 @@ local function run(command, opts)
         return out
     end
     if not ok then
-        error("command failed: " .. command .. "\n" .. out, 2)
+        error("command failed (" .. tostring(status) .. "): " .. command .. "\n" .. out, 2)
     end
     return out
 end
 
 local function command_ok(command)
-    local ok = os.execute(command .. " > /dev/null 2>&1")
-    return ok == true or ok == 0
+    return harness.command_result(command .. " > /dev/null 2>&1")
 end
 
 local function command_output(command)
-    local pipe = assert(io.popen(command .. " 2>&1", "r"))
-    local out = pipe:read("*a") or ""
-    local ok = pipe:close()
-    if not ok then
-        error("command failed: " .. command .. "\n" .. out, 2)
-    end
-    return out
+    return harness.run(command)
 end
 
 local function command_output_trimmed(command)
@@ -137,7 +133,7 @@ local function make_temp_dir(name)
 end
 
 local function current_lua_version()
-    local version = run("lua -e " .. shell_quote("local v = _VERSION:match('(%d+%.%d+)'); assert(v); print(v)"))
+    local version = run(lua_eval("local v = _VERSION:match('(%d+%.%d+)'); assert(v); print(v)"))
     return (version:gsub("%s+$", ""))
 end
 
@@ -211,17 +207,30 @@ local function check_style()
 end
 
 local function check_syntax()
-    run("find src test -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p")
+    run("find src test -type f -name '*.lua' -print0 | xargs -0 -n1 "
+        .. shell_quote(harness.luac_command()) .. " -p")
 end
 
 local function check_samples()
-    run("for f in test/single_file/*.lua; do lua \"$f\" >/tmp/luainstaller-single.out 2>/tmp/luainstaller-single.err || { echo \"FAILED $f\"; cat /tmp/luainstaller-single.err; exit 1; }; done")
-    run("lua test/student_management_system/smoke_test.lua")
-    run("lua test/firebird_web_sql/smoke_test.lua")
-    run("lua test/savinglua/smoke_test.lua")
-    run("lua test/ltokei/smoke_test.lua")
+    local sample_count = 0
+    local sample_files = command_output(
+        "find test/single_file -type f -name '*.lua' -print"
+    )
+    for file in sample_files:gmatch("[^\r\n]+") do
+        run(harness.command(harness.lua_command(), { file }))
+        sample_count = sample_count + 1
+    end
+    assert(sample_count == 30,
+        "expected all 30 single-file samples, got " .. tostring(sample_count))
+    run(harness.command(harness.lua_command(), { "test/student_management_system/smoke_test.lua" }))
+    run(harness.command(harness.lua_command(), { "test/firebird_web_sql/smoke_test.lua" }))
+    run(harness.command(harness.lua_command(), { "test/savinglua/smoke_test.lua" }))
+    run(harness.command(harness.lua_command(), { "test/ltokei/smoke_test.lua" }))
 
-    local missing = run("lua test/ltokei/main.lua /tmp/luainstaller-missing-path-for-smoke-all", {
+    local missing = run(harness.command(harness.lua_command(), {
+        "test/ltokei/main.lua",
+        "/tmp/luainstaller-missing-path-for-smoke-all",
+    }), {
         expect_failure = true,
     })
     assert_contains(missing, "does not exist")
@@ -253,7 +262,7 @@ for entry, expect in pairs(entries) do
 end
 print("analyzer ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "analyzer ok")
+    assert_contains(run(lua_eval(script)), "analyzer ok")
 end
 
 local function check_api_contract()
@@ -427,7 +436,7 @@ print("api contract ok")
     local onefile_out = root .. "/student-onefile"
     assert_contains(run("HOME=" .. shell_quote(root .. "/home")
         .. " LUAI_API_ONEFILE_OUT=" .. shell_quote(onefile_out)
-        .. " lua -e " .. shell_quote(script)), "api contract ok")
+        .. " " .. lua_eval(script)), "api contract ok")
     remove_tree(root)
 end
 
@@ -481,7 +490,7 @@ assert(#optional.dependencies.libraries == 0)
 print("discovery modes ok")
 ]], root .. "/main.lua", root .. "/optional.lua")
 
-    assert_contains(run("lua -e " .. shell_quote(script)), "discovery modes ok")
+    assert_contains(run(lua_eval(script)), "discovery modes ok")
     remove_tree(root)
 end
 
@@ -557,7 +566,7 @@ print(mod.message())
 return { message = function() return "runtime interpreter ok" end }
 ]])
 
-    local lua_bin = command_output_trimmed("command -v lua")
+    local lua_bin = command_output_trimmed("command -v " .. lua_command)
     local script = SOURCE_LOADER .. string.format([[
 local luainstaller = require("luainstaller")
 
@@ -569,10 +578,8 @@ local manual = luainstaller.bundle({
     max_deps = 20,
 })
 assert(manual.ok == true, manual.error and manual.error.message)
-local handle = assert(io.popen(%q .. " 2>&1", "r"))
-local output = handle:read("*a") or ""
-local ok = handle:close()
-assert(ok == true or ok == 0, output)
+local ok, output = require("luainstaller.process").output(%q)
+assert(ok, output)
 assert(output:find("manual include nested ok", 1, true), output)
 
 local native = luainstaller.analyze({
@@ -672,7 +679,7 @@ assert(diagnosed.action == "compatibility")
 assert(diagnosed.compatibility.summary == traced.compatibility.summary)
 print("compat api ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "compat api ok")
+    assert_contains(run(lua_eval(script)), "compat api ok")
 end
 
 local function check_manifest_without_popen()
@@ -720,7 +727,7 @@ assert(macos.manifest.launcher.profile == "static-lua")
 platform.detectHost = original_detect
 print("manifest no popen ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "manifest no popen ok")
+    assert_contains(run(lua_eval(script)), "manifest no popen ok")
 end
 
 local function check_bundler_without_popen()
@@ -746,7 +753,7 @@ assert(result.ok == false)
 assert(result.error.type == "ToolchainError")
 print("bundler no popen ok")
 ]], out_dir)
-    assert_contains(run("lua -e " .. shell_quote(script)), "bundler no popen ok")
+    assert_contains(run(lua_eval(script)), "bundler no popen ok")
     remove_tree(out_dir)
 end
 
@@ -756,7 +763,7 @@ local logger = require("luainstaller.logger")
 assert(logger.clearLogs() == false, "clearLogs must report a persistence failure")
 print("logger write failure ok")
 ]]
-    assert_contains(run("HOME=/proc/luainstaller-unwritable lua -e " .. shell_quote(script)),
+    assert_contains(run("HOME=/proc/luainstaller-unwritable " .. lua_eval(script)),
         "logger write failure ok")
 
     local short_write_script = SOURCE_LOADER .. [[
@@ -772,7 +779,7 @@ assert(logger.clearLogs() == false, "clearLogs must report a short write")
 io.open = saved_open
 print("logger short write failure ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(short_write_script)), "logger short write failure ok")
+    assert_contains(run(lua_eval(short_write_script)), "logger short write failure ok")
 end
 
 local function check_platform_profiles()
@@ -812,7 +819,7 @@ assert(cross == nil and cross_err.error.type == "UnsupportedPlatformError")
 platform.detectHost = original_detect
 print("platform profiles ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "platform profiles ok")
+    assert_contains(run(lua_eval(script)), "platform profiles ok")
 end
 
 local function check_macos_profile_host_and_toolchain()
@@ -841,7 +848,7 @@ else
 end
 print("macos profile host gate ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "macos profile host gate ok")
+    assert_contains(run(lua_eval(script)), "macos profile host gate ok")
 end
 
 local function check_windows_profile_reaches_toolchain()
@@ -870,28 +877,23 @@ else
 end
 print("windows profile toolchain ok")
 ]]
-    assert_contains(run("lua -e " .. shell_quote(script)), "windows profile toolchain ok")
+    assert_contains(run(lua_eval(script)), "windows profile toolchain ok")
 end
 
 local function check_remote_onefile_script_coverage()
     local macos = read_file("tools/remote-test-macos.sh")
     assert_contains(macos, "bundle_onefile()")
     assert_contains(macos, "--file")
-    assert_contains(macos, "mac-onefile-runtime")
-    assert_contains(macos, "mac-onefile-student")
-    assert_contains(macos, "LUAROCKS_TARBALL")
-    assert_contains(macos, "stage_source \"$LUAROCKS_TARBALL\"")
-    assert_not_contains(macos, "curl -fsSLO https://luarocks.org/releases")
+    assert_contains(macos, "macos-onefile")
+    assert_contains(macos, "ONEFILE_STUDENT")
     assert_contains(macos, "quote_remote()")
     assert_contains(macos, "copy_tree_macos()")
-    assert_contains(macos, "REMOTE_ROOT=$(quote_remote \"$REMOTE_ROOT\")")
-    assert_contains(macos, "rm -rf \"\\$ROCKTREE\"")
-    assert_contains(macos, "mkdir -p \"\\$ROCKTREE\"")
-    assert_contains(macos, "install --force lua-cjson 2.1.0.10-1")
-    assert_contains(macos, "install --force luafilesystem 1.9.0-1")
-    assert_contains(macos, "install --force luasocket 3.1.0-1")
-    assert_contains(macos, "install --force mimetypes 1.1.0-2")
-    assert_contains(macos, "install --force pegasus 1.1.0-0")
+    assert_contains(macos, "MATRIX_WORK_ROOT=")
+    assert_contains(macos, "lua-5.4.8")
+    assert_contains(macos, "luarocks-5.4.8")
+    assert_contains(macos, "native-deps-5.4.8")
+    assert_not_contains(macos, "command -v lua")
+    assert_not_contains(macos, " install --force lua-")
     assert_contains(macos, "git archive --format=tar HEAD")
     assert_contains(macos, "tools/test-lua-versions.sh")
 
@@ -903,9 +905,13 @@ local function check_remote_onefile_script_coverage()
     assert_not_contains(windows:lower(), "mingw")
 
     local linux = read_file("tools/remote-test-linux.sh")
-    assert_contains(linux, "test/contract_docs.lua")
-    assert_contains(linux, "test/cli_split_smoke.lua")
-    assert_contains(linux, "luarocks make")
+    assert_contains(linux, "MATRIX_WORK_ROOT=")
+    assert_contains(linux, "lua-5.4.8")
+    assert_contains(linux, "luarocks-5.4.8")
+    assert_contains(linux, "native-deps-5.4.8")
+    assert_contains(linux, "make --force --deps-mode=none")
+    assert_not_contains(linux, "command -v lua")
+    assert_not_contains(linux, " install --force lua-")
     assert_contains(linux, "git archive --format=tar HEAD")
     assert_contains(linux, "tools/test-lua-versions.sh")
     print("remote onefile script coverage ok")
@@ -913,7 +919,7 @@ end
 
 local function check_release_safety_contract()
     local root = make_temp_dir("release-safety")
-    local lua_bin = command_output_trimmed("command -v lua")
+    local lua_bin = command_output_trimmed("command -v " .. lua_command)
     local real_cc = command_output_trimmed("command -v cc")
     local unsafe_out = root .. "/unsafe-existing"
     run("mkdir -p " .. shell_quote(unsafe_out))
@@ -942,7 +948,7 @@ assert(unsafe_onefile.error.type == "InvalidOutputError")
 print("output safety ok")
 ]], unsafe_out, root .. "/onefile-dir")
     run("mkdir -p " .. shell_quote(root .. "/onefile-dir"))
-    assert_contains(run("lua -e " .. shell_quote(script)), "output safety ok")
+    assert_contains(run(lua_eval(script)), "output safety ok")
     assert(read_file(unsafe_out .. "/sentinel.txt") == "user data")
 
     local forged_out = root .. "/forged-generated"
@@ -960,7 +966,7 @@ assert(forged.ok == false, "forged generated manifest must not authorize deletin
 assert(forged.error.type == "InvalidOutputError")
 print("forged manifest safety ok")
 ]], forged_out)
-    assert_contains(run("lua -e " .. shell_quote(forged_script)), "forged manifest safety ok")
+    assert_contains(run(lua_eval(forged_script)), "forged manifest safety ok")
     assert(read_file(forged_out .. "/sentinel.txt") == "user data")
 
     local forged_allowed_out = root .. "/forged-allowed-generated"
@@ -978,7 +984,7 @@ assert(forged.ok == false, "forged generated manifest with allowed names must no
 assert(forged.error.type == "InvalidOutputError")
 print("forged allowed manifest safety ok")
 ]], forged_allowed_out)
-    assert_contains(run("lua -e " .. shell_quote(forged_allowed_script)), "forged allowed manifest safety ok")
+    assert_contains(run(lua_eval(forged_allowed_script)), "forged allowed manifest safety ok")
     assert(read_file(forged_allowed_out .. "/forged-allowed-generated") == "user executable")
 
     local onefile_path = root .. "/existing-onefile"
@@ -995,7 +1001,7 @@ assert(result.ok == false, "existing onefile output must be rejected unless expl
 assert(result.error.type == "InvalidOutputError")
 print("onefile existing file safety ok")
 ]], onefile_path)
-    assert_contains(run("lua -e " .. shell_quote(onefile_script)), "onefile existing file safety ok")
+    assert_contains(run(lua_eval(onefile_script)), "onefile existing file safety ok")
     assert(read_file(onefile_path) == "user executable")
 
     local marker = root .. "/logger-injected"
@@ -1005,7 +1011,8 @@ local logger = require("luainstaller.logger")
 assert(logger.clearLogs() == true)
 print("logger clear ok")
 ]]
-    assert_contains(run("HOME=" .. shell_quote(evil_home) .. " lua -e " .. shell_quote(logger_script)), "logger clear ok")
+    assert_contains(run("HOME=" .. shell_quote(evil_home) .. " " .. lua_eval(logger_script)),
+        "logger clear ok")
     if file_exists(marker) then
         error("logger directory creation must not execute shell metacharacters from HOME", 2)
     end
@@ -1023,7 +1030,7 @@ for i = 1, 2 do
 end
 print("generated marker rebuild ok")
 ]], rebuild_out)
-    assert_contains(run("lua -e " .. shell_quote(rebuild_script)), "generated marker rebuild ok")
+    assert_contains(run(lua_eval(rebuild_script)), "generated marker rebuild ok")
 
     local failing_bin = root .. "/failing-toolchain"
     run("mkdir -p " .. shell_quote(failing_bin))
@@ -1136,7 +1143,7 @@ assert(destinations[".luai/lua/a/init.lua"])
 assert(destinations[".luai/lua/b/init.lua"])
 print(result.executable)
 ]], pkg_root .. "/main.lua", root .. "/init-package-out")
-    local bundled = run("lua -e " .. shell_quote(pkg_script))
+    local bundled = run(lua_eval(pkg_script))
     local exe = bundled:match("([^\r\n]+)%s*$")
     assert_contains(run(shell_quote(exe)), "a:b")
 
@@ -1171,7 +1178,10 @@ local function check_release_metadata_contract()
     assert_contains(bundling, "source_id")
     assert_contains(bundling, "arg[0]")
     assert_not_contains(bundling, "32-bit FNV-1a")
-    local direct = run("lua test/runtime_bundle/main.lua metadata")
+    local direct = run(harness.command(harness.lua_command(), {
+        "test/runtime_bundle/main.lua",
+        "metadata",
+    }))
     assert_contains(direct, "hello metadata")
     print("release metadata contract ok")
 end
@@ -1181,14 +1191,14 @@ local function cli_command(program_name, args)
     for i = 1, #args do
         quoted[#quoted + 1] = string.format("%q", args[i])
     end
-    return "lua -e " .. shell_quote(SOURCE_LOADER .. string.format([[
+    return lua_eval(SOURCE_LOADER .. string.format([[
 local cli = require("luainstaller.cli")
 os.exit(cli.main({ %s }, { program_name = %q, color = false, animations = false }))
 ]], table.concat(quoted, ", "), program_name))
 end
 
 local function check_cli_contract()
-    local direct_help = run("lua src/cli.lua -h")
+    local direct_help = run(harness.command(harness.lua_command(), { "src/cli.lua", "-h" }))
     assert_contains(direct_help, "luai -a <entry.lua>")
 
     local luai_help = run(cli_command("luai", { "-h" }))
@@ -1308,7 +1318,8 @@ local function check_cli_source_lookup_safety()
     local root = make_temp_dir("cli-source-lookup")
     local script_name = "luai;touch${IFS}injected;#"
     run("cp src/cli.lua " .. shell_quote(root .. "/" .. script_name))
-    os.execute("cd " .. shell_quote(root) .. " && lua " .. shell_quote(script_name)
+    harness.command_result("cd " .. shell_quote(root) .. " && "
+        .. harness.command(harness.lua_command(), { script_name })
         .. " >/dev/null 2>&1")
     assert(not file_exists(root .. "/injected"), "CLI source lookup must quote a bare script name")
     remove_tree(root)
@@ -1316,9 +1327,10 @@ local function check_cli_source_lookup_safety()
 end
 
 local function check_runtime_cgen()
-    local script = SOURCE_LOADER .. [[
+local script = SOURCE_LOADER .. [[
 local runtime = require("luainstaller.runtime")
 local cgen = require("luainstaller.cgen")
+local compat = require("luainstaller.compat")
 
 local stripped = runtime.stripSource("\239\187\191#!/usr/bin/env lua\nprint('ok')")
 assert(stripped == "\nprint('ok')")
@@ -1368,7 +1380,7 @@ local bootstrap = cgen.generateBootstrap({
 assert(type(bootstrap) == "string")
 assert(bootstrap:find("luainstaller generated bootstrap", 1, true))
 
-local chunk = assert(load(bootstrap, "@generated-runtime-bundle"))
+local chunk = assert(compat.loadText(bootstrap, "@generated-runtime-bundle", _G))
 local old_arg = _G.arg
 _G.arg = { [0] = "generated.lua", "generated" }
 local generated_output = {}
@@ -1389,7 +1401,7 @@ local single = cgen.generateBootstrap({
     entry = "test/single_file/01_hello_luainstaller.lua",
     dependencies = { scripts = {}, libraries = {} },
 })
-assert(assert(load(single, "@generated-single-file")))
+assert(assert(compat.loadText(single, "@generated-single-file", _G)))
 
 local order_root = assert(os.getenv("LUAI_CGEN_ORDER_ROOT"))
 local function write_temp(path, content)
@@ -1422,7 +1434,7 @@ print("runtime cgen ok")
 ]]
     local root = make_temp_dir("cgen-order")
     assert_contains(run("LUAI_CGEN_ORDER_ROOT=" .. shell_quote(root)
-        .. " lua -e " .. shell_quote(script)), "runtime cgen ok")
+        .. " " .. lua_eval(script)), "runtime cgen ok")
     remove_tree(root)
 end
 
@@ -1447,7 +1459,7 @@ handle:close()
 print("c source generated")
 ]]
 
-    assert_contains(run("lua -e " .. shell_quote(script)), "c source generated")
+    assert_contains(run(lua_eval(script)), "c source generated")
 
     if not command_ok("cc --version") then
         remove_file("test/runtime_bundle/generated_launcher.c")
@@ -1460,12 +1472,15 @@ print("c source generated")
     remove_file(exe_path)
 
     local link_flags
-    if host_system() == "Darwin" then
-        local prefix = assert(os.getenv("LUAI_LUA_PREFIX"), "macOS launcher test needs LUAI_LUA_PREFIX")
+    local prefix = os.getenv("LUAI_LUA_PREFIX")
+    if prefix and prefix ~= "" then
         assert_file_exists(prefix .. "/include/lua.h")
         assert_file_exists(prefix .. "/lib/liblua.a")
         link_flags = "-I" .. shell_quote(prefix .. "/include")
             .. " " .. shell_quote(prefix .. "/lib/liblua.a") .. " -lm"
+        if host_system() ~= "Darwin" then
+            link_flags = link_flags .. " -ldl"
+        end
     else
         if not command_ok("pkg-config --exists lua") then
             remove_file("test/runtime_bundle/generated_launcher.c")
@@ -1480,8 +1495,7 @@ print("c source generated")
         shell_quote(exe_path),
         link_flags
     )
-    local ok = os.execute(compile)
-    assert(ok == true or ok == 0, "generated C launcher should compile")
+    run(compile)
 
     local output = run(shell_quote(exe_path) .. " launcher")
     assert_contains(output, "hello launcher")
@@ -1540,7 +1554,7 @@ assert_bundle({
         "LUAI_FIREBIRD_OUT=" .. shell_quote(firebird_out),
     }, " ")
 
-    run(env .. " lua -e " .. shell_quote(script))
+    run(env .. " " .. lua_eval(script))
 
     local manifest = assert(loadfile(runtime_out .. "/.luai/manifest.lua"))()
     assert(type(manifest.launcher.lua_runtime) == "table")
@@ -1574,7 +1588,7 @@ assert_bundle({
     run("mkdir -p " .. shell_quote(path_bin) .. " " .. shell_quote(path_cwd))
     run("ln -s " .. shell_quote(student_out .. "/student") .. " " .. shell_quote(path_bin .. "/student-via-path"))
     assert_contains(run("cd " .. shell_quote(path_cwd)
-        .. " && env -i PATH=" .. shell_quote(path_bin .. ":/usr/bin:/bin")
+        .. " && env -i PATH=" .. shell_quote(path_bin)
         .. " LUA_PATH='' LUA_CPATH=''"
         .. " student-via-path --data " .. shell_quote(path_data) .. " seed"), "Seeded 8 students")
 
@@ -1641,7 +1655,7 @@ assert_bundle({
     local student_out = root .. "/student-onefile"
     local built = run("LUAI_RUNTIME_ONEFILE_OUT=" .. shell_quote(runtime_out)
         .. " LUAI_STUDENT_ONEFILE_OUT=" .. shell_quote(student_out)
-        .. " lua -e " .. shell_quote(script))
+        .. " " .. lua_eval(script))
     assert_contains(built, runtime_out)
     assert_contains(built, student_out)
     local cache_root = root .. "/onefile-cache"
@@ -1733,7 +1747,7 @@ assert(result.ok == true,
     result.error and result.error.message or "precreated staging symlink was not bypassed")
 print("onefile build temp safety ok")
 ]], out_path)
-    assert_contains(run("TMPDIR=" .. shell_quote(temp_root) .. " lua -e " .. shell_quote(script)),
+    assert_contains(run("TMPDIR=" .. shell_quote(temp_root) .. " " .. lua_eval(script)),
         "onefile build temp safety ok")
     local victim_files = command_output_trimmed("find " .. shell_quote(victim) .. " -type f -print")
     assert(victim_files == "", "onefile build must not write through a staging parent symlink")

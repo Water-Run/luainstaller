@@ -8,14 +8,12 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-07-11
+    2026-07-18
 ]]
 
 local compat = require("luainstaller.compat")
 
 local M = {}
-
-local MASK32 = 0xffffffff
 
 local SHA256_CONSTANTS = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
@@ -128,6 +126,14 @@ end
 
 local function mask32(value)
     return compat.uint32(value)
+end
+
+local function multiplyFNVPrime(value)
+    -- 16777619 = 2^24 + 403.  Lua 5.1 represents numbers as doubles, so a
+    -- direct 32-bit multiplication can lose low bits before the modulo.  Only
+    -- the low byte contributes to the 2^24 term modulo 2^32, and both products
+    -- below remain exactly representable on every supported Lua number model.
+    return mask32(value * 403 + (value % 256) * 16777216)
 end
 
 local function rotateRight(value, count)
@@ -257,7 +263,7 @@ function M.fnv1a32(content)
     content = tostring(content or "")
     local value = 2166136261
     for index = 1, #content do
-        value = mask32(compat.bxor(value, content:byte(index)) * 16777619)
+        value = multiplyFNVPrime(compat.bxor(value, content:byte(index)))
     end
     return string.format("%08x", value)
 end

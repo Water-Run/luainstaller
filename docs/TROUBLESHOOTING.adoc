@@ -22,7 +22,9 @@ lua app/main.lua --help
 luai -a app/main.lua --max-deps 120
 luai -t app/main.lua --max-deps 120 --verbose
 luai -b --dir app/main.lua -o build/app --max-deps 120
-env -i PATH=/usr/bin:/bin build/app/app
+EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+env -i PATH="$EMPTY_PATH" build/app/app
+rmdir "$EMPTY_PATH"
 ----
 
 Record the first failure.
@@ -156,7 +158,9 @@ clear Lua environment variables; test on the real target OS.
 ----
 file build/app/.luai/native/*
 ldd build/app/.luai/native/*.so
-env -i PATH=/usr/bin:/bin build/app/app
+EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+env -i PATH="$EMPTY_PATH" build/app/app
+rmdir "$EMPTY_PATH"
 ----
 
 If it only works without a clean environment, the process is using host

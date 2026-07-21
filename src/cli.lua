@@ -56,6 +56,7 @@ local function installSourcePreloads()
         "luainstaller.path",
         "luainstaller.result",
         "luainstaller.lock_owner",
+        "luainstaller.distribution_files",
         "luainstaller.lua_abi",
         "luainstaller.native_profile",
         "luainstaller.analyzer",
@@ -92,6 +93,9 @@ local function installSourcePreloads()
     end
     package.preload["luainstaller.lock_owner"] = package.preload["luainstaller.lock_owner"] or function()
         return dofile(sourcePath("lock_owner.lua"))
+    end
+    package.preload["luainstaller.distribution_files"] = package.preload["luainstaller.distribution_files"] or function()
+        return dofile(sourcePath("distribution_files.lua"))
     end
     package.preload["luainstaller.lua_abi"] = package.preload["luainstaller.lua_abi"] or function()
         return dofile(sourcePath("lua_abi.lua"))

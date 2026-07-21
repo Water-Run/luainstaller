@@ -15,6 +15,7 @@ local harness = dofile("test/support/harness.lua")
 harness.install_loader()
 
 local compat = require("luainstaller.compat")
+local process = require("luainstaller.process")
 local info = compat.luaVersion()
 
 assert(info.major == 5, "Lua 5.x is required")
@@ -46,7 +47,32 @@ assert(output == _VERSION, string.format(
     tostring(output)
 ))
 
-local process = require("luainstaller.process")
+local exact_release = os.getenv("LUAI_LUA_RELEASE")
+local source_sha256 = os.getenv("LUAI_LUA_SOURCE_SHA256")
+if exact_release or source_sha256 then
+    local pinned_sources = {
+        ["5.1.5"] = "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
+        ["5.2.4"] = "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
+        ["5.3.6"] = "fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60",
+        ["5.4.8"] = "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
+        ["5.5.0"] = "57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d",
+    }
+    assert(type(exact_release) == "string" and pinned_sources[exact_release],
+        "matrix did not identify a pinned exact Lua release")
+    assert(source_sha256 == pinned_sources[exact_release],
+        "matrix Lua source digest does not match its exact release")
+    local release_major, release_minor = exact_release:match("^(%d+)%.(%d+)%.")
+    assert(tonumber(release_major) == info.major
+            and tonumber(release_minor) == info.minor,
+        "matrix exact Lua release does not match the running ABI")
+    local banner_ok, banner = process.outputCommand(interpreter, { "-v" })
+    assert(banner_ok, banner)
+    local expected_prefix = "Lua " .. exact_release
+    assert(banner:sub(1, #expected_prefix) == expected_prefix
+            and banner:sub(#expected_prefix + 1, #expected_prefix + 1):match("%s"),
+        "interpreter banner does not report the pinned patch release: " .. banner)
+end
+
 local output_succeeded, direct_output = process.output(harness.command(interpreter, {
     "-e",
     "io.write('process-output-ok')",
@@ -98,6 +124,7 @@ local product_files = {
     "src/cli.lua",
     "src/compat.lua",
     "src/discovery.lua",
+    "src/distribution_files.lua",
     "src/fs.lua",
     "src/hash.lua",
     "src/init.lua",

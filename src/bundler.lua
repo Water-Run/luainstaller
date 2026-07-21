@@ -13,6 +13,7 @@ Updated:
 
 local launcher = require("luainstaller.launcher")
 local compat = require("luainstaller.compat")
+local distribution_files = require("luainstaller.distribution_files")
 local fs = require("luainstaller.fs")
 local hash_mod = require("luainstaller.hash")
 local lock_owner = require("luainstaller.lock_owner")
@@ -445,6 +446,55 @@ local function copyFile(source, destination, expected_hash, hash_algorithm)
         end
     end
     return nil
+end
+
+local function writeDistributionFiles(root, target_os)
+    local records = {}
+    for _, item in ipairs(distribution_files) do
+        local relative = normalizePath(item.destination)
+        local valid, reason = validateTargetRelative(relative, target_os)
+        if not valid then
+            return nil, makeError(
+                "InvalidOptionsError",
+                "Distribution material path is not portable: " .. relative,
+                {
+                    path = relative,
+                    target_os = target_os,
+                    reason = reason,
+                }
+            )
+        end
+        local destination = normalizePath(root .. "/" .. relative)
+        if not isWithin(destination, root) or destination == normalizePath(root) then
+            return nil, makeError("FilesystemError", "Distribution material escapes the bundle", {
+                path = relative,
+                root = root,
+            })
+        end
+        if pathExists(destination) or isSymlink(destination) then
+            return nil, makeError(
+                "DuplicateModuleError",
+                "Distribution material collides with generated output",
+                { path = relative }
+            )
+        end
+        local directory_err = ensureDirectory(dirname(destination))
+        if directory_err then return nil, directory_err end
+        local write_err = writeFile(destination, item.content)
+        if write_err then return nil, write_err end
+        local copied, read_err = fs.readRegularFile(destination)
+        if copied == nil then
+            return nil, makeError("FilesystemError", "Cannot verify distribution material", {
+                path = destination,
+                cause = read_err,
+            })
+        end
+        records[#records + 1] = {
+            destination_path = relative,
+            content_hash = hash_mod.sha256(copied),
+        }
+    end
+    return records
 end
 
 local function copyLuaRuntime(lua_path, native_dir, runtime_name)
@@ -1598,14 +1648,17 @@ local function bundleOnedir(opts, lifecycle)
             reason = exe_reason,
         })
     end
-    if targetKey(exe_name, profile.target_os) == targetKey(".luai", profile.target_os) then
-        return makeError("InvalidOptionsError", "Executable name collides with the .luai metadata directory", {
+    if targetKey(exe_name, profile.target_os) == targetKey(".luai", profile.target_os)
+        or targetKey(exe_name, profile.target_os)
+            == targetKey("THIRD_PARTY_NOTICES.md", profile.target_os) then
+        return makeError("InvalidOptionsError", "Executable name collides with reserved bundle metadata", {
             target_path = exe_name,
             target_os = profile.target_os,
         })
     end
     local allowed_generated_entries = {
         [".luai"] = true,
+        ["THIRD_PARTY_NOTICES.md"] = true,
         [exe_name] = true,
     }
     local runtime_name = native_toolchain.runtime_name
@@ -1681,6 +1734,12 @@ local function bundleOnedir(opts, lifecycle)
     if err then
         return abandon(err)
     end
+    local material_records
+    material_records, err = writeDistributionFiles(out_dir, profile.target_os)
+    if err then
+        return abandon(err)
+    end
+    manifest.distribution_files = material_records
 
     local native_owners = {}
     for _, path in ipairs(dependencies.libraries or {}) do

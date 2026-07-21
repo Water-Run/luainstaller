@@ -27,7 +27,9 @@ lua test/ltokei/smoke_test.lua
 
 luai -t test/ltokei/main.lua --max-deps 120
 luai -b --dir test/ltokei/main.lua -o build/ltokei --max-deps 120
-env -i PATH=/usr/bin:/bin build/ltokei/ltokei test/ltokei/fixtures
+EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+env -i PATH="$EMPTY_PATH" build/ltokei/ltokei test/ltokei/fixtures
+rmdir "$EMPTY_PATH"
 ----
 
 Expected discovery is three `ltokei.*` Lua modules plus native `lfs`.

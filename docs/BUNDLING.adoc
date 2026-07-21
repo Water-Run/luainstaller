@@ -19,10 +19,17 @@ Linux / macOS:
 ----
 app/
 ├── app
+├── THIRD_PARTY_NOTICES.md
 └── .luai/
     ├── build/
-    │   └── launcher.c
+    │   ├── generate-onefile-payload.lua
+    │   ├── launcher.c
+    │   └── RELINKING.adoc
     ├── generated-output.txt
+    ├── licenses/
+    │   ├── GPL-3.0-or-later.txt
+    │   ├── LGPL-3.0-or-later.txt
+    │   └── Lua-MIT.txt
     ├── manifest.lua
     └── native/
         ├── liblua-5.x.so    # shared-Lua profiles; name follows ABI
@@ -116,6 +123,23 @@ roots produce byte-identical onefile artifacts. Generated bootstrap chunk
 names and manifest trace references use the same logical source IDs, so
 checkout directories and build usernames are not embedded as metadata.
 
+[#bundling-licenses]
+== Licenses and corresponding source
+
+Every onedir and onefile payload contains the Lua MIT license, luainstaller's
+LGPL-3.0-or-later text, the GPLv3 text incorporated by the LGPL, and
+`THIRD_PARTY_NOTICES.md`. The manifest records each material's destination and
+SHA-256; canonical material is installed with the Lua module so building from
+another working directory does not depend on repository-relative files.
+
+`.luai/build/launcher.c` is the exact generated inner-launcher source and
+contains bundled Lua sources as text. Onefile payloads additionally contain
+`.luai/build/extractor.c`, the exact outer extractor translation unit, with a
+documented generated `payload.inc` interface, `payload-files.lua`, and a
+standalone `generate-onefile-payload.lua` re-generator. Preserve
+`.luai/build/RELINKING.adoc` and the complete application/module sources when
+redistributing. Extra dependencies may require additional notices or source.
+
 `.luai/generated-output.txt` is the v2 ownership marker
 (`luainstaller-generated-output-v2`): final directory, every generated
 directory, and every generated regular file with SHA-256. Replacement is
@@ -128,9 +152,10 @@ output path.
 [#bundling-onefile]
 == Single-file
 
-Build a full directory bundle first, then embed runtime files into the
-extractor (path, size, executable bit, bytes). `.luai/build/` and the onedir
-ownership marker are omitted. An existing output path is not overwritten.
+Build a full directory bundle first, add the extractor corresponding source,
+then embed runtime files into the extractor (path, size, executable bit,
+bytes). The onedir ownership marker is omitted; `.luai/build/` is retained for
+license and relinking purposes. An existing output path is not overwritten.
 
 POSIX cache: `luainstaller-onefile-<effective-uid>` under the canonical
 temporary root; permission and sticky-ancestor rules are in

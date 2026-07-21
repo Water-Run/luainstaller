@@ -29,6 +29,14 @@ transaction finalization, dead-owner recovery, retry, and artifact execution.
 Checks POSIX PID/signal/exit semantics and Windows kill-on-close child
 containment for a forcefully terminated outer onefile process.
 
+`distribution_licenses.lua`::
+Checks canonical notices and license hashes, no-Lua onefile extraction,
+tamper repair, corresponding source, payload regeneration, and actual relink.
+
+`reproducible_artifacts.lua`::
+Builds equivalent projects under different roots and requires byte-identical
+onefiles, path privacy, and executable-style `arg[0]` in every output mode.
+
 `smoke_all.lua`::
 Runs the comprehensive local audit: syntax, samples, API, generated C,
 installation layouts, onedir, onefile, native dependencies, safety regressions,
@@ -52,6 +60,8 @@ $LUA test/contract_docs.lua
 $LUA test/production_edges.lua
 $LUA test/build_interruption.lua
 $LUA test/onefile_lifecycle.lua
+$LUA test/distribution_licenses.lua
+$LUA test/reproducible_artifacts.lua
 $LUA test/smoke_all.lua
 ----
 
@@ -74,8 +84,20 @@ Both matrix runners download the official Lua 5.1.5, 5.2.4, 5.3.6, 5.4.8,
 and 5.5.0 sources, verify pinned SHA-256 digests, and write per-version evidence
 logs below a guarded `luainstaller-*` temporary directory. These are tested
 versions, not a platform or patch-version allowlist.
+The POSIX runner supports either `sha256sum` or `shasum`. Exact cache markers
+bind every reused Lua/LuaRocks build to its source digest, recipe, host, and
+compiler; all required applicable suites run for every selected Lua release.
 LuaRocks 3.13.0 is pinned because it is the first release in this matrix that
 recognizes Lua 5.5.
+For every POSIX ABI the runner also builds an isolated, SHA-256-pinned sample
+tree containing lua-cjson, LuaFileSystem, LuaSocket, mimetypes, lzlib, Pegasus,
+and a directly compiled lsqlite3 plus SQLite amalgamation. LuaRocks dependency
+resolution is disabled, and the cache identity binds the exact source list and
+installation order. The lsqlite3 binding and pinned SQLite amalgamation are
+extracted into separate roots, and each matrix log records both selected C
+source paths so a bundled, stale `sqlite3.c` cannot silently satisfy coverage.
+See xref:../docs/TESTING.adoc#testing-version-matrix[the
+release matrix] for the complete source and digest table.
 
 == Packaging targets
 
@@ -120,7 +142,9 @@ Then analyze and build:
 luai -t test/runtime_bundle/main.lua --max-deps 120
 luai -b --dir test/runtime_bundle/main.lua \
   -o build/runtime-test --max-deps 120
-env -i PATH=/usr/bin:/bin build/runtime-test/runtime-test clean
+EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+env -i PATH="$EMPTY_PATH" build/runtime-test/runtime-test clean
+rmdir "$EMPTY_PATH"
 ----
 
 Remote coverage is driven by:

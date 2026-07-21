@@ -70,9 +70,8 @@ harness.assert_pe_closure(native_config, {
 })
 assert(fs.removeFile(native_module))
 
-local clean_path = package.config:sub(1, 1) == "\\"
-    and "C:\\Windows\\System32;C:\\Windows"
-    or "/usr/bin:/bin"
+local clean_path = path.join(root, "empty-path")
+assert(fs.makeDirectory(clean_path))
 local argument = "onefile space & quote-\"value\""
 local ran, output = process.outputCommand(built.executable, { argument }, {
     PATH = clean_path,

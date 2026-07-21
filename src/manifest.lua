@@ -251,6 +251,7 @@ function M.distribution(manifest)
         discovery = copyValue(manifest.discovery),
         trace = distributionTrace(manifest),
         compatibility = copyValue(manifest.compatibility),
+        distribution_files = copyValue(manifest.distribution_files or {}),
     }
 end
 

@@ -1,0 +1,73 @@
+= Relinking generated bundles
+:sectanchors:
+
+This file accompanies generated luainstaller executables. It records the
+source and practical inputs needed to replace or relink the generated launcher
+under LGPL-3.0-or-later. It is not a substitute for the license texts in
+`../licenses/`.
+
+== Included material
+
+* `launcher.c` is the exact generated launcher source used for the inner
+  executable. It contains the entry and bundled pure-Lua sources as text.
+* `extractor.c`, when present in a onefile payload, is the corresponding source
+  for the outer self-extractor. Its generated payload definitions are rebuilt
+  from the other extracted files as described in its header.
+* `generate-onefile-payload.lua` and `payload-files.lua`, when present,
+  regenerate the omitted self-referential `payload.inc` from the exact
+  extracted files and their recorded executable modes.
+* `../manifest.lua` records the Lua ABI, target OS/architecture, link mode,
+  logical source IDs, and SHA-256 content hashes.
+* `../licenses/LGPL-3.0-or-later.txt` and
+  `../licenses/GPL-3.0-or-later.txt` contain the applicable license texts.
+
+== Relinking the launcher
+
+. Use an official Lua interpreter, headers, and library with the same
+  major/minor ABI shown in `../manifest.lua`.
+. Use a native compiler for the target OS and architecture. Cross-compilation
+  is not part of the supported 1.0 relinking profile.
+. Compile `launcher.c` as strict C11, link the selected Lua library and its
+  platform dependencies, and preserve the loader search path used by the
+  target profile.
+. Replace the inner executable in an onedir tree, or rebuild the onefile
+  payload from that tree with the matching luainstaller source revision.
+. Run the application with `LUA_PATH`, `LUA_CPATH`, and every `LUA_INIT*`
+  variable cleared, then repeat its native-module tests.
+
+Typical POSIX shape (substitute paths and Lua libraries for the manifest):
+
+[source,bash]
+----
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+  launcher.c -o application $(pkg-config --cflags --libs lua)
+----
+
+To rebuild an extracted onefile wrapper, first regenerate its payload include,
+then compile the exact extractor translation unit:
+
+[source,bash]
+----
+lua .luai/build/generate-onefile-payload.lua . .luai/build/payload.inc
+cc -std=c11 -Wall -Wextra -Werror -pedantic \
+  .luai/build/extractor.c -o application-onefile
+----
+
+On Windows, use the same MSVC or MinGW-w64 CRT profile as the original bundle
+and place the matching Lua DLL beside the executable. On macOS, the release
+profile links the verified static Lua archive and the platform libraries
+reported by that Lua build.
+
+== Complete project source
+
+The preferred source for the generator, build scripts, and extractor template
+is the luainstaller source tree corresponding to the version that produced the
+bundle:
+
+https://github.com/Water-Run/luainstaller
+
+Keep that source revision, the application sources, manually included modules,
+native-module sources, and the exact Lua/toolchain provenance with any release.
+Third-party modules may impose additional source and notice requirements.
+
+xref:../README.adoc#documentation-index[Back to documentation index]

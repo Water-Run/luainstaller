@@ -140,8 +140,10 @@ exec "$LUAI_REAL_CC" "$@"
     assert(stagingCount() == 1, "SIGKILL staging fixture count: " .. stagingCount())
     retryBuild(killed_out)
 
+    local empty_path = path.join(root, "empty-path")
+    assert(fs.makeDirectory(empty_path))
     local ran, output = process.outputCommand(path.join(killed_out, "out-killed"), {}, {
-        PATH = "/usr/bin:/bin",
+        PATH = empty_path,
         LUA_PATH = "",
         LUA_CPATH = "",
         LUA_INIT = "",

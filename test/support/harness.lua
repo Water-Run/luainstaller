@@ -14,6 +14,46 @@ Updated:
 
 local M = {}
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
+local command_counter = 0
+
+local function legacy_windows_script(command, token)
+    local identity = tostring({}):gsub("[^%w]", "")
+    for attempt = 1, 100 do
+        local path = string.format(
+            "luai-test-command-%s-%d-%d-%d.cmd",
+            identity,
+            os.time(),
+            command_counter,
+            attempt
+        )
+        local existing = io.open(path, "rb")
+        if existing then
+            existing:close()
+        else
+            local handle, err = io.open(path, "wb")
+            if not handle then return nil, err end
+            local content = table.concat({
+                "@echo off",
+                "call :luai_test_command",
+                'set "LUAI_TEST_STATUS=%errorlevel%"',
+                '<nul set /p "=' .. token .. ':%LUAI_TEST_STATUS%"',
+                'exit /b %LUAI_TEST_STATUS%',
+                ':luai_test_command',
+                command,
+                'exit /b %errorlevel%',
+                "",
+            }, "\r\n")
+            local wrote, write_err = handle:write(content)
+            local closed, close_err = handle:close()
+            if not wrote or not closed then
+                os.remove(path)
+                return nil, tostring(write_err or close_err)
+            end
+            return path
+        end
+    end
+    return nil, "cannot allocate a unique Windows command script"
+end
 
 local function quote_windows(value)
     value = tostring(value or "")
@@ -53,6 +93,7 @@ local PRELOADS = {
     { "luainstaller.toolchain", "src/toolchain.lua" },
     { "luainstaller.result", "src/result.lua" },
     { "luainstaller.lock_owner", "src/lock_owner.lua" },
+    { "luainstaller.distribution_files", "src/distribution_files.lua" },
     { "luainstaller.lua_abi", "src/lua_abi.lua" },
     { "luainstaller.native_profile", "src/native_profile.lua" },
     { "luainstaller.logger", "src/logger.lua" },
@@ -107,10 +148,63 @@ function M.command(executable, arguments)
     return table.concat(parts, " ")
 end
 
-function M.run(command)
-    local pipe = assert(io.popen(command .. " 2>&1", "r"))
+function M.command_result(command)
+    command_counter = command_counter + 1
+    local invocation = command .. " 2>&1"
+    local legacy_token
+    local legacy_script
+    if _VERSION == "Lua 5.1" then
+        legacy_token = string.format(
+            "LUAI_TEST_EXIT_%s_%d_%d",
+            tostring({}):gsub("[^%w]", ""),
+            os.time(),
+            command_counter
+        )
+        if IS_WINDOWS then
+            local script_err
+            legacy_script, script_err = legacy_windows_script(command, legacy_token)
+            if not legacy_script then return false, tostring(script_err), nil end
+            invocation = "call " .. quote_windows(legacy_script) .. " 2>&1"
+        else
+            invocation = "(" .. command .. ") 2>&1; "
+                .. "__luai_test_status=$?; printf '\n" .. legacy_token
+                .. ":%s\n' \"$__luai_test_status\""
+        end
+    end
+
+    local opened, pipe = pcall(io.popen, invocation, "r")
+    if not opened or not pipe then
+        if legacy_script then os.remove(legacy_script) end
+        return false, tostring(pipe), nil
+    end
     local output = pipe:read("*a") or ""
-    local ok, _, code = pipe:close()
+    local close_ok, _, close_code = pipe:close()
+    if legacy_script then
+        local removed, remove_err = os.remove(legacy_script)
+        if not removed then
+            return false, output .. "\nfailed to remove command script: "
+                .. tostring(remove_err), nil
+        end
+    end
+    if legacy_token then
+        local marker_prefix = IS_WINDOWS and "" or "\n"
+        local captured, status = output:match(
+            "^(.*)" .. marker_prefix .. legacy_token .. ":(%d+)\r?\n?$"
+        )
+        if not status then
+            return false, output, nil
+        end
+        status = tonumber(status)
+        return status == 0, captured, status
+    end
+    if close_ok == true then
+        return true, output, 0
+    end
+    return false, output, tonumber(close_code)
+end
+
+function M.run(command)
+    local ok, output, code = M.command_result(command)
     if not ok then
         error("command failed (" .. tostring(code) .. "): " .. command .. "\n" .. output, 2)
     end
@@ -127,6 +221,22 @@ function M.lua_command()
         return current
     end
     return "lua"
+end
+
+function M.luac_command()
+    local configured = os.getenv("LUAI_TEST_LUAC")
+    if configured and configured ~= "" then
+        return configured
+    end
+    local lua = M.lua_command()
+    local sibling, replacements = lua:gsub("lua(%.[Ee][Xx][Ee])$", "luac%1", 1)
+    if replacements == 0 then
+        sibling, replacements = lua:gsub("lua$", "luac", 1)
+    end
+    if replacements > 0 then
+        return sibling
+    end
+    return "luac"
 end
 
 function M.run_lua(arguments)

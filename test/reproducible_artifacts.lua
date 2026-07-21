@@ -85,9 +85,8 @@ return { message = function(value) return "repro " .. value end }
         end
     end
 
-    local clean_path = package.config:sub(1, 1) == "\\"
-        and "C:\\Windows\\System32;C:\\Windows"
-        or "/usr/bin:/bin"
+    local clean_path = path.join(root, "empty-path")
+    assert(fs.makeDirectory(clean_path))
     for _, executable in ipairs({ onedirs[1], onefiles[1], onedirs[2], onefiles[2] }) do
         local ran, output = process.outputCommand(executable, { "identity" }, {
             PATH = clean_path,

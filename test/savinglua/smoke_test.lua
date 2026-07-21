@@ -12,19 +12,15 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-06-14
+    2026-07-18
 ]]
 local ROOT = "test/savinglua"
 package.path = ROOT .. "/src/?.lua;" .. package.path
+local harness = dofile("test/support/harness.lua")
 
 local store = require("savinglua.store")
 
 local DB = os.tmpname() .. ".sqlite3"
-
-local function shell_quote(value)
-    value = tostring(value or "")
-    return "'" .. value:gsub("'", "'\\''") .. "'"
-end
 
 local function assert_contains(text, pattern)
     if not tostring(text):find(pattern, 1, true) then
@@ -32,21 +28,16 @@ local function assert_contains(text, pattern)
     end
 end
 
-local function run(args)
-    local cmd = table.concat({
-        "lua",
-        shell_quote(ROOT .. "/main.lua"),
+local function run(arguments)
+    local command_arguments = {
+        ROOT .. "/main.lua",
         "--db",
-        shell_quote(DB),
-        args,
-    }, " ")
-    local pipe = assert(io.popen(cmd .. " 2>&1", "r"))
-    local out = pipe:read("*a")
-    local ok = pipe:close()
-    if not ok then
-        error("command failed: " .. cmd .. "\n" .. out, 2)
+        DB,
+    }
+    for _, argument in ipairs(arguments) do
+        command_arguments[#command_arguments + 1] = argument
     end
-    return out
+    return harness.run(harness.command(harness.lua_command(), command_arguments))
 end
 
 os.remove(DB)
@@ -75,10 +66,11 @@ assert(db:delete("users:grace"))
 assert(db:get("users:grace") == nil, "expected deleted record to be absent")
 db:close()
 
-assert_contains(run("put sessions:demo '{\"ok\":true,\"count\":3}'"), "stored sessions:demo")
-assert_contains(run("get sessions:demo"), "\"count\":3")
-assert_contains(run("scan users:"), "users:ada")
-assert_contains(run("delete sessions:demo"), "deleted sessions:demo")
+assert_contains(run({ "put", "sessions:demo", '{"ok":true,"count":3}' }),
+    "stored sessions:demo")
+assert_contains(run({ "get", "sessions:demo" }), "\"count\":3")
+assert_contains(run({ "scan", "users:" }), "users:ada")
+assert_contains(run({ "delete", "sessions:demo" }), "deleted sessions:demo")
 
 os.remove(DB)
 

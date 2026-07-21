@@ -129,6 +129,12 @@ host. Platform limits:
 xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
 Diagnosis: xref:docs/TROUBLESHOOTING.adoc[Troubleshooting].
 
+Every generated distribution contains the Lua MIT notice, the luainstaller
+LGPL/GPL texts, third-party notices, generated C source, and relinking
+instructions. Preserve them when redistributing an artifact and add the
+notices/source required by application dependencies. Details:
+xref:docs/RELINKING.adoc[Relinking generated bundles].
+
 [#usage-api]
 === Library use from `.lua`
 
@@ -201,6 +207,7 @@ Full gates: xref:docs/TESTING.adoc[Testing].
 
 * xref:docs/USAGE.adoc[Usage] — options, discovery, API
 * xref:docs/BUNDLING.adoc[Bundle format] — layout and runtime
+* xref:docs/RELINKING.adoc[Licenses and relinking]
 * xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules]
 * xref:docs/TROUBLESHOOTING.adoc[Troubleshooting]
 * xref:docs/IMPLEMENTATION.adoc[Implementation] (maintainers)

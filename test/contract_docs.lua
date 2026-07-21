@@ -36,6 +36,7 @@ local mkdir = harness.mkdir
 local find_trace = harness.find_trace
 local assert_error = harness.assert_error
 local invoke_cli = harness.invoke_cli
+local lua_command = harness.lua_command()
 
 local function check_cli_surfaces_contract()
     local code, out, err = invoke_cli("luai", { "-h" })
@@ -77,7 +78,7 @@ end
         "--discovery-mode",
         "runtime",
         "--lua",
-        command_output_trimmed("command -v lua"),
+        lua_command,
         "--",
         "--plugin=alpha",
     })
@@ -250,7 +251,7 @@ end
         entry = root .. "/app/main.lua",
         discovery_mode = "runtime",
         run_args = { "alpha" },
-        lua = command_output_trimmed("command -v lua"),
+        lua = lua_command,
         max_deps = 20,
     })
     assert(runtime.ok == true, runtime.error and runtime.error.message)
@@ -322,8 +323,10 @@ local function check_output_safety_contracts()
     local target = root .. "/target"
     local link = root .. "/link"
     mkdir(target)
-    if os.execute("ln -s " .. shell_quote(target) .. " " .. shell_quote(link) .. " >/dev/null 2>&1") == true
-        or os.execute("test -L " .. shell_quote(link) .. " >/dev/null 2>&1") == true then
+    local linked = harness.command_result(
+        "ln -s " .. shell_quote(target) .. " " .. shell_quote(link) .. " >/dev/null 2>&1")
+    if linked and harness.command_result(
+        "test -L " .. shell_quote(link) .. " >/dev/null 2>&1") then
         assert_error(luainstaller.bundle({
             entry = "test/runtime_bundle/main.lua",
             out = link,
@@ -387,7 +390,10 @@ local function check_manifest_and_marker_contracts()
     assert(marked_executable, "generated marker must record a top-level generated file and hash")
 
     local exe = out .. "/" .. out:match("([^/]+)$")
-    assert_contains(run("env -i PATH=/usr/bin:/bin " .. shell_quote(exe) .. " contract"), "hello contract")
+    local empty_path = root .. "/empty-path"
+    mkdir(empty_path)
+    assert_contains(run("env -i PATH=" .. shell_quote(empty_path) .. " "
+        .. shell_quote(exe) .. " contract"), "hello contract")
     remove_tree(root)
     print("manifest and marker contracts ok")
 end
@@ -419,8 +425,11 @@ print("override=" .. override.source)
     assert(bundled.ok == true, bundled.error and bundled.error.message)
 
     local exe = out .. "/" .. out:match("([^/]+)$")
+    local empty_path = root .. "/empty-path"
+    mkdir(empty_path)
     local output = run("cd " .. shell_quote(root .. "/host")
-        .. " && env -i PATH=/usr/bin:/bin LUA_PATH='./?.lua;;' " .. shell_quote(exe))
+        .. " && env -i PATH=" .. shell_quote(empty_path)
+        .. " LUA_PATH='./?.lua;;' " .. shell_quote(exe))
     assert_contains(output, "shadow=bundled")
     assert_contains(output, "override=preload")
     assert_not_contains(output, "shadow=host")
@@ -451,12 +460,15 @@ local persisted = assert(input:read("*a"))
 assert(input:close())
 local chunk = assert(require("luainstaller.compat").loadText(persisted, "@logs.lua", {}))
 assert(type(chunk()) == "table", "persisted logs must remain loadable")
-assert(os.execute("test ! -e " .. require("luainstaller.process").shellQuote(log_path .. ".lock")))
+assert(require("luainstaller.process").output(
+    "test ! -e " .. require("luainstaller.process").shellQuote(log_path .. ".lock")))
 assert(luainstaller.clearLogs() == true)
 assert(#luainstaller.getLogs({ limit = 10 }) == 0)
 print("logging contract child ok")
 ]]
-    assert_contains(run("HOME=" .. shell_quote(home) .. " lua -e " .. shell_quote(script)), "logging contract child ok")
+    assert_contains(run("HOME=" .. shell_quote(home) .. " "
+        .. shell_quote(lua_command) .. " -e " .. shell_quote(script)),
+        "logging contract child ok")
     remove_tree(root)
     print("logging contracts ok")
 end
@@ -466,6 +478,7 @@ local function check_documentation_contract()
         "docs/BUNDLING.adoc",
         "docs/IMPLEMENTATION.adoc",
         "docs/PLATFORMS-NATIVE-LIMITS.adoc",
+        "docs/RELINKING.adoc",
         "docs/TESTING.adoc",
         "docs/TROUBLESHOOTING.adoc",
         "docs/USAGE.adoc",
@@ -496,6 +509,8 @@ local function check_documentation_contract()
     assert_contains(bundling, "source_id")
     assert_contains(bundling, "Build-host absolute")
     assert_contains(bundling, "arg[0]")
+    assert_contains(bundling, "Lua-MIT.txt")
+    assert_contains(bundling, "extractor.c")
     assert_not_contains(bundling, "32-bit FNV-1a")
 
     local usage = read_file("docs/USAGE.adoc")
@@ -510,6 +525,9 @@ local function check_documentation_contract()
     assert_contains(testing, "Windows 11")
     assert_contains(testing, "macOS 26.x")
     assert_contains(testing, "SHA-256")
+    assert_contains(testing, "private empty directory")
+    assert_contains(testing, "lua-cjson-2.1.0.10-1.src.rock")
+    assert_contains(testing, "LUAI_REQUIRE_FULL_EDGE_COVERAGE=1")
     assert_contains(testing, "native build and run on physical hosts")
     assert_contains(testing, "cross-compilers are not substitutes")
     assert_contains(testing, "tip of `main`")
@@ -518,6 +536,7 @@ local function check_documentation_contract()
     assert_contains(readme, "luai")
     assert_contains(readme, "require(\"luainstaller\")")
     assert_contains(readme, "documentation-index")
+    assert_contains(readme, "docs/RELINKING.adoc")
 
     local platform_limits = read_file("docs/PLATFORMS-NATIVE-LIMITS.adoc")
     assert_contains(platform_limits, "official Lua `>= 5.1` and `< 6.0`")
@@ -537,7 +556,10 @@ local function check_documentation_contract()
     local rockspec = read_file("luainstaller-1.0.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 6.0"')
 
-    local direct_output = run("lua test/runtime_bundle/main.lua docs")
+    local direct_output = run(harness.command(lua_command, {
+        "test/runtime_bundle/main.lua",
+        "docs",
+    }))
     assert_contains(direct_output, "hello docs")
 
     local all_docs = table.concat({

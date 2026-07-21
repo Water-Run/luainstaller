@@ -449,7 +449,11 @@ local function pkgConfigCandidate(lua_version, config)
             local flags_ok, flags = process.outputCommand(
                 "pkg-config", { "--cflags", "--libs", module_name }
             )
-            local tokens, token_err = flags_ok and safeFlagTokens(trimmed(flags)) or nil
+            local tokens
+            local token_err
+            if flags_ok then
+                tokens, token_err = safeFlagTokens(trimmed(flags))
+            end
             if tokens then
                 local include_dir
                 local library_dir
@@ -502,7 +506,7 @@ local function pkgConfigCandidate(lua_version, config)
                     }
                 end
             end
-            if token_err then return nil end
+            if token_err then return nil, token_err end
         end
     end
     return nil
@@ -1050,7 +1054,8 @@ function M.resolve(opts)
         local rock = luarocksCandidate(lua_version, config)
         if rock then candidates[#candidates + 1] = rock end
         if host.os ~= "windows" then
-            local pkg = pkgConfigCandidate(lua_version, config)
+            local pkg, pkg_err = pkgConfigCandidate(lua_version, config)
+            if pkg_err then return nil, pkg_err end
             if pkg then candidates[#candidates + 1] = pkg end
         end
     end

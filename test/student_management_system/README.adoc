@@ -57,9 +57,11 @@ luai -t test/student_management_system/main.lua --max-deps 250
 luai -b --dir test/student_management_system/main.lua \
   -o build/student-manager --max-deps 250
 
-env -i PATH=/usr/bin:/bin \
+EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+env -i PATH="$EMPTY_PATH" \
   build/student-manager/student-manager \
   --data /tmp/bundled-students.json seed
+rmdir "$EMPTY_PATH"
 ----
 
 Expected discovery is five project Lua modules plus native `cjson`. The selected

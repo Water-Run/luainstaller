@@ -130,6 +130,14 @@ assert(output == argument .. "\31value & % ^ ! 测试", output)
 
 local failed = process.outputCommand(lua, { "-e", "os.exit(7)" })
 assert(failed == false, "non-zero child exit was reported as success")
+local harness_ok, harness_output, harness_status = harness.command_result(
+    '<nul set /p "=harness-status-output"&exit /b 7'
+)
+assert(not harness_ok, "Lua 5.1-compatible harness reported exit 7 as success")
+assert(harness_status == 7,
+    "Lua 5.1-compatible harness lost child status: " .. tostring(harness_status))
+assert(harness_output == "harness-status-output",
+    "Lua 5.1-compatible harness lost child output: " .. tostring(harness_output))
 
 local original = path.join(special, "original.txt")
 local copied = path.join(special, "copied.txt")

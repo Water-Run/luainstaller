@@ -20,11 +20,14 @@ From the repository root, with the official interpreter under test:
 ----
 LUA=${LUA:-lua}
 "$LUA" test/lua_abi.lua
+"$LUA" test/version_contract.lua
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/production_edges.lua
 "$LUA" test/build_interruption.lua
 "$LUA" test/onefile_lifecycle.lua
+"$LUA" test/distribution_licenses.lua
+"$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
 luarocks lint luainstaller-1.0.0-1.rockspec
 ----
@@ -35,6 +38,9 @@ luarocks lint luainstaller-1.0.0-1.rockspec
 
 |`test/lua_abi.lua`
 |Exact official-Lua ABI and builtin-module capability table
+
+|`test/version_contract.lua`
+|Exact pinned patch/source identity, compatibility helpers, and source parsing
 
 |`test/cli_split_smoke.lua`
 |`luai` vs `luainstaller` grammar split
@@ -50,6 +56,12 @@ luarocks lint luainstaller-1.0.0-1.rockspec
 
 |`test/onefile_lifecycle.lua`
 |POSIX process identity/signals and Windows child containment
+
+|`test/distribution_licenses.lua`
+|Notices, corresponding source, no-Lua extraction, tamper repair, and relinking
+
+|`test/reproducible_artifacts.lua`
+|Byte-identical cross-root artifacts, path privacy, and executable `arg[0]`
 
 |`test/smoke_all.lua`
 |Samples, discovery, generated C, directory/single-file, and more
@@ -94,7 +106,64 @@ install, invoking commands outside the checkout, and running artifacts with
 |5.5.0
 |===
 
-Archives are verified with SHA-256 before extract.
+Archives are verified with SHA-256 before extract. The POSIX runner accepts
+either `sha256sum` or the macOS-provided `shasum`; a missing verifier is a hard
+failure. Built Lua and LuaRocks prefixes carry exact cache-schema markers that
+bind the pinned patch archive, build recipe, host class, and compiler. A cache
+with a missing or different marker is rebuilt rather than accepted by ABI name
+alone.
+
+The POSIX matrix also builds the real sample dependency set separately for
+each Lua ABI. It installs only the following SHA-256-pinned source inputs with
+LuaRocks dependency resolution disabled, then load-tests every Lua and native
+module from that ABI's isolated tree:
+
+[cols="3,4",options="header"]
+|===
+|Input |SHA-256
+
+|`lua-cjson-2.1.0.10-1.src.rock`
+|`02dea368d07753647c75bd9e6660dd4d06ff7d09956d90d5afc4c3f5b78ed187`
+
+|`luafilesystem-1.9.0-1.src.rock`
+|`3de68d619f6ad95a27f4728814375447d921305194b7050dee6199057c31282f`
+
+|`luasocket-3.1.0-1.src.rock`
+|`f4a207f50a3f99ad65def8e29c54ac9aac668b216476f7fae3fae92413398ed2`
+
+|`mimetypes-1.1.0-2.src.rock`
+|`2cf77e0b6575caa6aecb43c9a06f705b1e7d92c19c5da6bb2f07a10feeee9e2f`
+
+|`lzlib-0.4.1.53-4.src.rock`
+|`860c893fc53d0a7830a54fa64f22a2b89260ca39c9a7dcb0890f6d3029f00ca5`
+
+|`pegasus-1.1.0-0.src.rock`
+|`0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746`
+
+|`lsqlite3_v096.zip`
+|`ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82`
+
+|`sqlite-amalgamation-3530200.zip`
+|`8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32`
+|===
+
+The native-dependency cache identity binds both this source list and its exact
+installation order. The runner extracts lsqlite3 and the pinned SQLite
+amalgamation into distinct roots, rejects any selected source outside its
+expected root, and records both exact C source paths in the evidence log.
+Linux matrix runs additionally set
+`LUAI_REQUIRE_FULL_EDGE_COVERAGE=1`, so missing sanitizer, alternate compiler,
+LuaJIT, PE cross-inspection, `/dev/full`, or permission probes fail the gate
+instead of appearing as a pass.
+
+Each source-built Lua prefix publishes its own `lua.pc`, and the runner pins
+`PKG_CONFIG_PATH` to that file. Native fixtures therefore compile against the
+headers and libraries for the ABI currently under test, never against a host
+`pkg-config lua` entry. The C probe calls a distinct API introduced or specific
+to each of Lua 5.1 through 5.5 and is then loaded by the produced executable.
+Linux requires `pkg-config` for the full metadata-fallback gate. A clean macOS
+host does not: the runner validates the generated `lua.pc` directly and builds
+through the explicit source-built Lua prefix, so Homebrew is not a prerequisite.
 
 [source,bash]
 ----
@@ -110,9 +179,13 @@ powershell.exe -NoLogo -NoProfile -NonInteractive `
   -HostLabel <label>
 ----
 
-A release requires all five versions. Each per-version evidence log must
-contain `lua ABI capabilities ok`, proving the ABI-specific `utf8` and `bit32`
-classification under the actual pinned interpreter.
+A release requires all five versions. Every POSIX version runs the complete
+local, native, interruption, onefile, license/relinking, reproducibility,
+production-edge, and smoke gates. Every Windows version runs all applicable
+native Windows gates, including lifecycle, license/relinking, and
+reproducibility. Each per-version evidence log must contain both `lua ABI
+capabilities ok` and the final `PASS` record; `version_contract.lua` also
+matches the interpreter's exact patch banner to the pinned source digest.
 
 [#testing-systems]
 == Tested system types
@@ -156,11 +229,12 @@ part of the user-facing contract.
 
 . rockspec lint and isolated install
 . Production sources parse on all five pinned versions
-. Four local suites without required skips
+. Every required local suite above without required skips
 . Five-version matrix on each verified environment class
-. Directory and single-file runs without system `lua` and without
-  `LUA_PATH` / `LUA_CPATH`
+. Directory and single-file runs with `PATH` set to a private empty directory,
+  without system `lua`, and without `LUA_PATH` / `LUA_CPATH`
 . Repeated single-file build and extract checks
+. Byte-identical cross-checkout artifacts and bundled-license relinking checks
 . Native modules and system libraries inspected on target
 . Documentation does not prescribe cross-build or a device allowlist
 . `git diff --check` and clean-checkout review

@@ -23,6 +23,67 @@ local writeFile = harness.write_file
 local shellQuote = harness.shell_quote
 local commandOutputTrimmed = harness.command_output_trimmed
 local runCommand = harness.run
+local commandResult = harness.command_result
+local function commandSucceeds(command)
+    local ok = commandResult(command)
+    return ok
+end
+local luaCommand = shellQuote(harness.lua_command())
+local compat = require("luainstaller.compat")
+local loadText = compat.loadText
+local packValues = compat.pack
+local unpackValues = compat.unpack
+
+local function selectedLinuxRuntime()
+    local info = compat.luaVersion()
+    local prefix = os.getenv("LUAI_LUA_PREFIX")
+    if type(prefix) == "string" and prefix ~= "" then
+        local runtime = string.format(
+            "%s/lib/liblua.so.%d.%d",
+            prefix,
+            info.major,
+            info.minor
+        )
+        if require("luainstaller.fs").isRegularFile(runtime) then
+            return require("luainstaller.path").basename(runtime), runtime
+        end
+    end
+    local lua_binary = harness.lua_command()
+    if not require("luainstaller.path").isAbsolute(lua_binary) then
+        lua_binary = commandOutputTrimmed("command -v " .. shellQuote(lua_binary))
+    end
+    local ldd = runCommand("LC_ALL=C ldd " .. shellQuote(lua_binary))
+    local runtime_name, runtime_path = ldd:match(
+        "(liblua[^%s]*)%s+=>%s+([^%s]+)"
+    )
+    if runtime_path == "not" then return nil end
+    return runtime_name, runtime_path
+end
+
+local native_fixture_config
+local function compileNativeFixture(source_path, output_path)
+    if not native_fixture_config then
+        local config, config_err = require("luainstaller.toolchain").resolve()
+        assert(config, config_err and config_err.error
+            and config_err.error.message or "native fixture toolchain unavailable")
+        native_fixture_config = config
+    end
+    local compiled, output, command = require("luainstaller.toolchain").compileNativeModule(
+        native_fixture_config,
+        source_path,
+        output_path,
+        { work_dir = require("luainstaller.path").dirname(output_path) }
+    )
+    assert(compiled, table.concat({
+        tostring(command or "native fixture compile failed"),
+        tostring(output or ""),
+    }, "\n"))
+    if native_fixture_config.host.os == "linux" then
+        assert(not tostring(command):find("-llua", 1, true),
+            "ordinary Linux fixture linked a private liblua")
+    end
+    return command
+end
 
 local tests = {}
 
@@ -42,6 +103,52 @@ local function assertEqual(actual, expected, label)
     ))
 end
 
+test("FNV-1a matches standard 32-bit vectors on every Lua number model", function()
+    local fnv1a32 = require("luainstaller.hash").fnv1a32
+    for _, vector in ipairs({
+        { content = "", expected = "811c9dc5" },
+        { content = "a", expected = "e40c292c" },
+        { content = "foobar", expected = "bf9cf968" },
+        { content = "hello", expected = "4f9f2cab" },
+    }) do
+        assertEqual(fnv1a32(vector.content), vector.expected,
+            "FNV-1a vector " .. string.format("%q", vector.content))
+    end
+end)
+
+test("native fixture exercises version-specific Lua C APIs", function()
+    local source = readFile("test/fixtures/native_probe.c")
+    for _, contract in ipairs({
+        "LUA_VERSION_NUM == 501",
+        "lua_objlen",
+        "LUA_VERSION_NUM == 502",
+        "lua_absindex",
+        "LUA_VERSION_NUM == 503",
+        "lua_isinteger",
+        "LUA_VERSION_NUM == 504",
+        "lua_newuserdatauv",
+        "LUA_VERSION_NUM == 505",
+        "lua_numbertocstring",
+        "luaL_checkversion",
+    }) do
+        assert(source:find(contract, 1, true),
+            "native ABI fixture omits " .. contract)
+    end
+end)
+
+test("test harness preserves child output and nonzero exit status", function()
+    local command
+    if package.config:sub(1, 1) == "\\" then
+        command = '<nul set /p "=harness-status-output"&exit /b 7'
+    else
+        command = "printf harness-status-output; exit 7"
+    end
+    local ok, output, status = harness.command_result(command)
+    assert(not ok, "nonzero child status was reported as success")
+    assertEqual(status, 7, "child exit status")
+    assertEqual(output, "harness-status-output", "child output")
+end)
+
 test("full edge-coverage prerequisites are available", function()
     if os.getenv("LUAI_REQUIRE_FULL_EDGE_COVERAGE") ~= "1" then return end
     assert(package.config:sub(1, 1) == "/", "full edge coverage requires a POSIX host")
@@ -50,34 +157,56 @@ test("full edge-coverage prerequisites are available", function()
         "cc", "clang", "luajit", "pkg-config", "sha256sum",
         "x86_64-w64-mingw32-gcc",
     }) do
-        local available = os.execute("command -v " .. command .. " >/dev/null 2>&1")
-        assert(available == true or available == 0,
+        local available = commandSucceeds("command -v " .. command .. " >/dev/null 2>&1")
+        assert(available,
             "full edge coverage is missing command: " .. command)
     end
     local full = io.open("/dev/full", "wb")
     assert(full, "full edge coverage requires /dev/full")
     full:close()
-    local lua_binary = commandOutputTrimmed("command -v lua")
-    assert(runCommand("ldd " .. shellQuote(lua_binary)):find("liblua", 1, true),
-        "full edge coverage could not identify the linked Lua runtime")
+    local runtime_name, runtime_path = selectedLinuxRuntime()
+    assert(runtime_name and runtime_path,
+        "full edge coverage could not identify the selected Lua runtime")
+    local dynamic = runCommand("LC_ALL=C readelf -d " .. shellQuote(runtime_path))
+    assert(dynamic:find("Library soname: [" .. runtime_name .. "]", 1, true),
+        "selected Lua runtime does not expose its ABI SONAME")
+    local prefix = os.getenv("LUAI_LUA_PREFIX")
+    if type(prefix) == "string" and prefix ~= "" then
+        assertEqual(commandOutputTrimmed("pkg-config --modversion lua"),
+            os.getenv("LUAI_LUA_RELEASE"), "selected pkg-config Lua release")
+        assertEqual(commandOutputTrimmed("pkg-config --variable=includedir lua"),
+            prefix .. "/include", "selected pkg-config Lua headers")
+    end
     local root = makeTempDir("coverage-prerequisites")
     local unreadable = root .. "/unreadable"
     makeDirectory(unreadable)
     runCommand("chmod 000 " .. shellQuote(unreadable))
-    local inaccessible = os.execute("test ! -r " .. shellQuote(unreadable))
+    local inaccessible = commandSucceeds("test ! -r " .. shellQuote(unreadable))
     runCommand("chmod 700 " .. shellQuote(unreadable))
     removeTree(root)
-    assert(inaccessible == true or inaccessible == 0,
+    assert(inaccessible,
         "full edge coverage must run as a user affected by permission bits")
+    io.write("full edge prerequisites enforced\n")
 end)
 
 local function fnv1a32Collision(content)
     assert(#content >= 5, "collision fixture must be at least five bytes")
-    local mask = 0xffffffff
     local prime = 16777619
     local inverse = 899433627
+    local bxor = require("luainstaller.compat").bxor
+    local function multiply32(left, right)
+        local left_low = left % 65536
+        local left_high = math.floor(left / 65536)
+        local right_low = right % 65536
+        local right_high = math.floor(right / 65536)
+        local low_product = left_low * right_low
+        local low = low_product % 65536
+        local high = (left_high * right_low + left_low * right_high
+            + math.floor(low_product / 65536)) % 65536
+        return high * 65536 + low
+    end
     local function step(state, byte)
-        return ((state ~ byte) * prime) & mask
+        return multiply32(bxor(state, byte), prime)
     end
     local state = 2166136261
     local prefix = content:sub(1, -6)
@@ -98,11 +227,11 @@ local function fnv1a32Collision(content)
     local target = tonumber(require("luainstaller.hash").fnv1a32(content), 16)
     local original_suffix = content:sub(-5)
     for fifth = 0, 255 do
-        local before_fifth = ((target * inverse) & mask) ~ fifth
+        local before_fifth = bxor(multiply32(target, inverse), fifth)
         for fourth = 0, 255 do
-            local before_fourth = ((before_fifth * inverse) & mask) ~ fourth
+            local before_fourth = bxor(multiply32(before_fifth, inverse), fourth)
             for third = 0, 255 do
-                local before_third = ((before_fourth * inverse) & mask) ~ third
+                local before_third = bxor(multiply32(before_fourth, inverse), third)
                 local first_two = forward[before_third]
                 if first_two then
                     local suffix = first_two .. string.char(third, fourth, fifth)
@@ -136,8 +265,8 @@ test("sha256 known vectors", function()
 end)
 
 test("sha256 matches the host across block boundaries and binary data", function()
-    local available = os.execute("command -v sha256sum >/dev/null 2>&1")
-    if available ~= true and available ~= 0 then
+    local available = commandSucceeds("command -v sha256sum >/dev/null 2>&1")
+    if not available then
         return
     end
     local root = makeTempDir("sha256-differential")
@@ -335,7 +464,7 @@ assert(result.error.option == "lua_prefix")
 print("drive-relative environment rejected")
 ]]
     local output = runCommand("LUAI_LUA_PREFIX=" .. shellQuote("H:lua54")
-        .. " lua -e " .. shellQuote(child))
+        .. " " .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("drive-relative environment rejected", 1, true))
 end)
 
@@ -677,7 +806,7 @@ test("require lexer matches legal Lua literal forms", function()
     }
 
     for _, case in ipairs(cases) do
-        assert(load(case.source, "=" .. case.name, "t", {}), case.name)
+        assert(loadText(case.source, "=" .. case.name, {}), case.name)
         local actual = LuaLexer.new(case.source, case.name):extractRequires()
         assertEqual(#actual, #case.expected, case.name .. " count")
         for index, expected in ipairs(case.expected) do
@@ -729,7 +858,7 @@ test("require lexer ignores identifier references and declarations", function()
         "return object . pcall(require, 'foo')",
     }
     for _, source in ipairs(sources) do
-        assert(load(source, "=reference", "t", {}), source)
+        assert(loadText(source, "=reference", {}), source)
         local actual = LuaLexer.new(source, "reference.lua"):extractRequires()
         assertEqual(#actual, 0, source)
     end
@@ -743,7 +872,7 @@ test("require lexer rejects computed call arguments", function()
         "return pcall(require, name)",
         "return pcall(require, 'foo' .. suffix)",
     }) do
-        assert(load(source, "=computed", "t", {}), source)
+        assert(loadText(source, "=computed", {}), source)
         local ok, err = pcall(function()
             return LuaLexer.new(source, "computed.lua"):extractRequires()
         end)
@@ -791,12 +920,12 @@ test("BOM and shebang normalization preserves source lines", function()
     local source = "\239\187\191#!/usr/bin/env lua require('not-a-module')\r\nreturn 7"
     local prepared = analyzer.prepareSource(source)
     assertEqual(prepared:sub(1, 1), "\n", "prepared shebang newline")
-    assert(load(prepared, "=prepared", "t", {}))
+    assert(loadText(prepared, "=prepared", {}))
     assertEqual(#analyzer.LuaLexer.new(source, "shebang.lua"):extractRequires(), 0, "shebang requires")
     assertEqual(runtime.stripSource(source):sub(1, 1), "\n", "runtime shebang newline")
 end)
 
-test("bit32 is resolved as an external Lua 5.4 module", function()
+test("bit32 resolution follows the selected Lua ABI", function()
     local root = makeTempDir("bit32-module")
     local entry = root .. "/main.lua"
     local module = root .. "/bit32.lua"
@@ -804,8 +933,16 @@ test("bit32 is resolved as an external Lua 5.4 module", function()
     writeFile(module, "return { external = true }")
     local result = require("luainstaller").analyze({ entry = entry })
     assert(result.ok, result.error and result.error.message)
-    assertEqual(#result.dependencies.scripts, 1, "bit32 dependency count")
-    assertEqual(result.dependencies.scripts[1], module, "bit32 dependency path")
+    local current = assert(require("luainstaller.lua_abi").current())
+    if require("luainstaller.lua_abi").isBuiltin(current, "bit32") then
+        assertEqual(#result.dependencies.scripts, 0,
+            "built-in bit32 dependency count for Lua " .. current)
+    else
+        assertEqual(#result.dependencies.scripts, 1,
+            "external bit32 dependency count for Lua " .. current)
+        assertEqual(result.dependencies.scripts[1], module,
+            "external bit32 dependency path for Lua " .. current)
+    end
     removeTree(root)
 end)
 
@@ -1015,9 +1152,7 @@ test("runtime discovery rejects a C loader without loader data", function()
 #include <lauxlib.h>
 int luaopen_shadow(lua_State *state) { lua_pushinteger(state, 88); return 1; }
 ]])
-    runCommand("cc -std=c11 -Wall -Wextra -Werror -pedantic -shared -fPIC "
-        .. shellQuote(native_source) .. " -o " .. shellQuote(native)
-        .. " $(pkg-config --cflags --libs lua)")
+    compileNativeFixture(native_source, native)
     writeFile(entry, string.format([[
 package.loaded.math = nil
 table.insert(package.searchers, 1, function(name)
@@ -1143,12 +1278,8 @@ __attribute__((constructor)) static void restore_original_path(void) {
 }
 int luaopen_swap(lua_State *state) { lua_pushinteger(state, 99); return 1; }
 ]], backup, active))
-    runCommand("cc -std=c11 -Wall -Wextra -Werror -pedantic -shared -fPIC "
-        .. shellQuote(original_source) .. " -o " .. shellQuote(active)
-        .. " $(pkg-config --cflags --libs lua)")
-    runCommand("cc -std=c11 -Wall -Wextra -Werror -pedantic -shared -fPIC "
-        .. shellQuote(replacement_source) .. " -o " .. shellQuote(replacement)
-        .. " $(pkg-config --cflags --libs lua)")
+    compileNativeFixture(original_source, active)
+    compileNativeFixture(replacement_source, replacement)
     writeFile(entry, string.format([[
 package.cpath = %q .. package.cpath
 table.insert(package.searchers, 1, function(name)
@@ -1181,9 +1312,7 @@ test("runtime bundle rejects native modules without provable executed bytes", fu
 #include <lauxlib.h>
 int luaopen_swap(lua_State *state) { lua_pushinteger(state, 41); return 1; }
 ]])
-    runCommand("cc -std=c11 -Wall -Wextra -Werror -pedantic -shared -fPIC "
-        .. shellQuote(native_source) .. " -o " .. shellQuote(native)
-        .. " $(pkg-config --cflags --libs lua)")
+    compileNativeFixture(native_source, native)
     writeFile(entry, string.format([[
 package.cpath = %q .. package.cpath
 assert(require("swap") == 41)
@@ -1196,13 +1325,17 @@ assert(require("swap") == 41)
     })
     assert(not bundled.ok, "runtime bundle accepted an unverifiable native loader")
     assertEqual(bundled.error.type, "DiscoveryError", "real runtime native loader")
-    assert(bundled.error.message:find("static discovery", 1, true), "native rejection is not actionable")
+    assert(bundled.error.message:find("static discovery", 1, true),
+        table.concat({
+            "native rejection is not actionable: " .. tostring(bundled.error.message),
+            tostring(bundled.error.output or ""),
+        }, "\n"))
     assert(not fileExists(root .. "/out"), "rejected runtime bundle published output")
     removeTree(root)
 end)
 
 test("runtime discovery rejects a non-official Lua interpreter", function()
-    if not os.execute("command -v luajit >/dev/null 2>&1") then
+    if not commandSucceeds("command -v luajit >/dev/null 2>&1") then
         return
     end
     local result = require("luainstaller").analyze({
@@ -1281,10 +1414,10 @@ io.open = function(path, mode)
     local actual = assert(original_open(path, mode))
     local proxy = {}
     function proxy:write(...)
-        local values = table.pack(...)
-        assert(actual:write(table.unpack(values, 1, values.n)))
+        local values = packValues(...)
+        assert(actual:write(unpackValues(values, 1, values.n)))
         if values[1] == "LUAINSTALLER_TRACE_V4_COMPLETE" then
-            assert(actual:write(table.unpack(values, 1, values.n)))
+            assert(actual:write(unpackValues(values, 1, values.n)))
         end
         return self
     end
@@ -1368,7 +1501,7 @@ test("runtime run restores bundled module cache entries and all returns", functi
     }
 
     package.loaded.edge_cache = "outer"
-    local returned = table.pack(runtime.run(payload))
+    local returned = packValues(runtime.run(payload))
     assertEqual(returned.n, 3, "return count")
     assertEqual(returned[1], 17, "bundled module value")
     assertEqual(returned[2], nil, "middle nil")
@@ -1407,9 +1540,9 @@ test("generated runtime restores module cache and return values", function()
         dependencies = { scripts = { module }, libraries = {} },
         module_names = { [module] = "edge_cache" },
     })
-    local chunk = assert(load(bootstrap, "@generated-runtime-state", "t", _G))
+    local chunk = assert(loadText(bootstrap, "@generated-runtime-state", _G))
     package.loaded.edge_cache = "outer-generated"
-    local returned = table.pack(chunk())
+    local returned = packValues(chunk())
     assertEqual(returned.n, 3, "generated return count")
     assertEqual(returned[1], 29, "generated bundled value")
     assertEqual(returned[2], nil, "generated middle nil")
@@ -1486,13 +1619,7 @@ static int open_alias(lua_State *L) {
 int luaopen_pkg(lua_State *L) { return open_alias(L); }
 int luaopen_pkg_init(lua_State *L) { return open_alias(L); }
 ]])
-    runCommand(table.concat({
-        "cc -shared -fPIC",
-        shellQuote(root .. "/module.c"),
-        "-o",
-        shellQuote(root .. "/pkg/init.so"),
-        "$(pkg-config --cflags --libs lua)",
-    }, " "))
+    compileNativeFixture(root .. "/module.c", root .. "/pkg/init.so")
     writeFile(root .. "/main.lua", [[
 local first = require("pkg")
 local second = require("pkg.init")
@@ -1513,10 +1640,9 @@ end)
 
 test("Lua runtime cannot overwrite a native module destination", function()
     if commandOutputTrimmed("uname -s") ~= "Linux" then return end
-    local lua_binary = commandOutputTrimmed("command -v lua")
-    local ldd = runCommand("ldd " .. shellQuote(lua_binary))
-    local runtime_name, runtime_path = ldd:match("(liblua[^%s]*)%s+=>%s+([^%s]+)")
-    if not runtime_name or not runtime_path or runtime_path == "not" then return end
+    local runtime_name, runtime_path = selectedLinuxRuntime()
+    assert(runtime_name and runtime_path,
+        "cannot identify the selected Lua runtime collision fixture")
 
     local root = makeTempDir("native-runtime-collision")
     local entry = root .. "/main.lua"
@@ -1631,7 +1757,7 @@ assert(io.open(%q, "rb") == nil, "failed build must not publish output")
         "LUAI_MUTATE_SOURCE=" .. shellQuote(dependency),
         "LUAI_REAL_CC=" .. shellQuote(real_cc),
         "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
-        "lua -e " .. shellQuote(child),
+        luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     removeTree(root)
 end)
@@ -1838,14 +1964,14 @@ test("output changed after publication is restored before backup deletion", func
         if from == out and tostring(to):find(".luai-backup-", 1, true) then
             backup_path = to
         end
-        local values = table.pack(original_rename(from, to))
+        local values = packValues(original_rename(from, to))
         if values[1] and not injected and to == out
             and tostring(from):find(".luai-staging-", 1, true) then
             assert(backup_path, "backup path was not observed")
             injected = true
             writeFile(backup_path .. "/USER-DATA.txt", "must survive backup cleanup race\n")
         end
-        return table.unpack(values, 1, values.n)
+        return unpackValues(values, 1, values.n)
     end)
     local call_ok, rebuilt = pcall(luainstaller.bundle, opts)
     rawset(os, "rename", original_rename)
@@ -1945,13 +2071,13 @@ test("backup cleanup preserves a late replacement at an owned name", function()
     rawset(os, "rename", function(from, to)
         if not injected and isOwnedBackupName(from)
             and type(to) == "string" and to:find("%.luai%-remove%-") then
-            local values = table.pack(original_rename(from, to))
+            local values = packValues(original_rename(from, to))
             if values[1] then
                 injected = true
                 replaced_path = from
                 writeFile(from, user_content)
             end
-            return table.unpack(values, 1, values.n)
+            return unpackValues(values, 1, values.n)
         end
         return original_rename(from, to)
     end)
@@ -2002,7 +2128,7 @@ test("backup cleanup never unlinks a directory-name file replacement", function(
         return original_remove(candidate)
     end)
     rawset(io, "popen", function(command, mode)
-        local candidate = command:match("^rmdir '([^']+)' 2>&1$")
+        local candidate = command:match("rmdir '([^']+)'", 1)
         if isTarget(candidate) then replaceDirectory(candidate) end
         return original_popen(command, mode)
     end)
@@ -2047,7 +2173,7 @@ test("empty backup cleanup never unlinks a regular-file replacement", function()
         return original_remove(candidate)
     end)
     rawset(io, "popen", function(command, mode)
-        local candidate = command:match("^rmdir '([^']+)' 2>&1$")
+        local candidate = command:match("rmdir '([^']+)'", 1)
         if isTarget(candidate) then replaceDirectory(candidate) end
         return original_popen(command, mode)
     end)
@@ -2082,8 +2208,7 @@ test("output lock release never removes a replacement lock", function()
         injected = true
         replacement_lock = lock_path
         assert(original_rename(lock_path, lock_path .. ".original"))
-        local made = os.execute("mkdir -m 700 " .. shellQuote(lock_path))
-        assert(made == true or made == 0)
+        runCommand("mkdir -m 700 " .. shellQuote(lock_path))
         writeFile(lock_path .. "/OTHER-OWNER", replacement_content)
     end
 
@@ -2131,7 +2256,7 @@ test("build transaction finalizes a thrown compiler failure", function()
 
     local lock_path = root .. "/.luai-lock-"
         .. require("luainstaller.hash").sha256(out)
-    local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+    local lock_absent = commandSucceeds("test ! -e " .. shellQuote(lock_path)
         .. " && test ! -L " .. shellQuote(lock_path))
     local staging_count = tonumber(commandOutputTrimmed(
         "find " .. shellQuote(root)
@@ -2142,7 +2267,7 @@ test("build transaction finalizes a thrown compiler failure", function()
     assert(injected, "compiler interruption hook did not run")
     assert(call_ok, "bundle leaked a thrown compiler failure: " .. tostring(result))
     assert(result and result.ok == false, "thrown compiler failure was not structured")
-    assert(lock_absent == true or lock_absent == 0, "interrupted build left its output lock")
+    assert(lock_absent, "interrupted build left its output lock")
     assertEqual(staging_count, 0, "interrupted build staging count")
 end)
 
@@ -2184,22 +2309,22 @@ test("build transaction finalizes thrown staging and publish failures", function
         fs.createDirectory = original_create
         rawset(os, "rename", original_rename)
 
-        local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+        local lock_absent = commandSucceeds("test ! -e " .. shellQuote(lock_path)
             .. " && test ! -L " .. shellQuote(lock_path))
         local staging_count = tonumber(commandOutputTrimmed(
             "find " .. shellQuote(root)
                 .. " -mindepth 1 -maxdepth 1 -name '.luai-staging-*' -print | wc -l"
         ))
-        local output_absent = os.execute("test ! -e " .. shellQuote(out)
+        local output_absent = commandSucceeds("test ! -e " .. shellQuote(out)
             .. " && test ! -L " .. shellQuote(out))
         removeTree(root)
 
         assert(injected, point .. " interruption hook did not run")
         assert(call_ok, point .. " interruption escaped: " .. tostring(result))
         assert(result and result.ok == false, point .. " interruption was not structured")
-        assert(lock_absent == true or lock_absent == 0, point .. " interruption left a lock")
+        assert(lock_absent, point .. " interruption left a lock")
         assertEqual(staging_count, 0, point .. " interruption staging count")
-        assert(output_absent == true or output_absent == 0,
+        assert(output_absent,
             point .. " interruption published an output")
     end
 end)
@@ -2228,13 +2353,13 @@ test("output lock owner publication failure leaves no anonymous lock", function(
             out = out,
         })
         fs.writeFile = original_write
-        local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+        local lock_absent = commandSucceeds("test ! -e " .. shellQuote(lock_path)
             .. " && test ! -L " .. shellQuote(lock_path))
         removeTree(root)
         assert(injected, mode .. " owner-write hook did not run")
         assert(call_ok, mode .. " owner-write failure escaped: " .. tostring(result))
         assert(result and not result.ok, mode .. " owner-write failure was not reported")
-        assert(lock_absent == true or lock_absent == 0,
+        assert(lock_absent,
             mode .. " owner-write failure left an anonymous lock")
     end
 end)
@@ -2264,17 +2389,17 @@ test("build recovers an unchanged dead-owner lock and staging tree", function()
         entry = "test/single_file/01_hello_luainstaller.lua",
         out = out,
     })
-    local stale_stage_absent = os.execute("test ! -e " .. shellQuote(stage_path)
+    local stale_stage_absent = commandSucceeds("test ! -e " .. shellQuote(stage_path)
         .. " && test ! -L " .. shellQuote(stage_path))
-    local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+    local lock_absent = commandSucceeds("test ! -e " .. shellQuote(lock_path)
         .. " && test ! -L " .. shellQuote(lock_path))
     local artifact_exists = fileExists(out .. "/out")
     removeTree(root)
 
     assert(result.ok, result.error and result.error.message)
-    assert(stale_stage_absent == true or stale_stage_absent == 0,
+    assert(stale_stage_absent,
         "dead owner's staging tree remains")
-    assert(lock_absent == true or lock_absent == 0, "dead owner's output lock remains")
+    assert(lock_absent, "dead owner's output lock remains")
     assert(artifact_exists, "retry did not publish an artifact")
 end)
 
@@ -2346,8 +2471,7 @@ test("build stale recovery preserves a replacement output lock", function()
             and tostring(to):find("/.luai-lock-stale-", 1, true) then
             injected = true
             assert(original_rename(lock_path, lock_path .. ".observed-stale"))
-            local made = os.execute("mkdir -m 700 " .. shellQuote(lock_path))
-            assert(made == true or made == 0)
+            runCommand("mkdir -m 700 " .. shellQuote(lock_path))
             writeFile(lock_path .. "/owner." .. replacement_token, replacement)
             writeFile(lock_path .. "/SENTINEL", "replacement must survive\n")
         end
@@ -2408,8 +2532,7 @@ test("build empty-lock recovery preserves a replacement directory", function()
             and tostring(to):find("/.luai-lock-stale-", 1, true) then
             injected = true
             assert(original_rename(lock_path, lock_path .. ".observed-empty"))
-            local made = os.execute("mkdir -m 700 " .. shellQuote(lock_path))
-            assert(made == true or made == 0)
+            runCommand("mkdir -m 700 " .. shellQuote(lock_path))
             replacement_identity = identity(lock_path)
         end
         return original_rename(from, to)
@@ -2458,14 +2581,14 @@ test("output lock release never unlinks a regular-file replacement", function()
     rawset(os, "remove", function(candidate)
         if not injected and type(candidate) == "string"
             and candidate:find("%.luai%-lock") and candidate:find("/owner%.") then
-            local values = table.pack(original_remove(candidate))
+            local values = packValues(original_remove(candidate))
             if values[1] then
                 injected = true
                 replacement_lock = candidate:match("^(.*)/owner%.")
                 assert(original_rename(replacement_lock, replacement_lock .. ".original"))
                 writeFile(replacement_lock, user_content)
             end
-            return table.unpack(values, 1, values.n)
+            return unpackValues(values, 1, values.n)
         end
         return original_remove(candidate)
     end)
@@ -2505,9 +2628,9 @@ test("output lock entropy failure occurs before lock publication", function()
 
     assert(call_ok, result)
     assert(not result.ok, "entropy failure was not reported")
-    local absent = os.execute("test ! -e " .. shellQuote(lock_path)
+    local absent = commandSucceeds("test ! -e " .. shellQuote(lock_path)
         .. " && test ! -L " .. shellQuote(lock_path))
-    assert(absent == true or absent == 0, "entropy failure published a lock without ownership")
+    assert(absent, "entropy failure published a lock without ownership")
     removeTree(root)
 end)
 
@@ -2532,14 +2655,13 @@ test("output lock release leaves a newly acquired empty lock untouched", functio
         if not injected and type(candidate) == "string"
             and candidate:find("%.luai%-lock")
             and candidate:find("/owner%.") then
-            local values = table.pack(original_remove(candidate))
+            local values = packValues(original_remove(candidate))
             if values[1] then
                 injected = true
                 assert(replacement_lock, "active lock path was not observed")
-                local made = os.execute("mkdir -m 700 " .. shellQuote(replacement_lock))
-                assert(made == true or made == 0)
+                runCommand("mkdir -m 700 " .. shellQuote(replacement_lock))
             end
-            return table.unpack(values, 1, values.n)
+            return unpackValues(values, 1, values.n)
         end
         return original_remove(candidate)
     end)
@@ -2675,8 +2797,8 @@ test("unreadable nonempty output is never classified empty", function()
     makeDirectory(out)
     writeFile(out .. "/sentinel", "keep\n")
     runCommand("chmod 000 " .. shellQuote(out))
-    local unreadable = os.execute("test ! -r " .. shellQuote(out))
-    if unreadable == true or unreadable == 0 then
+    local unreadable = commandSucceeds("test ! -r " .. shellQuote(out))
+    if unreadable then
         local result = require("luainstaller").bundle({
             entry = "test/single_file/01_hello_luainstaller.lua",
             out = out,
@@ -2834,14 +2956,22 @@ test("Linux explicit prefixes support lib64 and contained runtime links", functi
     local toolchain = require("luainstaller.toolchain")
     local lua_info = compat.luaVersion()
     local abi = string.format("%d.%d", lua_info.major, lua_info.minor)
-    local include_source = commandOutputTrimmed(
-        "pkg-config --variable=includedir lua"
-    )
-    local lua_binary = commandOutputTrimmed("command -v lua")
-    local runtime_source = commandOutputTrimmed(
-        "ldd " .. shellQuote(lua_binary)
-            .. " | awk '/[Ll]ua/{print $3; exit}'"
-    )
+    local matrix_prefix = os.getenv("LUAI_LUA_PREFIX")
+    local include_source
+    local runtime_source
+    if type(matrix_prefix) == "string" and matrix_prefix ~= "" then
+        include_source = path.join(matrix_prefix, "include")
+        runtime_source = path.join(matrix_prefix, "lib/liblua.so." .. abi)
+    else
+        include_source = commandOutputTrimmed(
+            "pkg-config --variable=includedir lua"
+        )
+        local lua_binary = commandOutputTrimmed("command -v lua")
+        runtime_source = commandOutputTrimmed(
+            "ldd " .. shellQuote(lua_binary)
+                .. " | awk '/[Ll]ua/{print $3; exit}'"
+        )
+    end
     assert(include_source ~= "" and fs.isRegularFile(include_source .. "/lua.h"))
     assert(runtime_source ~= "" and fs.isRegularFile(runtime_source), runtime_source)
 
@@ -2877,14 +3007,25 @@ test("Linux explicit prefixes support lib64 and contained runtime links", functi
 
     local linked_prefix, linked_lib = makePrefix("linked-prefix", "lib")
     assert(fs.copyFile(runtime_source, linked_lib .. "/runtime-blob"))
-    local linked_name = "liblua-" .. abi .. ".so"
+    -- Preserve the runtime's loader identity. Renaming a shared object whose
+    -- ELF SONAME differs makes the probe unlaunchable even when the symlink is
+    -- otherwise safely contained.
+    local linked_name = runtime_name
     runCommand("ln -s runtime-blob "
         .. shellQuote(linked_lib .. "/" .. linked_name))
     local linked_config, linked_err = toolchain.resolve({
         lua_prefix = linked_prefix,
         lua_version = lua_info,
     })
-    assert(linked_config, linked_err and linked_err.error.message)
+    local linked_diagnostic = {}
+    if linked_err and linked_err.error then
+        linked_diagnostic[#linked_diagnostic + 1] = linked_err.error.message
+        for _, failure in ipairs(linked_err.error.failures or {}) do
+            linked_diagnostic[#linked_diagnostic + 1] = tostring(failure.message)
+                .. ": " .. tostring(failure.output or failure.cause or "")
+        end
+    end
+    assert(linked_config, table.concat(linked_diagnostic, "\n"))
     assert(linked_config.runtime_path:sub(1, #linked_lib + 1) == linked_lib .. "/")
     assertEqual(linked_config.runtime_name, linked_name, "linked runtime identity")
 
@@ -2897,10 +3038,12 @@ test("Linux explicit prefixes support lib64 and contained runtime links", functi
     assert(linked_bundle.ok, linked_bundle.error and linked_bundle.error.message)
     assert(fileExists(linked_out .. "/.luai/native/" .. linked_name),
         "bundle did not preserve the linked runtime loader name")
+    local empty_path = root .. "/empty-path"
+    makeDirectory(empty_path)
     local linked_ran, linked_output = require("luainstaller.process").outputCommand(
         linked_bundle.executable,
         { "linked-prefix" },
-        { PATH = "/usr/bin:/bin", LUA_PATH = "", LUA_CPATH = "" }
+        { PATH = empty_path, LUA_PATH = "", LUA_CPATH = "" }
     )
     assert(linked_ran and linked_output:find("hello linked-prefix", 1, true),
         linked_output)
@@ -2931,19 +3074,25 @@ test("onedir rejects an executable collision with metadata directory", function(
 end)
 
 test("pkg-config Lua ABI mismatch stops before compiler invocation", function()
-    if package.config:sub(1, 1) ~= "/" then return end
+    if package.config:sub(1, 1) ~= "/"
+        or not commandSucceeds("command -v pkg-config >/dev/null 2>&1")
+    then
+        return
+    end
     local root = makeTempDir("pkg-config-abi")
     local fake_bin = root .. "/bin"
     local compiler_marker = root .. "/compiler-called"
     local out = root .. "/out"
+    local current_version = compat.luaVersion().version
+    local mismatched_release = current_version == "Lua 5.4" and "5.3.6" or "5.4.8"
     makeDirectory(fake_bin)
-    writeFile(fake_bin .. "/pkg-config", [[#!/bin/sh
+    writeFile(fake_bin .. "/pkg-config", string.format([[#!/bin/sh
 if [ "$1" = "--modversion" ]; then
-    printf '%s\n' '5.3.6'
+    printf '%%s\n' %q
     exit 0
 fi
 exec "$LUAI_REAL_PKG_CONFIG" "$@"
-]])
+]], mismatched_release))
     writeFile(fake_bin .. "/cc", [[#!/bin/sh
 : > "$LUAI_COMPILER_MARKER"
 exec "$LUAI_REAL_CC" "$@"
@@ -2960,71 +3109,103 @@ local result = require("luainstaller").bundle({
     entry = "test/single_file/01_hello_luainstaller.lua",
     out = %q,
 })
-assert(result.ok == false, "Lua 5.3 pkg-config metadata must fail")
+assert(result.ok == false, %q)
 assert(result.error.type == "ToolchainError", result.error.type)
 assert(io.open(%q, "rb") == nil, "compiler was invoked before ABI rejection")
-]], out, compiler_marker)
+]], out, mismatched_release .. " pkg-config metadata must not match "
+        .. current_version, compiler_marker)
     runCommand(table.concat({
         "LUAI_REAL_PKG_CONFIG=" .. shellQuote(commandOutputTrimmed("command -v pkg-config")),
         "LUAI_REAL_CC=" .. shellQuote(commandOutputTrimmed("command -v cc")),
         "LUAI_COMPILER_MARKER=" .. shellQuote(compiler_marker),
         "LUAI_LUA=" .. shellQuote(fake_bin .. "/lua-no-dev"),
+        "LUAI_LUA_PREFIX=" .. shellQuote(""),
         "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
-        "lua -e " .. shellQuote(child),
+        luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(not fileExists(out .. "/out"), "ABI failure published an executable")
     removeTree(root)
 end)
 
-test("linked Lua runtime must report the 5.4 ABI", function()
+test("unsafe pkg-config flags fail closed before compiler discovery", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("pkg-config-unsafe-flags")
+    local fake_bin = root .. "/bin"
+    local compiler_marker = root .. "/compiler-called"
+    local out = root .. "/out"
+    local info = compat.luaVersion()
+    local module_release = string.format("%d.%d.99", info.major, info.minor)
+    makeDirectory(fake_bin)
+    writeFile(fake_bin .. "/pkg-config", string.format([[#!/bin/sh
+case "$1" in
+    --version) printf '%%s\n' '1.9.5'; exit 0 ;;
+    --modversion) printf '%%s\n' %s; exit 0 ;;
+    --cflags) printf '%%s\n' '-I/tmp/lua-include;injected'; exit 0 ;;
+esac
+exit 2
+]], shellQuote(module_release)))
+    writeFile(fake_bin .. "/cc", [[#!/bin/sh
+: > "$LUAI_COMPILER_MARKER"
+exit 2
+]])
+    writeFile(fake_bin .. "/luarocks", "#!/bin/sh\nexit 2\n")
+    writeFile(fake_bin .. "/lua-no-dev", "#!/bin/sh\nexit 2\n")
+    runCommand("chmod 700 " .. shellQuote(fake_bin .. "/pkg-config")
+        .. " " .. shellQuote(fake_bin .. "/cc")
+        .. " " .. shellQuote(fake_bin .. "/luarocks")
+        .. " " .. shellQuote(fake_bin .. "/lua-no-dev"))
+
+    local child = harness.loader_prelude() .. string.format([[
+local result = require("luainstaller").bundle({
+    entry = "test/single_file/01_hello_luainstaller.lua",
+    out = %q,
+})
+assert(result.ok == false, "unsafe pkg-config flags were accepted")
+assert(result.error.type == "ToolchainError", result.error.type)
+assert(result.error.message:find("unsafe characters", 1, true), result.error.message)
+assert(result.error.token == "-I/tmp/lua-include;injected", tostring(result.error.token))
+]], out)
+    runCommand(table.concat({
+        "LUAI_COMPILER_MARKER=" .. shellQuote(compiler_marker),
+        "LUAI_LUA=" .. shellQuote(fake_bin .. "/lua-no-dev"),
+        "LUAI_LUA_PREFIX=" .. shellQuote(""),
+        "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
+        luaCommand .. " -e " .. shellQuote(child),
+    }, " "))
+    assert(not fileExists(compiler_marker),
+        "compiler discovery ran after unsafe pkg-config metadata")
+    assert(not fileExists(out), "unsafe pkg-config metadata published output")
+    removeTree(root)
+end)
+
+test("linked Lua runtime must report the selected ABI", function()
     if commandOutputTrimmed("uname -s") ~= "Linux" then return end
     local root = makeTempDir("linked-lua-abi")
     local fake_bin = root .. "/bin"
     local fake_lib = root .. "/lib"
     local stub_c = root .. "/lua-stub.c"
     local out = root .. "/out"
+    local lua_info = compat.luaVersion()
+    local real_toolchain, real_toolchain_err = require("luainstaller.toolchain").resolve({
+        lua_prefix = os.getenv("LUAI_LUA_PREFIX"),
+        lua_version = lua_info,
+    })
+    assert(real_toolchain, real_toolchain_err and real_toolchain_err.error.message)
+    assertEqual(real_toolchain.link_mode, "shared", "ABI rejection fixture link mode")
+    local misreported_version = lua_info.version == "Lua 5.3" and "Lua 5.4" or "Lua 5.3"
     makeDirectory(fake_bin)
     makeDirectory(fake_lib)
-    writeFile(stub_c, [[
-typedef struct lua_State { int placeholder; } lua_State;
-typedef int (*lua_CFunction)(lua_State *);
-lua_State *luaL_newstate(void) { static lua_State state; return &state; }
-void luaL_openlibs(lua_State *state) { (void)state; }
-void lua_close(lua_State *state) { (void)state; }
-int lua_getglobal(lua_State *state, const char *name) { (void)state; (void)name; return 4; }
-const char *lua_tolstring(lua_State *state, int index, unsigned long *size) {
-    (void)state; (void)index; if (size) *size = 7; return "Lua 5.3";
+    writeFile(stub_c, string.format([[
+#include <stddef.h>
+typedef struct lua_State lua_State;
+const char *lua_tolstring(lua_State *state, int index, size_t *size) {
+    static const char version[] = %q;
+    (void)state;
+    (void)index;
+    if (size) *size = sizeof(version) - 1;
+    return version;
 }
-void lua_settop(lua_State *state, int index) { (void)state; (void)index; }
-int luaL_callmeta(lua_State *state, int index, const char *name) {
-    (void)state; (void)index; (void)name; return 0;
-}
-int lua_type(lua_State *state, int index) { (void)state; (void)index; return 4; }
-void luaL_traceback(lua_State *state, lua_State *from, const char *message, int level) {
-    (void)state; (void)from; (void)message; (void)level;
-}
-int lua_gettop(lua_State *state) { (void)state; return 0; }
-void lua_createtable(lua_State *state, int array, int records) {
-    (void)state; (void)array; (void)records;
-}
-const char *lua_pushstring(lua_State *state, const char *value) { (void)state; return value; }
-void lua_rawseti(lua_State *state, int index, long long key) {
-    (void)state; (void)index; (void)key;
-}
-void lua_setglobal(lua_State *state, const char *name) { (void)state; (void)name; }
-void lua_pushcclosure(lua_State *state, lua_CFunction function, int upvalues) {
-    (void)state; (void)function; (void)upvalues;
-}
-int luaL_loadbufferx(lua_State *state, const char *buffer, unsigned long size,
-    const char *name, const char *mode) {
-    (void)state; (void)buffer; (void)size; (void)name; (void)mode; return 0;
-}
-int lua_pcallk(lua_State *state, int arguments, int results, int error_function,
-    long context, void *continuation) {
-    (void)state; (void)arguments; (void)results; (void)error_function;
-    (void)context; (void)continuation; return 0;
-}
-]])
+]], misreported_version))
     runCommand(table.concat({
         "cc -shared -fPIC",
         shellQuote(stub_c),
@@ -3032,21 +3213,31 @@ int lua_pcallk(lua_State *state, int arguments, int results, int error_function,
         "-o",
         shellQuote(fake_lib .. "/liblua-fake.so"),
     }, " "))
+    local fake_flags = table.concat({
+        "-I" .. real_toolchain.include_dir,
+        "-L" .. fake_lib,
+        "-Wl,-rpath," .. fake_lib,
+        "-llua-fake",
+        real_toolchain.library_path,
+        "-Wl,-rpath," .. real_toolchain.library_dir,
+        "-lm",
+        "-ldl",
+    }, " ")
     writeFile(fake_bin .. "/pkg-config", string.format([[#!/bin/sh
 if [ "$1" = "--version" ]; then
     printf '%%s\n' '1.9.5'
     exit 0
 fi
 if [ "$1" = "--modversion" ]; then
-    printf '%%s\n' '5.4.99'
+    printf '%%s\n' %s
     exit 0
 fi
 if [ "$1" = "--cflags" ]; then
-    printf '%%s\n' '-I%s -L%s -Wl,-rpath,%s -llua-fake -lm -ldl'
+    printf '%%s\n' %s
     exit 0
 fi
 exit 2
-]], commandOutputTrimmed("pkg-config --variable=includedir lua"), fake_lib, fake_lib))
+]], shellQuote(lua_info.version:match("(%d+%.%d+)") .. ".99"), shellQuote(fake_flags)))
     writeFile(fake_bin .. "/luarocks", "#!/bin/sh\nexit 2\n")
     runCommand("chmod 700 " .. shellQuote(fake_bin .. "/pkg-config")
         .. " " .. shellQuote(fake_bin .. "/luarocks"))
@@ -3059,10 +3250,18 @@ local result = require("luainstaller").bundle({
 assert(result.ok == false, "misreported linked Lua runtime was accepted")
 assert(result.error.type == "ToolchainError", result.error.type)
 assert(result.error.message:find("linked Lua runtime", 1, true), result.error.message)
-]], out)
+local diagnostic = result.error.message
+for _, failure in ipairs(result.error.failures or {}) do
+    diagnostic = diagnostic .. "\n" .. tostring(failure.message)
+        .. "\n" .. tostring(failure.output or "")
+end
+assert(diagnostic:find(%q, 1, true), diagnostic)
+assert(diagnostic:find(%q, 1, true), diagnostic)
+    ]], out, "expected " .. lua_info.version, "got " .. misreported_version)
     runCommand(table.concat({
+        "LUAI_LUA_PREFIX=" .. shellQuote(""),
         "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
-        "lua -e " .. shellQuote(child),
+        luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(not fileExists(out .. "/out"), "ABI probe failure published an executable")
     removeTree(root)
@@ -3087,6 +3286,20 @@ test("target launcher enforces the selected Lua ABI", function()
     local include_dir = root .. "/include"
     local c_path = root .. "/launcher.c"
     local log_path = root .. "/compiler.log"
+    local selected_prefix = os.getenv("LUAI_LUA_PREFIX")
+    local selected_include
+    if selected_prefix and selected_prefix ~= "" then
+        selected_include = selected_prefix .. "/include"
+        assert(fileExists(selected_include .. "/lua.h"),
+            "selected Lua prefix has no lua.h")
+    elseif commandSucceeds("command -v pkg-config >/dev/null 2>&1") then
+        selected_include = commandOutputTrimmed(
+            "pkg-config --variable=includedir lua"
+        )
+    else
+        removeTree(root)
+        return
+    end
     makeDirectory(include_dir)
     local lua_info = require("luainstaller.compat").luaVersion()
     local mismatched_num = lua_info.num == 501 and 502 or 501
@@ -3122,6 +3335,26 @@ test("target launcher enforces the selected Lua ABI", function()
     local template = readFile("src/launcher/luai_launcher.c")
     assert(template:find("@LUA_VERSION_NUM@", 1, true))
     assert(template:find("@LUA_VERSION@", 1, true))
+    local file_template_source = launcher.generateSource({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        dependencies = { scripts = {}, libraries = {} },
+        lua_version = lua_info,
+        template_path = "src/launcher/luai_launcher.c",
+    })
+    for source_name, source in pairs({
+        embedded = generated,
+        file = file_template_source,
+    }) do
+        assert(source:find(
+            "const char *arg0 = argc > 0 && argv[0] != NULL ? argv[0] : \"\";",
+            1,
+            true
+        ), source_name .. " launcher does not preserve a safe invocation arg[0]")
+        assert(source:find("const char *executable_path = arg0;", 1, true),
+            source_name .. " launcher does not separate arg[0] from its real path")
+        assert(source:find('lua_setglobal(L, "__luai_executable_path");', 1, true),
+            source_name .. " launcher cannot locate bundle metadata through symlinks")
+    end
 
     local cgen = require("luainstaller.cgen")
     local payload_opts = {
@@ -3147,14 +3380,14 @@ test("target launcher enforces the selected Lua ABI", function()
     assert(manifest51.manifest.lua.major == 5 and manifest51.manifest.lua.minor == 1)
     assert(manifest55.manifest.lua.abi == "lua5.5")
     writeFile(c_path, generated)
-    local compiled = os.execute(table.concat({
+    local compiled = commandSucceeds(table.concat({
         "cc -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only",
         "-I" .. shellQuote(include_dir),
+        "-I" .. shellQuote(selected_include),
         shellQuote(c_path),
-        "$(pkg-config --cflags lua)",
         ">" .. shellQuote(log_path) .. " 2>&1",
     }, " "))
-    assert(compiled ~= true and compiled ~= 0, "mismatched Lua headers passed the launcher guard")
+    assert(not compiled, "mismatched Lua headers passed the launcher guard")
     assert(readFile(log_path):find("generated for a different Lua ABI", 1, true))
     removeTree(root)
 end)
@@ -3225,9 +3458,11 @@ test("onefile cache repairs an equal-size FNV collision and mode", function()
 
     assert(os.remove(manifest_path))
     runCommand("mkfifo " .. shellQuote(manifest_path))
-    local fifo_ok, _, fifo_code = os.execute("timeout 5 env TMPDIR=" .. shellQuote(cache)
+    local fifo_ok, _, fifo_code = harness.command_result(
+        "timeout 5 env TMPDIR=" .. shellQuote(cache)
         .. " " .. shellQuote(out) .. " fifo >/dev/null 2>&1")
-    assert(not fifo_ok and fifo_code ~= 124, "extractor blocked on a cache FIFO")
+    assert(not fifo_ok, "extractor accepted a cache FIFO")
+    assertEqual(fifo_code, 1, "cache FIFO rejection status")
     runCommand("test -p " .. shellQuote(manifest_path))
     assert(os.remove(manifest_path))
     runCommand("TMPDIR=" .. shellQuote(cache) .. " " .. shellQuote(out) .. " repaired")
@@ -3240,15 +3475,16 @@ test("onefile cache repairs an equal-size FNV collision and mode", function()
     runCommand("chmod 700 " .. shellQuote(victim .. "/manifest.lua"))
     runCommand("rm -rf " .. shellQuote(luai_dir))
     runCommand("ln -s " .. shellQuote(victim) .. " " .. shellQuote(luai_dir))
-    local linked_ok, _, linked_code = os.execute(
+    local linked_ok, _, linked_code = harness.command_result(
         "timeout 5 env TMPDIR=" .. shellQuote(cache) .. " " .. shellQuote(out)
             .. " linked-parent >/dev/null 2>&1"
     )
-    assert(not linked_ok and linked_code ~= 124, "extractor accepted a linked cache parent")
+    assert(not linked_ok, "extractor accepted a linked cache parent")
+    assertEqual(linked_code, 1, "linked cache parent rejection status")
     assert(readFile(victim .. "/manifest.lua") == original, "linked parent changed victim bytes")
-    local executable_victim = os.execute("test -x " .. shellQuote(victim .. "/manifest.lua"))
-    assert(executable_victim == true or executable_victim == 0,
-        "linked parent changed victim mode before validation")
+    local executable_victim = harness.command_result(
+        "test -x " .. shellQuote(victim .. "/manifest.lua"))
+    assert(executable_victim, "linked parent changed victim mode before validation")
     removeTree(root)
 end)
 
@@ -3297,7 +3533,7 @@ assert(result.error.path == %q, "committed output path missing")
     runCommand(table.concat({
         "LUAI_REAL_RM=" .. shellQuote(commandOutputTrimmed("command -v rm")),
         "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
-        "lua -e " .. shellQuote(child),
+        luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(fileExists(out), "committed output was lost after cleanup failure")
     runCommand(shellQuote(out) .. " committed")
@@ -3314,7 +3550,10 @@ test("onefile extractor is strict C11 and sanitizer clean", function()
     writeFile(fake_bin .. "/cc", [[#!/bin/sh
 for value in "$@"; do
     case "$value" in
-        */extractor.c) cp "$value" "$LUAI_CAPTURE_EXTRACTOR" ;;
+        */extractor.c)
+            cp "$value" "$LUAI_CAPTURE_EXTRACTOR"
+            cp "${value%/*}/payload.inc" "${LUAI_CAPTURE_EXTRACTOR%/*}/payload.inc"
+            ;;
     esac
 done
 exec "$LUAI_REAL_CC" "$@"
@@ -3325,12 +3564,14 @@ local bundler = require("luainstaller.bundler")
 local onefile = require("luainstaller.onefile")
 local original = bundler.bundleOnedir
 bundler.bundleOnedir = function(opts)
-    assert(os.execute("mkdir -p " .. require("luainstaller.process").shellQuote(opts.out .. "/utf8-雪")
-        .. " " .. require("luainstaller.process").shellQuote(opts.out .. "/.luai")))
+    assert(require("luainstaller.process").output(
+        "mkdir -p " .. require("luainstaller.process").shellQuote(opts.out .. "/utf8-雪")
+            .. " " .. require("luainstaller.process").shellQuote(opts.out .. "/.luai")))
     local inner = assert(io.open(opts.out .. "/inner", "wb"))
     assert(inner:write("#!/bin/sh\nexit 0\n"))
     assert(inner:close())
-    assert(os.execute("chmod 700 " .. require("luainstaller.process").shellQuote(opts.out .. "/inner")))
+    assert(require("luainstaller.process").output(
+        "chmod 700 " .. require("luainstaller.process").shellQuote(opts.out .. "/inner")))
     local empty = assert(io.open(opts.out .. "/utf8-雪/empty.bin", "wb"))
     assert(empty:close())
     local long_name = string.rep("n", 240)
@@ -3354,14 +3595,22 @@ assert(result.ok, result.error and result.error.message)
         "LUAI_CAPTURE_EXTRACTOR=" .. shellQuote(captured),
         "LUAI_REAL_CC=" .. shellQuote(commandOutputTrimmed("command -v cc")),
         "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
-        "lua -e " .. shellQuote(child),
+        luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(fileExists(captured), "extractor C source was not captured")
     local source = readFile(captured)
+    local windows_run = assert(source:match(
+        "(static int luai_append_quoted.-)#else\nstatic int luai_run_inner"
+    ), "Windows onefile execution branch is missing")
     assert(source:find("#define _DARWIN_C_SOURCE 1", 1, true),
         "extractor does not expose Darwin no-follow flags under strict C11")
     assert(source:find('#define LUAI_INNER_EXE "\\', 1, true))
     assert(source:find("CreateProcessA(exe_path, cmd, NULL, NULL, FALSE", 1, true))
+    assert(windows_run:find(
+        "argc > 0 && argv[0] != NULL ? argv[0] : exe_path",
+        1,
+        true
+    ), "Windows onefile does not safely construct argv[0]")
     assert(source:find("CreateJobObjectA", 1, true),
         "Windows onefile does not create a child-containment job")
     assert(source:find("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE", 1, true),
@@ -3374,6 +3623,13 @@ assert(result.ok, result.error and result.error.message)
         "POSIX onefile retains an unnecessary supervising process")
     assert(source:find("execv(exe_path, child_argv);", 1, true),
         "POSIX onefile does not replace itself with the inner launcher")
+    assert(source:find(
+        "child_argv[0] = argc > 0 && argv[0] != NULL ? argv[0] : exe_path;",
+        1,
+        true
+    ), "POSIX onefile does not safely construct argv[0]")
+    assert(not source:find("(char *)exe_path", 1, true),
+        "POSIX onefile discards the executable-path const qualifier")
     assert(source:find("else if (!backslash) pos = slash", 1, true))
     assert(source:find("luai_pin_absolute_chain", 1, true),
         "Windows extractor does not pin the temporary-path ancestor chain")
@@ -3397,7 +3653,8 @@ assert(result.ok, result.error and result.error.message)
     assert(ancestor_owner_check and ancestor_write_check
             and ancestor_owner_check < ancestor_write_check,
         "POSIX extractor trusts a non-writable ancestor owned by another user")
-    assert(source:match("luai_file_%d+, 0, 0 }"), "empty file record missing")
+    local payload_include = readFile(root .. "/payload.inc")
+    assert(payload_include:match("luai_file_%d+, 0, 0 }"), "empty file record missing")
 
     local hooked = source
     local function_body = [[
@@ -3453,10 +3710,10 @@ static void luai_test_swap_parent(const char *parent) {
     local victim_manifest = victim .. "/.luai/manifest.lua"
     writeFile(victim_manifest, "victim manifest must survive\n")
     runCommand("chmod 700 " .. shellQuote(victim_manifest))
-    local hook_ok = os.execute("TMPDIR=" .. shellQuote(race_cache)
+    local hook_ok = commandSucceeds("TMPDIR=" .. shellQuote(race_cache)
         .. " LUAI_TEST_VICTIM=" .. shellQuote(victim)
         .. " " .. shellQuote(hooked_exe) .. " >/dev/null 2>&1")
-    assert(hook_ok ~= true and hook_ok ~= 0,
+    assert(not hook_ok,
         "swapped string path unexpectedly executed through the victim")
     local swapped_parent = commandOutputTrimmed(
         "find " .. shellQuote(race_cache) .. " -type l -print"
@@ -3467,8 +3724,8 @@ static void luai_test_swap_parent(const char *parent) {
         "onefile parent replacement target")
     runCommand("test -d " .. shellQuote(swapped_parent .. ".old"))
     assertEqual(readFile(victim_manifest), "victim manifest must survive\n", "onefile parent race bytes")
-    local victim_executable = os.execute("test -x " .. shellQuote(victim_manifest))
-    assert(victim_executable == true or victim_executable == 0,
+    local victim_executable = commandSucceeds("test -x " .. shellQuote(victim_manifest))
+    assert(victim_executable,
         "onefile parent race changed victim mode")
 
     local gcc_exe = root .. "/extractor-gcc"
@@ -3487,15 +3744,15 @@ static void luai_test_swap_parent(const char *parent) {
     makeDirectory(shared_cache)
     runCommand("chmod 0777 " .. shellQuote(shared_parent)
         .. " && chmod 0700 " .. shellQuote(shared_cache))
-    local shared_ok = os.execute("TMPDIR=" .. shellQuote(shared_cache)
+    local shared_ok = commandSucceeds("TMPDIR=" .. shellQuote(shared_cache)
         .. " " .. shellQuote(gcc_exe) .. " >/dev/null 2>&1")
-    assert(shared_ok ~= true and shared_ok ~= 0,
+    assert(not shared_ok,
         "onefile accepted a non-sticky writable TMPDIR ancestor")
     runCommand("chmod 1777 " .. shellQuote(shared_parent))
     runCommand("TMPDIR=" .. shellQuote(shared_cache) .. " " .. shellQuote(gcc_exe))
 
-    local mingw = os.execute("command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1")
-    if mingw == true or mingw == 0 then
+    local mingw = commandSucceeds("command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1")
+    if mingw then
         local windows_one = root .. "/extractor-windows-1.exe"
         local windows_two = root .. "/extractor-windows-2.exe"
         local windows_command = table.concat({
@@ -3510,8 +3767,8 @@ static void luai_test_swap_parent(const char *parent) {
         assert(readFile(windows_one) == readFile(windows_two), "MinGW extractor is not reproducible")
     end
 
-    local clang = os.execute("command -v clang >/dev/null 2>&1")
-    if clang == true or clang == 0 then
+    local clang = commandSucceeds("command -v clang >/dev/null 2>&1")
+    if clang then
         local clang_exe = root .. "/extractor-clang"
         runCommand(table.concat({
             "clang -std=c11 -Wall -Wextra -Werror -pedantic",
@@ -3548,7 +3805,7 @@ assert(logger.logInfo("edge", "parallel", %q) == true)
 ]], "worker-" .. index)
         workers[#workers + 1] = table.concat({
             "HOME=" .. shellQuote(home),
-            "lua -e " .. shellQuote(child),
+            luaCommand .. " -e " .. shellQuote(child),
             "&",
         }, " ")
         workers[#workers + 1] = 'pids="$pids $!"'
@@ -3575,7 +3832,8 @@ for index = 1, 60 do
 end
 print("logger concurrency ok")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(verify))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(verify))
     assert(output:find("logger concurrency ok", 1, true))
     removeTree(root)
 end)
@@ -3595,7 +3853,9 @@ assert(input:close())
 local backup_input = assert(io.open(path .. ".bak", "rb"))
 local original_backup = assert(backup_input:read("*a"))
 assert(backup_input:close())
-assert(type(assert(load(original, "@logs.lua", "t", {}))()) == "table")
+assert(type(assert(require("luainstaller.compat").loadText(
+    original, "@logs.lua", {}
+))()) == "table")
 
 local saved_open = io.open
 io.open = function(candidate, mode)
@@ -3632,7 +3892,8 @@ local logs = logger.getLogs({ descending = false })
 assert(#logs == 1 and logs[1].message == "before")
 print("logger failure preservation ok")
 ]], home .. "/.luainstaller/logs.lua")
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger failure preservation ok", 1, true))
     removeTree(root)
 end)
@@ -3651,7 +3912,8 @@ local logs = logger.getLogs()
 assert(#logs == 0, "cleared backup resurrected " .. tostring(#logs) .. " entries")
 print("logger clear backup ok")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(root) .. " lua -e " .. shellQuote(script))
+    local output = runCommand("HOME=" .. shellQuote(root) .. " "
+        .. luaCommand .. " -e " .. shellQuote(script))
     assert(output:find("logger clear backup ok", 1, true))
     removeTree(root)
 end)
@@ -3667,7 +3929,8 @@ test("logger times out without releasing another owner lock", function()
 local logger = require("luainstaller.logger")
 local directory = %q
 local lock = directory .. "/logs.lua.lock"
-assert(os.execute("mkdir -p " .. require("luainstaller.process").shellQuote(lock)))
+assert(require("luainstaller.process").output(
+    "mkdir -p " .. require("luainstaller.process").shellQuote(lock)))
 local content = "created=" .. tostring(os.time()) .. "\ntoken=active-owner\n"
 for _, name in ipairs({ "owner", "owner.active-owner" }) do
     local handle = assert(io.open(lock .. "/" .. name, "wb"))
@@ -3686,7 +3949,8 @@ end
 assert(os.remove(lock))
 print("logger owned-lock timeout ok")
 ]], home .. "/.luainstaller")
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger owned-lock timeout ok", 1, true))
     removeTree(root)
 end)
@@ -3715,7 +3979,7 @@ rawset(os, "rename", function(from, to)
             "active logger token was not found")
         replacement = "created=1\ntoken=" .. replacement_token .. "\n"
         assert(original_rename(lock, lock .. ".original"))
-        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
         assert(fs.writeFile(lock .. "/owner", replacement))
         assert(fs.writeFile(lock .. "/owner." .. replacement_token, replacement))
         assert(fs.writeFile(lock .. "/SENTINEL", "replacement lock must survive\n"))
@@ -3734,7 +3998,8 @@ assert(fs.readFile(lock .. "/SENTINEL") == "replacement lock must survive\n",
     "replacement sentinel was changed")
 print("logger replacement release ok")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger replacement release ok", 1, true))
     removeTree(root)
 end)
@@ -3747,6 +4012,7 @@ test("logger release leaves a newly acquired empty lock untouched", function()
     local child = harness.loader_prelude() .. [[
 local process = require("luainstaller.process")
 local logger = require("luainstaller.logger")
+local compat = require("luainstaller.compat")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
 local original_remove = os.remove
 local original_rename = os.rename
@@ -3755,7 +4021,7 @@ local injected = false
 rawset(os, "remove", function(candidate)
     if not injected and type(candidate) == "string"
         and candidate:find("logs%.lua%.lock") and candidate:find("/owner%.") then
-        local values = table.pack(original_remove(candidate))
+        local values = compat.pack(original_remove(candidate))
         if values[1] then
             injected = true
             local cleanup_lock = candidate:match("^(.*)/owner%.")
@@ -3763,9 +4029,9 @@ rawset(os, "remove", function(candidate)
             if cleanup_lock == active_lock then
                 assert(original_rename(cleanup_lock, cleanup_lock .. ".previous-owner"))
             end
-            assert(os.execute("mkdir -m 700 " .. process.shellQuote(active_lock)))
+            assert(process.output("mkdir -m 700 " .. process.shellQuote(active_lock)))
         end
-        return table.unpack(values, 1, values.n)
+        return compat.unpack(values, 1, values.n)
     end
     return original_remove(candidate)
 end)
@@ -3773,10 +4039,11 @@ end)
 assert(logger.clearLogs() == true)
 rawset(os, "remove", original_remove)
 assert(injected, "post-sentinel logger acquisition hook did not run")
-assert(os.execute("test -d " .. process.shellQuote(lock)))
+assert(process.output("test -d " .. process.shellQuote(lock)))
 print("logger new owner window ok")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger new owner window ok", 1, true))
     removeTree(root)
 end)
@@ -3793,7 +4060,7 @@ local process = require("luainstaller.process")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
 local replacement = "created=" .. tostring(os.time()) .. "\ntoken=new-active\n"
 assert(logger.clearLogs() == true)
-assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
 assert(fs.writeFile(lock .. "/owner",
     "created=" .. tostring(os.time() - 1000) .. "\ntoken=observed-stale\n"))
 
@@ -3803,7 +4070,7 @@ rawset(os, "rename", function(from, to)
     if not injected and from == lock and tostring(to):find(".stale.", 1, true) then
         injected = true
         assert(original_rename(lock, lock .. ".observed-stale"))
-        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
         assert(fs.writeFile(lock .. "/owner.new-active", replacement))
     end
     return original_rename(from, to)
@@ -3817,7 +4084,8 @@ assert(fs.readFile(lock .. "/owner.new-active") == replacement,
     "newly active replacement lock was changed")
 print("logger stale observation replacement ok")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger stale observation replacement ok", 1, true))
     removeTree(root)
 end)
@@ -3834,7 +4102,7 @@ local logger = require("luainstaller.logger")
 local process = require("luainstaller.process")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
 assert(logger.clearLogs() == true)
-assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
 local owner = assert(lock_owner.encode({
     token = "recent-dead-owner-token",
     pid = "4194303",
@@ -3846,7 +4114,8 @@ assert(fs.readFile(lock .. "/owner.recent-dead-owner-token") == owner,
     "the recent dead-owner lock was changed")
 print("logger recent dead owner preserved")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger recent dead owner preserved", 1, true))
     removeTree(root)
 end)
@@ -3863,7 +4132,7 @@ local logger = require("luainstaller.logger")
 local process = require("luainstaller.process")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
 assert(logger.clearLogs() == true)
-assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
 local stale = assert(lock_owner.encode({
     token = "observed-dead-owner-token",
     pid = "4194303",
@@ -3880,7 +4149,7 @@ lock_owner.isAlive = function(pid)
     if not injected and tostring(pid) == "4194303" then
         injected = true
         assert(original_rename(lock, lock .. ".observed-stale"))
-        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
         assert(fs.writeFile(lock .. "/owner.new-live-owner-token", replacement))
         return false
     end
@@ -3903,7 +4172,8 @@ assert(fs.readFile(lock .. "/owner.new-live-owner-token") == replacement,
     "the replacement lock was changed")
 print("logger liveness replacement preserved")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger liveness replacement preserved", 1, true))
     removeTree(root)
 end)
@@ -3924,7 +4194,8 @@ local lock = path .. ".lock"
 assert(logger.clearLogs() == true)
 assert(logger.logInfo("edge", "recover", "before") == true)
 assert(os.rename(path, backup))
-assert(os.execute("mkdir " .. require("luainstaller.process").shellQuote(lock)))
+assert(require("luainstaller.process").output(
+    "mkdir " .. require("luainstaller.process").shellQuote(lock)))
 local owner = assert(io.open(lock .. "/owner", "wb"))
 assert(owner:write("created=" .. tostring(os.time() - 1000) .. "\ntoken=abandoned\n"))
 assert(owner:close())
@@ -3939,7 +4210,8 @@ assert(primary:read(1) ~= nil, "primary log was not restored")
 assert(primary:close())
 print("logger stale recovery ok")
 ]], home .. "/.luainstaller")
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger stale recovery ok", 1, true))
     removeTree(root)
 end)
@@ -3954,13 +4226,14 @@ local logger = require("luainstaller.logger")
 local process = require("luainstaller.process")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
 assert(logger.clearLogs() == true)
-assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
-assert(os.execute("touch -t 200001010000 " .. process.shellQuote(lock)))
+assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(process.output("touch -t 200001010000 " .. process.shellQuote(lock)))
 assert(logger.clearLogs() == true, "empty abandoned lock was not recovered")
-assert(os.execute("test ! -e " .. process.shellQuote(lock)))
+assert(process.output("test ! -e " .. process.shellQuote(lock)))
 print("logger empty stale lock recovery ok")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger empty stale lock recovery ok", 1, true))
     removeTree(root)
 end)
@@ -3975,8 +4248,8 @@ local logger = require("luainstaller.logger")
 local process = require("luainstaller.process")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
 assert(logger.clearLogs() == true)
-assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
-assert(os.execute("touch -t 200001010000 " .. process.shellQuote(lock)))
+assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
+assert(process.output("touch -t 200001010000 " .. process.shellQuote(lock)))
 
 local original_rename = os.rename
 local injected = false
@@ -3985,7 +4258,7 @@ rawset(os, "rename", function(from, to)
     if not injected and from == lock and tostring(to):find(".stale.", 1, true) then
         injected = true
         assert(original_rename(lock, lock .. ".observed-stale"))
-        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
         replacement_identity = assert(process.firstLine("stat -c '%d:%i' "
             .. process.shellQuote(lock)))
     end
@@ -4000,7 +4273,8 @@ assert(process.firstLine("stat -c '%d:%i' " .. process.shellQuote(lock))
     == replacement_identity, "new empty lock identity was not preserved")
 print("logger empty stale replacement ok")
 ]]
-    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger empty stale replacement ok", 1, true))
     removeTree(root)
 end)
@@ -4011,6 +4285,25 @@ test("remote scripts are pinned and non-destructive", function()
     local linux_runner = readFile("tools/remote-test-linux.sh")
     local macos_runner = readFile("tools/remote-test-macos.sh")
     local windows_runner = readFile("tools/remote-test-windows.sh")
+    for _, clean_test in ipairs({
+        "test/native_bundle.lua",
+        "test/native_onefile.lua",
+        "test/distribution_licenses.lua",
+        "test/reproducible_artifacts.lua",
+    }) do
+        local source = readFile(clean_test)
+        assert(source:find('path.join(root, "empty-path")', 1, true),
+            clean_test .. " does not create a private empty PATH")
+        assert(not source:find("/usr/bin:/bin", 1, true),
+            clean_test .. " can still discover a host Lua interpreter")
+        assert(not source:find("C:\\Windows\\System32;C:\\Windows", 1, true),
+            clean_test .. " can still discover a Windows Lua interpreter")
+    end
+    assert(not readFile("test/smoke_all.lua"):find(
+        "/tmp/luainstaller-single.",
+        1,
+        true
+    ), "smoke suite writes through predictable shared temporary files")
     for _, version in ipairs({ "5.1.5", "5.2.4", "5.3.6", "5.4.8", "5.5.0" }) do
         assert(posix_matrix:find(version, 1, true), "POSIX matrix omits Lua " .. version)
         assert(windows_matrix:find(version, 1, true), "Windows matrix omits Lua " .. version)
@@ -4034,10 +4327,72 @@ test("remote scripts are pinned and non-destructive", function()
         "POSIX matrix does not verify the shared liblua SONAME")
     assert(posix_matrix:find('ln -s "liblua.so.$abi"', 1, true),
         "POSIX matrix does not use relative shared-liblua links")
+    assert(posix_matrix:find('lib/pkgconfig/lua.pc', 1, true),
+        "POSIX matrix does not publish selected-ABI pkg-config metadata")
+    assert(posix_matrix:find('export PKG_CONFIG_PATH=', 1, true),
+        "POSIX matrix native fixtures can use host Lua headers")
+    local universal_commands = assert(posix_matrix:match(
+        "for command in ([^\n]+); do"
+    ), "POSIX matrix has no universal tool prerequisite list")
+    assert(not universal_commands:find("pkg-config", 1, true),
+        "POSIX matrix requires pkg-config on a clean macOS host")
+    assert(posix_matrix:find("lua_pc_version()", 1, true),
+        "POSIX matrix cannot validate lua.pc without pkg-config")
+    assert(posix_matrix:find(
+        'command -v pkg-config >/dev/null 2>&1 || { echo "missing command: pkg-config"',
+        1,
+        true
+    ), "Linux matrix does not require pkg-config for its full edge gate")
+    assert(not readFile("test/production_edges.lua"):find(
+        "$(pkg-config" .. " --cflags lua)",
+        1,
+        true
+    ), "production edge suite cannot compile on a pkg-config-free macOS host")
     assert(posix_matrix:find('"$lua" test/lua_abi.lua', 1, true),
         "POSIX matrix omits the ABI capability contract")
     assert(windows_matrix:find("'lua_abi.lua'", 1, true),
         "Windows matrix omits the ABI capability contract")
+    assert(windows_matrix:find("'luac.exe'", 1, true),
+        "Windows matrix does not build the selected release's bytecode checker")
+    local _, exact_luac_checks = windows_matrix:gsub(
+        "Test%-ExactLuaRelease %$luac %$version",
+        ""
+    )
+    assert(exact_luac_checks >= 2,
+        "Windows matrix does not validate the built luac patch release")
+    assert(windows_matrix:find("LUAI_TEST_LUAC", 1, true),
+        "Windows matrix can syntax-check with a host luac")
+    assert(windows_matrix:find("Invoke-Native $luac @('-p'", 1, true),
+        "Windows matrix does not parse sources and tests with the selected luac")
+    for _, suite in ipairs({
+        "test/distribution_licenses.lua",
+        "test/reproducible_artifacts.lua",
+        "test/production_edges.lua",
+        "test/smoke_all.lua",
+    }) do
+        assert(posix_matrix:find(suite, 1, true),
+            "POSIX matrix omits required suite " .. suite)
+    end
+    for _, suite in ipairs({
+        "'release_docs_contract.lua'",
+        "'distribution_licenses.lua'",
+        "'reproducible_artifacts.lua'",
+    }) do
+        assert(windows_matrix:find(suite, 1, true),
+            "Windows matrix omits required suite " .. suite)
+    end
+    assert(not posix_matrix:find("RUN_FULL_SUITE", 1, true),
+        "POSIX release matrix makes required coverage optional")
+    assert(posix_matrix:find("VERSION_FILTER", 1, true),
+        "POSIX matrix cannot safely target one pinned release for diagnosis")
+    assert(posix_matrix:find("LUAI_LUA_RELEASE", 1, true),
+        "POSIX matrix does not publish the exact Lua patch release to tests")
+    assert(posix_matrix:find("find src test tools -type f -name '*.lua'", 1, true),
+        "POSIX matrix does not parse every shipped Lua source with exact luac")
+    assert(windows_matrix:find("LUAI_LUA_RELEASE", 1, true),
+        "Windows matrix does not publish the exact Lua patch release to tests")
+    assert(windows_matrix:find("@('src','test','tools')", 1, true),
+        "Windows matrix does not parse every shipped Lua source with exact luac")
     assert(posix_matrix:find(
         "245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37",
         1,
@@ -4049,15 +4404,6 @@ test("remote scripts are pinned and non-destructive", function()
         1,
         true
     ))
-    for runner_name, runner in pairs({
-        ["Linux remote runner"] = linux_runner,
-        ["macOS remote runner"] = macos_runner,
-    }) do
-        assert(runner:find("luarocks-3.13.0", 1, true),
-            runner_name .. " does not use the pinned LuaRocks release")
-        assert(not runner:find("luarocks-3.12.2", 1, true),
-            runner_name .. " retains a stale LuaRocks release path")
-    end
     for _, pin in ipairs({
         "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
         "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
@@ -4070,15 +4416,140 @@ test("remote scripts are pinned and non-destructive", function()
             "Windows matrix lacks official Lua SHA-256")
     end
     assert(posix_matrix:find("require_safe_tmp_path()", 1, true))
+    assert(posix_matrix:find("require_owned_private_root()", 1, true),
+        "POSIX matrix does not verify temporary-root ownership")
     assert(posix_matrix:find("stage_source()", 1, true))
-    assert(posix_matrix:find("sha256sum -c", 1, true))
+    assert(posix_matrix:find("sha256_file()", 1, true),
+        "POSIX matrix lacks a portable SHA-256 adapter")
+    assert(posix_matrix:find("shasum -a 256", 1, true),
+        "POSIX matrix cannot verify sources on a clean macOS host")
+    assert(not posix_matrix:find("sha256sum -c", 1, true),
+        "POSIX matrix retains a GNU-only hash verification path")
+    assert(posix_matrix:find("CACHE_SCHEMA=", 1, true),
+        "POSIX matrix caches have no exact schema marker")
+    assert(posix_matrix:find("cache_marker_matches", 1, true),
+        "POSIX matrix does not validate exact cache provenance")
+    assert(posix_matrix:find("deps_install_order_hash", 1, true),
+        "POSIX native dependency cache does not bind installation order")
+    assert(posix_matrix:find("build_native_dependencies()", 1, true),
+        "POSIX matrix does not provision sample dependencies per Lua ABI")
+    assert(posix_matrix:find("--deps-mode=none", 1, true),
+        "POSIX matrix permits LuaRocks to resolve unpinned transitive dependencies")
+    for _, dependency in ipairs({
+        "lua-cjson-2.1.0.10-1.src.rock",
+        "luafilesystem-1.9.0-1.src.rock",
+        "luasocket-3.1.0-1.src.rock",
+        "mimetypes-1.1.0-2.src.rock",
+        "lzlib-0.4.1.53-4.src.rock",
+        "pegasus-1.1.0-0.src.rock",
+        "lsqlite3_v096.zip",
+        "sqlite-amalgamation-3530200.zip",
+    }) do
+        assert(posix_matrix:find(dependency, 1, true),
+            "POSIX matrix omits pinned sample source " .. dependency)
+    end
+    for _, digest in ipairs({
+        "02dea368d07753647c75bd9e6660dd4d06ff7d09956d90d5afc4c3f5b78ed187",
+        "3de68d619f6ad95a27f4728814375447d921305194b7050dee6199057c31282f",
+        "f4a207f50a3f99ad65def8e29c54ac9aac668b216476f7fae3fae92413398ed2",
+        "2cf77e0b6575caa6aecb43c9a06f705b1e7d92c19c5da6bb2f07a10feeee9e2f",
+        "860c893fc53d0a7830a54fa64f22a2b89260ca39c9a7dcb0890f6d3029f00ca5",
+        "0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746",
+        "ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82",
+        "8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32",
+    }) do
+        assert(posix_matrix:find(digest, 1, true),
+            "POSIX matrix omits sample source SHA-256 " .. digest)
+    end
+    assert(posix_matrix:find('export LUA_PATH="$DEPS_LUA_PATH"', 1, true),
+        "POSIX matrix does not isolate sample Lua modules to its ABI rock tree")
+    assert(posix_matrix:find('export LUA_CPATH="$DEPS_LUA_CPATH"', 1, true),
+        "POSIX matrix does not isolate sample native modules to its ABI rock tree")
+    assert(posix_matrix:find('require("lsqlite3")', 1, true),
+        "POSIX matrix does not load-test its locally compiled SQLite module")
+    assert(posix_matrix:find(
+        'unzip -q "$SOURCE_CACHE/$SQLITE_ZIP" -d "$deps_build_dir/sqlite-src"',
+        1,
+        true
+    ), "POSIX matrix does not isolate the pinned SQLite amalgamation")
+    assert(posix_matrix:find(
+        'deps_lsqlite_file=$deps_build_dir/lsqlite3-src/lsqlite3_v096/lsqlite3.c',
+        1,
+        true
+    ), "POSIX matrix does not require the pinned lsqlite3 source path")
+    assert(posix_matrix:find(
+        'deps_sqlite_file=$deps_build_dir/sqlite-src/' ..
+            'sqlite-amalgamation-3530200/sqlite3.c',
+        1,
+        true
+    ), "POSIX matrix does not require the pinned SQLite source path")
+    assert(posix_matrix:find('[ -L "$deps_sqlite_file" ]', 1, true),
+        "POSIX matrix accepts a symlink in place of pinned SQLite source")
+    assert(posix_matrix:find("SQLite amalgamation source:", 1, true),
+        "POSIX matrix does not report the exact SQLite source it compiles")
+    assert(posix_matrix:find(
+        "recipe=pinned-src-rocks-lsqlite-v3-exact-sqlite-paths",
+        1,
+        true
+    ), "POSIX matrix does not invalidate the ambiguous SQLite cache recipe")
+    assert(posix_matrix:find(
+        'LUAI_REQUIRE_FULL_EDGE_COVERAGE=1 "$lua" test/production_edges.lua',
+        1,
+        true
+    ), "Linux matrix does not make full edge prerequisites mandatory")
     assert(windows_matrix:find("Assert-SafeRoot", 1, true))
     assert(windows_matrix:find("Stage-Source", 1, true))
     assert(windows_matrix:find("Get-FileHash", 1, true))
+    assert(windows_matrix:find("$CacheSchema =", 1, true),
+        "Windows matrix caches have no exact schema marker")
+    assert(windows_matrix:find("Test-CacheMarker", 1, true),
+        "Windows matrix does not validate exact cache provenance")
     assert(linux_runner:find("git archive --format=tar HEAD", 1, true))
     assert(macos_runner:find("git archive --format=tar HEAD", 1, true))
+    assert(not macos_runner:find("pkg-config --modversion", 1, true),
+        "macOS runner requires a non-system pkg-config installation")
+    assert(macos_runner:find("/^Version:/", 1, true),
+        "macOS runner does not validate the selected lua.pc directly")
+    assert(macos_runner:find("find src test tools -type f -name '*.lua'", 1, true),
+        "macOS runner omits shipped Lua sources from its exact-luac pass")
+    assert(linux_runner:find("find src test tools -type f -name '*.lua'", 1, true),
+        "Linux runner omits shipped Lua sources from its exact-luac pass")
     assert(not linux_runner:find("git ls-files", 1, true))
     assert(not macos_runner:find("git ls-files", 1, true))
+    for runner_name, runner in pairs({
+        ["Linux remote runner"] = linux_runner,
+        ["macOS remote runner"] = macos_runner,
+    }) do
+        assert(runner:find("MATRIX_WORK_ROOT=", 1, true),
+            runner_name .. " does not name its shared ABI-matrix root")
+        for _, selected_output in ipairs({
+            "lua-5.4.8",
+            "luarocks-5.4.8",
+            "native-deps-5.4.8",
+        }) do
+            assert(runner:find(selected_output, 1, true),
+                runner_name .. " does not reuse matrix output " .. selected_output)
+        end
+        assert(runner:find("TEST_ROOT=", 1, true),
+            runner_name .. " does not isolate supplemental artifacts per run")
+        assert(runner:find("renice 15 -p $$", 1, true),
+            runner_name .. " does not lower physical-host CPU priority")
+        assert(not runner:find("command -v lua", 1, true),
+            runner_name .. " can silently test a host Lua ABI")
+        assert(not runner:find("command -v luac", 1, true),
+            runner_name .. " can silently syntax-check with a host Lua ABI")
+        assert(not runner:find(" install --force lua-", 1, true),
+            runner_name .. " resolves sample dependencies outside the pinned matrix")
+        assert(runner:find("EMPTY_PATH=", 1, true),
+            runner_name .. " does not create a private empty PATH")
+        assert(runner:find('env -i PATH="$EMPTY_PATH"', 1, true)
+                or runner:find('env -i PATH="\\$EMPTY_PATH"', 1, true),
+            runner_name .. " does not execute artifacts with the empty PATH")
+        assert(not runner:find("env -i PATH=/usr/bin:/bin", 1, true),
+            runner_name .. " clean target can still discover a host Lua")
+    end
+    assert(linux_runner:find("ionice -c 3 -p $$", 1, true),
+        "Linux runner does not lower physical-host I/O priority")
     for name, content in pairs({
         posix = posix_matrix,
         powershell = windows_matrix,

@@ -52,6 +52,7 @@ build = {
         ["luainstaller.toolchain"] = "src/toolchain.lua",
         ["luainstaller.result"]   = "src/result.lua",
         ["luainstaller.lock_owner"] = "src/lock_owner.lua",
+        ["luainstaller.distribution_files"] = "src/distribution_files.lua",
         ["luainstaller.runtime"]  = "src/runtime.lua",
         ["luainstaller.cgen"]     = "src/cgen.lua",
         ["luainstaller.launcher"] = "src/launcher.lua",

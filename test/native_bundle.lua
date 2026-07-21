@@ -65,9 +65,8 @@ harness.assert_pe_closure(native_config, {
     path.join(out, native_config.runtime_name or ""),
 })
 
-local clean_path = package.config:sub(1, 1) == "\\"
-    and "C:\\Windows\\System32;C:\\Windows"
-    or "/usr/bin:/bin"
+local clean_path = path.join(root, "empty-path")
+assert(fs.makeDirectory(clean_path))
 local ran, output = process.outputCommand(built.executable, { "native-clean" }, {
     PATH = clean_path,
     LUA_PATH = "",

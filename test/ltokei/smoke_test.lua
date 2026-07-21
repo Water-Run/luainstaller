@@ -11,18 +11,14 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-07-11
+    2026-07-18
 ]]
 local ROOT = "test/ltokei"
 package.path = ROOT .. "/src/?.lua;" .. package.path
+local harness = dofile("test/support/harness.lua")
 
 local scanner = require("ltokei.scanner")
 local formatter = require("ltokei.formatter")
-
-local function shell_quote(value)
-    value = tostring(value or "")
-    return "'" .. value:gsub("'", "'\\''") .. "'"
-end
 
 local function assert_contains(text, pattern)
     if not tostring(text):find(pattern, 1, true) then
@@ -45,13 +41,11 @@ assert_contains(table_text, "Language")
 assert_contains(table_text, "Markdown")
 assert_contains(table_text, "Total")
 
-local cmd = "lua " .. shell_quote(ROOT .. "/main.lua") .. " " .. shell_quote(ROOT .. "/fixtures")
-local pipe = assert(io.popen(cmd .. " 2>&1", "r"))
-local out = pipe:read("*a")
-local ok = pipe:close()
-if not ok then
-    error("command failed: " .. cmd .. "\n" .. out, 2)
-end
+local cmd = harness.command(harness.lua_command(), {
+    ROOT .. "/main.lua",
+    ROOT .. "/fixtures",
+})
+local out = harness.run(cmd)
 assert_contains(out, "Lua")
 assert_contains(out, "Total")
 

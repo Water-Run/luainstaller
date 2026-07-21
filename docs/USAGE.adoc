@@ -50,8 +50,10 @@ luai -t test/runtime_bundle/main.lua --max-deps 120
 luai -b --dir test/runtime_bundle/main.lua \
   -o build/runtime-demo --max-deps 120
 
-env -i PATH=/usr/bin:/bin \
+EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+env -i PATH="$EMPTY_PATH" \
   build/runtime-demo/runtime-demo Grace
+rmdir "$EMPTY_PATH"
 ----
 
 [source,bash]

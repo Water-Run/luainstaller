@@ -41,9 +41,11 @@ luai -t test/savinglua/main.lua --max-deps 250
 luai -b --dir test/savinglua/main.lua \
   -o build/savinglua --max-deps 250
 
-env -i PATH=/usr/bin:/bin build/savinglua/savinglua \
+EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+env -i PATH="$EMPTY_PATH" build/savinglua/savinglua \
   --db /tmp/bundled-savinglua.sqlite3 \
   put check '{"ok":true}'
+rmdir "$EMPTY_PATH"
 ----
 
 Expected discovery is `savinglua.store`, `cjson`, and `lsqlite3`. The database

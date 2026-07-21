@@ -50,6 +50,10 @@ local luai = path.join(bin, "luai" .. command_suffix)
 local full = path.join(bin, "luainstaller" .. command_suffix)
 assert(fs.pathType(luai) == "file", "LuaRocks did not install luai")
 assert(fs.pathType(full) == "file", "LuaRocks did not install luainstaller")
+local lua_abi = assert(_VERSION:match("Lua (%d+%.%d+)"))
+assert(fs.pathType(path.join(
+    tree, "share/lua/" .. lua_abi .. "/luainstaller/distribution_files.lua"
+)) == "file", "LuaRocks did not install distribution materials")
 
 local function installedCommand(command, arguments, environment)
     if not windows then
@@ -80,12 +84,20 @@ local built, build_output = installedCommand(full, {
     "-o", out, "--max-deps", "20",
 })
 assert(built, build_output)
+assert(harness.read_file(path.join(out, ".luai/licenses/Lua-MIT.txt"))
+    == harness.read_file("LICENSES/Lua-MIT.txt"))
+assert(harness.read_file(path.join(out, ".luai/licenses/LGPL-3.0-or-later.txt"))
+    == harness.read_file("LICENSE"))
+assert(harness.read_file(path.join(out, ".luai/licenses/GPL-3.0-or-later.txt"))
+    == harness.read_file("LICENSES/GPL-3.0-or-later.txt"))
+assert(harness.read_file(path.join(out, "THIRD_PARTY_NOTICES.md"))
+    == harness.read_file("THIRD_PARTY_NOTICES.md"))
 
 local executable = path.join(out, path.basename(out) .. (windows and ".exe" or ""))
+local empty_path = path.join(root, "empty-path")
+assert(fs.makeDirectory(empty_path))
 local ran, run_output = process.outputCommand(executable, { "outside" }, {
-    PATH = windows
-        and "C:\\Windows\\System32;C:\\Windows"
-        or "/usr/bin:/bin",
+    PATH = empty_path,
     LUA_PATH = "",
     LUA_CPATH = "",
 })
