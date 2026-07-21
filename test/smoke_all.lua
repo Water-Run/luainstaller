@@ -19,6 +19,7 @@ end
 local SOURCE_LOADER = [[
 package.preload["luainstaller.fs"] = function() return dofile("src/fs.lua") end
 package.preload["luainstaller.hash"] = function() return dofile("src/hash.lua") end
+package.preload["luainstaller.lock_owner"] = function() return dofile("src/lock_owner.lua") end
 package.preload["luainstaller.lua_abi"] = function() return dofile("src/lua_abi.lua") end
 package.preload["luainstaller.native_profile"] = function() return dofile("src/native_profile.lua") end
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
@@ -263,6 +264,8 @@ assert(luainstaller.getEngines == nil)
 assert(luainstaller.ErrorTypes.REQUIRE_ENGINE == nil)
 assert(luainstaller.ErrorTypes.DISCOVERY == "DiscoveryError")
 assert(luainstaller.ErrorTypes.LAUNCHER_GENERATION == "LauncherGenerationError")
+assert(luainstaller.ErrorTypes.BUILD_FAILED == "BuildFailedError")
+assert(luainstaller.ErrorTypes.INTERRUPTED == "InterruptedError")
 assert(luainstaller.build == nil)
 assert(luainstaller.bundleToSinglefile == nil)
 
@@ -1150,7 +1153,8 @@ print(result.executable)
 
     local testing_guide = read_file("docs/TESTING.adoc")
     assert_contains(testing_guide, "test-lua-versions.ps1")
-    assert_contains(testing_guide, "physical native hosts")
+    assert_contains(testing_guide, "native build and run on physical hosts")
+    assert_contains(testing_guide, "cross-compilers are not substitutes")
     assert_contains(testing_guide, "test/production_edges.lua")
     assert_not_contains(testing_guide, "tools/install-source.sh")
 
@@ -1164,6 +1168,8 @@ local function check_release_metadata_contract()
     local bundling = read_file("docs/BUNDLING.adoc")
     assert_contains(bundling, "luainstaller-generated-output-v2")
     assert_contains(bundling, "SHA-256")
+    assert_contains(bundling, "source_id")
+    assert_contains(bundling, "arg[0]")
     assert_not_contains(bundling, "32-bit FNV-1a")
     local direct = run("lua test/runtime_bundle/main.lua metadata")
     assert_contains(direct, "hello metadata")
@@ -1377,7 +1383,7 @@ chunk()
 print = old_print
 _G.arg = old_arg
 assert(generated_output[1] == "hello generated")
-assert(generated_output[2] == "entry=test/runtime_bundle/main.lua")
+assert(generated_output[2] == "entry=generated.lua")
 
 local single = cgen.generateBootstrap({
     entry = "test/single_file/01_hello_luainstaller.lua",
@@ -1479,7 +1485,7 @@ print("c source generated")
 
     local output = run(shell_quote(exe_path) .. " launcher")
     assert_contains(output, "hello launcher")
-    assert_contains(output, "entry=test/runtime_bundle/main.lua")
+    assert_contains(output, "entry=" .. exe_path)
 
     remove_file(c_path)
     remove_file(exe_path)
@@ -1541,7 +1547,8 @@ assert_bundle({
     if host_system() == "Darwin" then
         assert(manifest.launcher.lua_runtime.link_mode == "static")
         assert(manifest.launcher.lua_runtime.destination_path == nil)
-        assert(manifest.launcher.lua_runtime.source_path:match("/lib/liblua%.a$"))
+        assert(manifest.launcher.lua_runtime.source_id:match("^runtime/"))
+        assert(manifest.launcher.lua_runtime.source_path == nil)
         local dynamic = command_output("otool -L " .. shell_quote(runtime_out .. "/runtime"))
         assert_not_contains(dynamic, "liblua")
     else

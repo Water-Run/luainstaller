@@ -19,6 +19,7 @@ package.preload["luainstaller.manifest"] = function() return dofile("src/manifes
 package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
 package.preload["luainstaller.fs"] = function() return dofile("src/fs.lua") end
 package.preload["luainstaller.hash"] = function() return dofile("src/hash.lua") end
+package.preload["luainstaller.lock_owner"] = function() return dofile("src/lock_owner.lua") end
 package.preload["luainstaller.process"] = function() return dofile("src/process.lua") end
 package.preload["luainstaller.toolchain"] = function() return dofile("src/toolchain.lua") end
 package.preload["luainstaller.path"] = function() return dofile("src/path.lua") end

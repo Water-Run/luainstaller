@@ -48,6 +48,13 @@ process holding a writable descriptor opened before rename may still mutate
 that inode after verification. Use a new output path when that cannot be
 ruled out.
 
+Each lock binds a cryptographic token, owner PID, output hash, and exact
+staging name. Normal failures and SIGINT-visible interruptions finalize owned
+state; the CLI reports such an interruption with status `130`. After an
+uncatchable crash or SIGKILL, the next build reclaims only an
+unchanged lock whose owner PID is proven dead; live, malformed, or replaced
+locks are left untouched.
+
 [#bundling-launcher]
 == Startup
 
@@ -58,6 +65,11 @@ ruled out.
 
 The process image path comes from the OS (not the spelling of `argv[0]`), so
 launch via `PATH` or a symlink still locates `.luai/native`.
+
+Application code sees the launcher's invoked executable spelling in
+`arg[0]`; it is never replaced with the build-time entry-script path. The
+OS-resolved process image used for native lookup is private bootstrap state and
+is cleared before the entry runs.
 
 [#bundling-lua]
 == Pure-Lua lookup order
@@ -92,8 +104,17 @@ native linked probe requires `_VERSION` to match the build interpreter.
 
 `.luai/manifest.lua` records entry, hashes, mode, Lua ABI, platform, module
 groups, include/exclude, and trace data. Format `version = 2` with
-`hash_algorithm = "sha256"`. Sources are re-read before embed/copy; mismatch →
-`SourceChangedError`.
+`hash_algorithm = "sha256"`. Artifact manifests identify sources with stable
+`source_id` values: paths below the entry directory are relative, while an
+external source uses `external/<sha256>/<basename>`. Build-host absolute
+paths, the output path, and manual include paths remain only in the in-memory
+build result and diagnostics; they are not serialized into the bundle.
+Sources are re-read before embed/copy; mismatch → `SourceChangedError`.
+
+With identical inputs and toolchain, builds made under different checkout
+roots produce byte-identical onefile artifacts. Generated bootstrap chunk
+names and manifest trace references use the same logical source IDs, so
+checkout directories and build usernames are not embedded as metadata.
 
 `.luai/generated-output.txt` is the v2 ownership marker
 (`luainstaller-generated-output-v2`): final directory, every generated
@@ -115,6 +136,12 @@ POSIX cache: `luainstaller-onefile-<effective-uid>` under the canonical
 temporary root; permission and sticky-ancestor rules are in
 xref:TROUBLESHOOTING.adoc[Troubleshooting]. Windows uses the user temporary
 directory with reparse/DACL constraints.
+
+After extraction, POSIX replaces the outer process with the inner launcher,
+preserving PID, signal, and exit semantics. Windows starts the inner launcher
+suspended, assigns it to a kill-on-close Job Object, and resumes it only after
+containment succeeds; forcefully terminating the outer process therefore also
+terminates the inner process tree.
 
 Cache hits require full-byte equality. After confirming no process uses the
 cache:

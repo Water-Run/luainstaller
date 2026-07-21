@@ -210,6 +210,8 @@ run_version() {
     "$lua" test/native_bundle.lua
     "$lua" test/onefile_compile_native.lua
     "$lua" test/native_onefile.lua
+    "$lua" test/onefile_lifecycle.lua
+    "$lua" test/build_interruption.lua
     if [ "${RUN_FULL_SUITE:-0}" = 1 ] && [ "$version" = 5.5.0 ]; then
         "$lua" test/production_edges.lua
         "$lua" test/smoke_all.lua

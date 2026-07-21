@@ -94,7 +94,7 @@ function M.install(payload)
     end
 end
 
-function M.run(payload, run_args)
+function M.run(payload, run_args, application_arg0)
     payload = payload or {}
     run_args = run_args or {}
     local entry = payload.entry
@@ -122,7 +122,9 @@ function M.run(payload, run_args)
         error(uninstall, 0)
     end
     local old_arg = _G.arg
-    local runtime_arg = { [0] = entry.path or entry.id or "__entry__" }
+    local runtime_arg = { [0] = application_arg0
+        or (type(old_arg) == "table" and old_arg[0])
+        or entry.path or entry.id or "__entry__" }
     for i = 1, #run_args do
         runtime_arg[i] = run_args[i]
     end

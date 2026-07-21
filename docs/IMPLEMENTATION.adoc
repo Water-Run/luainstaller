@@ -93,8 +93,11 @@ recorded. A single complete completion marker is required.
 [#implementation-manifest]
 == Manifest and ABI
 
-Pure-Lua paths stay relative to the entry; outside the tree goes under
-`external/`. Manifest v2 uses SHA-256; mismatch → `SourceChangedError`.
+Pure-Lua paths stay relative to the entry; outside the tree uses the stable
+logical ID `external/<sha256>/<basename>`. The serialized manifest contains
+`source_id` values and no build-host absolute paths; the in-memory build
+manifest retains physical paths for verification and diagnostics. Manifest v2
+uses SHA-256; mismatch → `SourceChangedError`.
 Launcher compile-time guards and `_VERSION` probes use the build
 interpreter's major/minor ABI and run on the native host.
 

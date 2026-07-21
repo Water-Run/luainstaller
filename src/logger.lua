@@ -12,6 +12,7 @@ Updated:
 ]]
 
 local fs = require("luainstaller.fs")
+local lock_owner = require("luainstaller.lock_owner")
 local process = require("luainstaller.process")
 local compat = require("luainstaller.compat")
 
@@ -158,6 +159,10 @@ end
 
 local function uniqueToken()
     token_counter = token_counter + 1
+    local secure = lock_owner.secureToken(
+        "logger\0" .. tostring(token_counter) .. "\0" .. getLogFilePath()
+    )
+    if secure then return secure end
     local address = tostring({}):gsub("[^%w]", "")
     return table.concat({
         tostring(os.time()),
@@ -169,18 +174,31 @@ local function uniqueToken()
 end
 
 local function ownerContent(token, created)
+    local pid = lock_owner.currentPid()
+    if pid then
+        local encoded = lock_owner.encode({
+            token = token,
+            pid = pid,
+            created = created or os.time(),
+        })
+        if encoded then return encoded end
+    end
     return string.format("created=%d\ntoken=%s\n", created or os.time(), token)
 end
 
 local function parseOwner(content)
     if type(content) ~= "string" then
-        return nil, nil
+        return nil, nil, nil
+    end
+    local decoded = lock_owner.decode(content)
+    if decoded and decoded.output_hash == nil and decoded.staging == nil then
+        return decoded.created, decoded.token, decoded.pid
     end
     local created, token = content:match("^created=(%d+)\ntoken=([%w_.-]+)\n$")
     if not created then
-        return nil, nil
+        return nil, nil, nil
     end
-    return tonumber(created), token
+    return tonumber(created), token, nil
 end
 
 local function directoryModifiedAt(path)
@@ -252,7 +270,7 @@ end
 local function lockCreatedAt(lock_path)
     local initial_identity = directoryIdentity(lock_path)
     local function observed(kind, content, token)
-        local created = select(1, parseOwner(content))
+        local created, _, pid = parseOwner(content)
         if initial_identity and directoryIdentity(lock_path) ~= initial_identity then
             return nil, nil
         end
@@ -260,6 +278,7 @@ local function lockCreatedAt(lock_path)
             kind = kind,
             content = content,
             token = token,
+            pid = pid,
             identity = initial_identity,
         }
     end
@@ -347,17 +366,57 @@ local function abandonPartiallyCreatedLock(lock_path, token, release_token, expe
     return removeDirectory(release_path)
 end
 
+local function observationMatches(lock_path, observed)
+    if type(observed) ~= "table" or isSymbolicLink(lock_path)
+        or not isDirectory(lock_path) then
+        return false
+    end
+    if observed.identity and directoryIdentity(lock_path) ~= observed.identity then
+        return false
+    end
+    if observed.kind == "unowned" then
+        return true
+    end
+    if observed.kind == "legacy" then
+        return isRegularFile(lock_path .. PATH_SEP .. "owner")
+            and fs.readFile(lock_path .. PATH_SEP .. "owner") == observed.content
+    end
+    if observed.kind == "sentinel" then
+        local sentinel = singleOwnerSentinel(lock_path)
+        return sentinel ~= nil and sentinel.token == observed.token
+            and fs.readFile(sentinel.path) == observed.content
+    end
+    return false
+end
+
 local function recoverStaleLock(lock_path)
     if isSymbolicLink(lock_path) or not isDirectory(lock_path) then
         return false
     end
     local created, observed = lockCreatedAt(lock_path)
-    if not created or created > os.time() - LOCK_STALE_SECONDS then
+    if not created then
         return false
+    end
+    -- A dead PID alone is insufficient: another process may have observed the
+    -- owner immediately before normal release and then race with a fresh
+    -- owner at the same public lock name.  The age floor prevents that live
+    -- hand-off from being treated as crash recovery.
+    if created > os.time() - LOCK_STALE_SECONDS then
+        return false
+    end
+    if observed and observed.pid then
+        local alive = lock_owner.isAlive(observed.pid)
+        if alive ~= false then return false end
     end
     -- Owner-less recovery is safe only when the platform supplies a stable
     -- directory identity that can be checked after the rename.
     if not observed then
+        return false
+    end
+    -- Liveness checks and filesystem probes are not atomic.  Revalidate the
+    -- exact directory identity and owner bytes immediately before moving it;
+    -- post-rename verification below closes the remaining rename window.
+    if not observationMatches(lock_path, observed) then
         return false
     end
 

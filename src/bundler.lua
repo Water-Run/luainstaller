@@ -15,6 +15,8 @@ local launcher = require("luainstaller.launcher")
 local compat = require("luainstaller.compat")
 local fs = require("luainstaller.fs")
 local hash_mod = require("luainstaller.hash")
+local lock_owner = require("luainstaller.lock_owner")
+local manifest_mod = require("luainstaller.manifest")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
@@ -39,6 +41,7 @@ local targetKey = path.targetKey
 local makeError = result.error
 local GENERATED_MARKER = "luainstaller-generated-output-v2"
 local GENERATED_MARKER_RELATIVE = ".luai/generated-output.txt"
+local OUTPUT_LOCK_STALE_SECONDS = 120
 local writeFile
 local validateOutputDirectory
 
@@ -464,6 +467,7 @@ local function copyLuaRuntime(lua_path, native_dir, runtime_name)
     end
     return nil, {
         source_path = normalizePath(lua_path),
+        source_id = normalizePath("runtime/" .. lua_name),
         destination_path = normalizePath(".luai/native/" .. lua_name),
     }
 end
@@ -631,28 +635,7 @@ local function uniqueSiblingPath(final_path, label)
 end
 
 local function secureToken(context)
-    if IS_WINDOWS then
-        local ok, output = process.outputPowerShell(table.concat({
-            "$Bytes=New-Object byte[] 32;",
-            "$Rng=[Security.Cryptography.RandomNumberGenerator]::Create();",
-            "try{$Rng.GetBytes($Bytes)}finally{$Rng.Dispose()};",
-            "[Console]::Write([Convert]::ToBase64String($Bytes))",
-        }))
-        if not ok or not tostring(output):match("^[A-Za-z0-9+/]+=?=?$") then
-            return nil, tostring(output or "cannot acquire Windows cryptographic randomness")
-        end
-        return hash_mod.sha256(tostring(context or "") .. "\0" .. output)
-    end
-    local handle, open_err = io.open("/dev/urandom", "rb")
-    if not handle then
-        return nil, tostring(open_err or "cannot open /dev/urandom")
-    end
-    local bytes, read_err = handle:read(32)
-    local closed, close_err = handle:close()
-    if type(bytes) ~= "string" or #bytes ~= 32 or not closed then
-        return nil, tostring(read_err or close_err or "short read from /dev/urandom")
-    end
-    return hash_mod.sha256(tostring(context or "") .. "\0" .. bytes)
+    return lock_owner.secureToken(context)
 end
 
 local function renamePath(source, destination)
@@ -672,10 +655,18 @@ local function removeDirectoryOnly(path_value)
     return nil, output
 end
 
-local function createStagingDirectory(final_path)
+local function createStagingDirectory(final_path, lock)
     local parent_err = ensureDirectory(dirname(final_path))
     if parent_err then
         return nil, parent_err
+    end
+    if lock and lock.stage_path then
+        local ok, output = fs.createDirectory(lock.stage_path)
+        if ok then return lock.stage_path end
+        return nil, makeError("FilesystemError", "Cannot create owned staging directory", {
+            path = lock.stage_path,
+            output = output,
+        })
     end
     for _ = 1, 20 do
         local candidate = uniqueSiblingPath(final_path, "staging")
@@ -698,6 +689,38 @@ local function createStagingDirectory(final_path)
     })
 end
 
+local recoverStaleOutputLock
+local restoreMovedOutputLock
+
+local function discardUnpublishedOutputLock(lock_path, token, release_token, expected_content)
+    local release_path = normalizePath(dirname(lock_path)
+        .. "/.luai-lock-release-" .. release_token)
+    if pathExists(release_path) or isSymlink(release_path)
+        or not renamePath(lock_path, release_path) then
+        return false
+    end
+    local entries = fs.listTree(release_path)
+    if type(entries) == "table" and #entries == 0 then
+        local removed = removeDirectoryOnly(release_path)
+        if removed then return true end
+        restoreMovedOutputLock(release_path, lock_path)
+        return false
+    end
+    if type(entries) == "table" and #entries == 1 then
+        local expected_name = "owner." .. token
+        local entry = entries[1]
+        local owner_path = normalizePath(release_path .. "/" .. expected_name)
+        if entry.type == "file" and entry.path == expected_name
+            and fs.readRegularFile(owner_path) == expected_content
+            and removeFile(owner_path) then
+            local removed = removeDirectoryOnly(release_path)
+            return removed and true or false
+        end
+    end
+    restoreMovedOutputLock(release_path, lock_path)
+    return false
+end
+
 local function acquireOutputLock(final_path)
     local parent_err = ensureDirectory(dirname(final_path))
     if parent_err then
@@ -714,36 +737,81 @@ local function acquireOutputLock(final_path)
             output = token_err or release_token_err,
         })
     end
-    local ok, output = fs.createDirectory(lock_path)
-    if not ok then
-        return nil, makeError("FilesystemError", "Another build is using this output path, or a stale build lock remains", {
+    local pid, pid_err = lock_owner.currentPid()
+    if not pid then
+        return nil, makeError("FilesystemError", "Cannot identify output lock owner process", {
             path = final_path,
             lock_path = lock_path,
-            output = output,
+            output = pid_err,
         })
     end
+    local stage_name = ".luai-staging-" .. lock_id:sub(1, 24) .. "-" .. token
+    local stage_path = normalizePath(dirname(final_path) .. "/" .. stage_name)
+    local owner = {
+        token = token,
+        pid = pid,
+        created = os.time(),
+        output_hash = lock_id,
+        staging = stage_name,
+    }
+    local owner_content, owner_encode_err = lock_owner.encode(owner)
+    if not owner_content then
+        return nil, makeError("FilesystemError", "Cannot encode output lock ownership", {
+            path = final_path,
+            lock_path = lock_path,
+            output = owner_encode_err,
+        })
+    end
+    local ok, output
+    for attempt = 1, 2 do
+        ok, output = fs.createDirectory(lock_path)
+        if ok then break end
+        if attempt == 1 and recoverStaleOutputLock
+            and recoverStaleOutputLock(final_path, lock_path, lock_id) then
+            -- Retry once after atomically reclaiming an unchanged dead owner.
+        else
+            return nil, makeError("FilesystemError", "Another build is using this output path, or a stale build lock remains", {
+                path = final_path,
+                lock_path = lock_path,
+                output = output,
+            })
+        end
+    end
     local owner_path = normalizePath(lock_path .. "/owner." .. token)
-    local owner_content = "token=" .. token .. "\noutput=" .. normalizePath(final_path) .. "\n"
-    local wrote, write_err = fs.writeFile(owner_path, owner_content)
+    local write_called, wrote, write_err = pcall(fs.writeFile, owner_path, owner_content)
+    if not write_called then
+        write_err = wrote
+        wrote = nil
+    end
     if not wrote then
+        local cleaned = discardUnpublishedOutputLock(
+            lock_path,
+            token,
+            release_token,
+            owner_content
+        )
         return nil, makeError("FilesystemError", "Cannot record output lock ownership", {
             path = final_path,
             lock_path = lock_path,
             owner_path = owner_path,
             output = write_err,
-            cleanup_error = "lock retained because ownership could not be proven",
+            cleanup_error = cleaned and nil
+                or "lock retained because ownership could not be proven",
         })
     end
     return {
         path = lock_path,
         owner_path = owner_path,
         owner_content = owner_content,
+        owner = owner,
         token = token,
         release_token = release_token,
+        stage_name = stage_name,
+        stage_path = stage_path,
     }
 end
 
-local function restoreMovedOutputLock(release_path, lock_path)
+restoreMovedOutputLock = function(release_path, lock_path)
     if pathExists(lock_path) or isSymlink(lock_path) then
         return false, "public lock path is already occupied"
     end
@@ -752,8 +820,153 @@ local function restoreMovedOutputLock(release_path, lock_path)
     if not reserved then return false, reserve_err end
     local restored, restore_err = os.rename(release_path, lock_path)
     if not restored then
+        removeDirectoryOnly(lock_path)
         return false, restore_err
     end
+    return true
+end
+
+local function readOutputLockOwner(lock_path, expected_output_hash)
+    if isSymlink(lock_path) or not directoryExists(lock_path) then return nil end
+    local entries = fs.listTree(lock_path)
+    if type(entries) ~= "table" or #entries ~= 1 then return nil end
+    local entry = entries[1]
+    local token = type(entry.path) == "string"
+        and entry.path:match("^owner%.([A-Za-z0-9_.-]+)$") or nil
+    if entry.type ~= "file" or not token then return nil end
+    local owner_path = normalizePath(lock_path .. "/" .. entry.path)
+    local content = fs.readRegularFile(owner_path)
+    local owner = content and lock_owner.decode(content) or nil
+    if not owner or owner.token ~= token or owner.output_hash ~= expected_output_hash then
+        return nil
+    end
+    local expected_stage = ".luai-staging-" .. expected_output_hash:sub(1, 24)
+        .. "-" .. owner.token
+    if owner.staging ~= expected_stage then return nil end
+    return {
+        content = content,
+        owner = owner,
+        owner_path = owner_path,
+    }
+end
+
+local function directoryIdentity(path_value)
+    if IS_WINDOWS then return nil end
+    local quoted = process.shellQuote(path_value)
+    local identity = process.firstLine("stat -c '%d:%i' " .. quoted .. " 2>/dev/null")
+    if not tostring(identity or ""):match("^%d+:%d+$") then
+        identity = process.firstLine("stat -f '%d:%i' " .. quoted .. " 2>/dev/null")
+    end
+    if tostring(identity or ""):match("^%d+:%d+$") then return identity end
+    return nil
+end
+
+local function recoverEmptyOutputLock(final_path, lock_path)
+    if IS_WINDOWS or isSymlink(lock_path) or not directoryExists(lock_path) then
+        return false
+    end
+    local identity = directoryIdentity(lock_path)
+    local modified = fs.modifiedAt(lock_path)
+    local entries = fs.listTree(lock_path)
+    if not identity or not modified or modified > os.time() - OUTPUT_LOCK_STALE_SECONDS
+        or type(entries) ~= "table" or #entries ~= 0
+        or directoryIdentity(lock_path) ~= identity then
+        return false
+    end
+    local recovery_token = secureToken(final_path .. "\0empty-stale")
+    if not recovery_token then return false end
+    local tombstone = normalizePath(dirname(lock_path)
+        .. "/.luai-lock-stale-" .. recovery_token)
+    if pathExists(tombstone) or isSymlink(tombstone)
+        or not renamePath(lock_path, tombstone) then
+        return false
+    end
+    local moved_entries = fs.listTree(tombstone)
+    if directoryIdentity(tombstone) ~= identity or type(moved_entries) ~= "table"
+        or #moved_entries ~= 0 then
+        restoreMovedOutputLock(tombstone, lock_path)
+        return false
+    end
+    local removed = removeDirectoryOnly(tombstone)
+    if not removed then
+        restoreMovedOutputLock(tombstone, lock_path)
+        return false
+    end
+    return true
+end
+
+recoverStaleOutputLock = function(final_path, lock_path, expected_output_hash)
+    local observed = readOutputLockOwner(lock_path, expected_output_hash)
+    if not observed then return recoverEmptyOutputLock(final_path, lock_path) end
+    local alive = lock_owner.isAlive(observed.owner.pid)
+    if alive ~= false then return false end
+
+    local checked = readOutputLockOwner(lock_path, expected_output_hash)
+    if not checked or checked.content ~= observed.content
+        or not lock_owner.same(checked.owner, observed.owner) then
+        return false
+    end
+    local recovery_token = secureToken(final_path .. "\0stale")
+    if not recovery_token then return false end
+    local tombstone = normalizePath(dirname(lock_path)
+        .. "/.luai-lock-stale-" .. recovery_token)
+    if pathExists(tombstone) or isSymlink(tombstone)
+        or not renamePath(lock_path, tombstone) then
+        return false
+    end
+
+    local moved = readOutputLockOwner(tombstone, expected_output_hash)
+    if not moved or moved.content ~= observed.content
+        or not lock_owner.same(moved.owner, observed.owner) then
+        restoreMovedOutputLock(tombstone, lock_path)
+        return false
+    end
+
+    local stage_path = normalizePath(dirname(final_path) .. "/" .. moved.owner.staging)
+    if pathExists(stage_path) or isSymlink(stage_path) then
+        if isSymlink(stage_path) or not directoryExists(stage_path) then
+            restoreMovedOutputLock(tombstone, lock_path)
+            return false
+        end
+        local stage_tombstone = normalizePath(dirname(final_path)
+            .. "/.luai-staging-stale-" .. recovery_token)
+        if pathExists(stage_tombstone) or isSymlink(stage_tombstone)
+            or not renamePath(stage_path, stage_tombstone) then
+            restoreMovedOutputLock(tombstone, lock_path)
+            return false
+        end
+        local stage_cleanup_err = removeTree(stage_tombstone)
+        if stage_cleanup_err then
+            if not pathExists(stage_path) and not isSymlink(stage_path)
+                and pathExists(stage_tombstone) then
+                renamePath(stage_tombstone, stage_path)
+            end
+            restoreMovedOutputLock(tombstone, lock_path)
+            return false
+        end
+    end
+
+    local stale_owner_path = normalizePath(tombstone .. "/owner." .. moved.owner.token)
+    local owner_quarantine = normalizePath(dirname(lock_path)
+        .. "/.luai-lock-owner-stale-" .. recovery_token)
+    if pathExists(owner_quarantine) or isSymlink(owner_quarantine)
+        or fs.readRegularFile(stale_owner_path) ~= moved.content
+        or not renamePath(stale_owner_path, owner_quarantine) then
+        restoreMovedOutputLock(tombstone, lock_path)
+        return false
+    end
+    if fs.readRegularFile(owner_quarantine) ~= moved.content then
+        renamePath(owner_quarantine, stale_owner_path)
+        restoreMovedOutputLock(tombstone, lock_path)
+        return false
+    end
+    local removed = removeDirectoryOnly(tombstone)
+    if not removed then
+        renamePath(owner_quarantine, stale_owner_path)
+        restoreMovedOutputLock(tombstone, lock_path)
+        return false
+    end
+    removeFile(owner_quarantine)
     return true
 end
 
@@ -1332,7 +1545,7 @@ local function validateTargetTree(root, target_os)
     return nil
 end
 
-function M.bundleOnedir(opts)
+local function bundleOnedir(opts, lifecycle)
     opts = opts or {}
     local manifest = opts.manifest
     local dependencies = opts.dependencies or { scripts = {}, libraries = {} }
@@ -1409,6 +1622,8 @@ function M.bundleOnedir(opts)
     if not output_lock then
         return lock_err
     end
+    lifecycle.lock = output_lock
+    lifecycle.output_path = final_out_dir
     output_err = validateOutputDirectory(final_out_dir, allowed_generated_entries)
     if output_err then
         return releaseOutputLock(output_lock, output_err)
@@ -1418,10 +1633,11 @@ function M.bundleOnedir(opts)
         return releaseOutputLock(output_lock, snapshot_err)
     end
 
-    local out_dir, stage_err = createStagingDirectory(final_out_dir)
+    local out_dir, stage_err = createStagingDirectory(final_out_dir, output_lock)
     if not out_dir then
         return releaseOutputLock(output_lock, stage_err)
     end
+    lifecycle.stage = out_dir
     local function abandon(failure)
         local cleanup_err = removeTree(out_dir)
         if cleanup_err and failure and failure.error then
@@ -1544,12 +1760,14 @@ function M.bundleOnedir(opts)
         end
         manifest.launcher.lua_runtime = {
             source_path = normalizePath(native_toolchain.runtime_path),
+            source_id = normalizePath("runtime/" .. runtime_name),
             destination_path = runtime_name,
             link_mode = "shared-dll",
         }
     elseif native_toolchain.link_mode == "static" then
         manifest.launcher.lua_runtime = {
             source_path = normalizePath(native_toolchain.static_library_path),
+            source_id = normalizePath("runtime/" .. basename(native_toolchain.static_library_path)),
             destination_path = nil,
             link_mode = "static",
         }
@@ -1636,7 +1854,10 @@ function M.bundleOnedir(opts)
     if err then
         return abandon(err)
     end
-    err = writeFile(normalizePath(luai_dir .. "/manifest.lua"), serializeManifest(manifest))
+    err = writeFile(
+        normalizePath(luai_dir .. "/manifest.lua"),
+        serializeManifest(manifest_mod.distribution(manifest))
+    )
     if err then
         return abandon(err)
     end
@@ -1654,8 +1875,12 @@ function M.bundleOnedir(opts)
         if not err.error or err.error.committed ~= true then
             return abandon(err)
         end
+        lifecycle.stage = nil
+        lifecycle.committed = true
         return releaseOutputLock(output_lock, err)
     end
+    lifecycle.stage = nil
+    lifecycle.committed = true
 
     local success = {
         ok = true,
@@ -1672,6 +1897,42 @@ function M.bundleOnedir(opts)
         return release_err
     end
     return success
+end
+
+function M.bundleOnedir(opts)
+    local lifecycle = {}
+    local called, value = xpcall(function()
+        return bundleOnedir(opts, lifecycle)
+    end, function(failure)
+        return failure
+    end)
+    if called then return value end
+
+    local cause = type(value) == "table" and value.message or tostring(value)
+    local lowered_cause = tostring(cause or ""):lower()
+    local interrupted = lowered_cause == "interrupted"
+        or lowered_cause:find("interrupted!", 1, true) ~= nil
+    local failure = makeError(
+        interrupted and "InterruptedError" or "BuildFailedError",
+        interrupted and "Build interrupted" or "Build transaction was interrupted",
+        {
+        cause = tostring(cause or "unknown failure"),
+        output_path = lifecycle.output_path,
+        committed = lifecycle.committed and true or nil,
+        }
+    )
+    if lifecycle.stage then
+        local stage_cleanup_err = removeTree(lifecycle.stage)
+        if stage_cleanup_err then
+            failure.error.cleanup_error = stage_cleanup_err.error
+                and stage_cleanup_err.error.message or tostring(stage_cleanup_err)
+            failure.error.cleanup_path = lifecycle.stage
+        end
+    end
+    if lifecycle.lock then
+        failure = releaseOutputLock(lifecycle.lock, failure)
+    end
+    return failure
 end
 
 return M

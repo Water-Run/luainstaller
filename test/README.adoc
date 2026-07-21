@@ -21,6 +21,14 @@ source snapshots, recursive SHA-256 ownership, target paths and Lua ABI,
 deterministic onefile extraction, concurrent logs, LuaRocks installation, and
 remote-script safety.
 
+`build_interruption.lua`::
+Injects SIGINT and SIGKILL during native compilation, then verifies status 130,
+transaction finalization, dead-owner recovery, retry, and artifact execution.
+
+`onefile_lifecycle.lua`::
+Checks POSIX PID/signal/exit semantics and Windows kill-on-close child
+containment for a forcefully terminated outer onefile process.
+
 `smoke_all.lua`::
 Runs the comprehensive local audit: syntax, samples, API, generated C,
 installation layouts, onedir, onefile, native dependencies, safety regressions,
@@ -42,6 +50,8 @@ being tested (shown as `$LUA` below):
 $LUA test/cli_split_smoke.lua
 $LUA test/contract_docs.lua
 $LUA test/production_edges.lua
+$LUA test/build_interruption.lua
+$LUA test/onefile_lifecycle.lua
 $LUA test/smoke_all.lua
 ----
 

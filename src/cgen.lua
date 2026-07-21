@@ -20,6 +20,7 @@ local M = {}
 local normalizePath = path.normalize
 local absolutePath = path.absolute
 local basename = path.basename
+local dirname = path.dirname
 
 local function contentHash(content, algorithm)
     if algorithm == "fnv1a32" then
@@ -99,6 +100,15 @@ local function sortedKeys(tbl)
     return keys
 end
 
+local function logicalSourceId(source_path, entry_root, content)
+    local canonical = normalizePath(absolutePath(source_path))
+    local relative = path.relativeWithin(canonical, entry_root)
+    if relative then return normalizePath(relative) end
+    local name = basename(canonical):gsub("[^%w._-]", "_")
+    if name == "" or name == "." or name == ".." then name = "source" end
+    return normalizePath("external/" .. hash.sha256(content) .. "/" .. name)
+end
+
 local function moduleAliases(configured, fallback, source_path)
     local aliases = {}
     local seen = {}
@@ -166,11 +176,15 @@ function M.buildPayload(opts)
     end
 
     local dependencies = opts.dependencies or { scripts = {}, libraries = {} }
+    local entry_root = dirname(normalizePath(absolutePath(opts.entry)))
+    local entry_source = readFile(opts.entry, opts)
+    local entry_id = logicalSourceId(opts.entry, entry_root, entry_source)
     local payload = {
         entry = {
             id = "__entry__",
-            path = opts.entry,
-            source = readFile(opts.entry, opts),
+            path = entry_id,
+            source_id = entry_id,
+            source = entry_source,
         },
         modules = {},
         module_records = {},
@@ -183,9 +197,12 @@ function M.buildPayload(opts)
         local canonical = normalizePath(absolutePath(script_path))
         local record = records_by_path[canonical]
         if not record then
+            local source = readFile(script_path, opts)
+            local source_id = logicalSourceId(script_path, entry_root, source)
             record = {
-                path = canonical,
-                source = readFile(script_path, opts),
+                path = source_id,
+                source_id = source_id,
+                source = source,
                 index = #payload.module_records + 1,
             }
             records_by_path[canonical] = record
@@ -335,7 +352,7 @@ local function install(payload)
   end
 end
 
-local function run(payload, run_args)
+local function run(payload, run_args, application_arg0)
   local loaded = package.loaded
   local previous_modules = {}
   for name in pairs(payload.modules or {}) do
@@ -350,7 +367,9 @@ local function run(payload, run_args)
   end
   local old_arg = _G.arg
   local entry = payload.entry
-  local runtime_arg = { [0] = entry.path or entry.id or "__entry__" }
+  local runtime_arg = { [0] = application_arg0
+      or (type(old_arg) == "table" and old_arg[0])
+      or entry.path or entry.id or "__entry__" }
   for i = 1, #(run_args or {}) do runtime_arg[i] = run_args[i] end
   _G.arg = runtime_arg
   local results = packValues(pcall(function()
@@ -382,11 +401,13 @@ function M.generateBootstrap(opts)
     end
     source[#source + 1] = emitPayload(payload)
     source[#source + 1] = RUNTIME_SOURCE
-    source[#source + 1] = "local launcher_path = arg and arg[0] or \"\""
+    source[#source + 1] = "local application_arg0 = arg and arg[0] or \"\""
+    source[#source + 1] = "local launcher_path = rawget(_G, \"__luai_executable_path\") or application_arg0"
+    source[#source + 1] = "rawset(_G, \"__luai_executable_path\", nil)"
     source[#source + 1] = "configureNativePath(" .. quote(opts.native_dir or "") .. ", launcher_path)"
     source[#source + 1] = "local run_args = {}"
     source[#source + 1] = "if arg then for i = 1, #arg do run_args[i] = arg[i] end end"
-    source[#source + 1] = "return run(payload, run_args)"
+    source[#source + 1] = "return run(payload, run_args, application_arg0)"
     return table.concat(source, "\n")
 end
 

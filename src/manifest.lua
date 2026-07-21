@@ -41,31 +41,12 @@ local function fileHash(path)
     return hash.sha256(content)
 end
 
-local function relativePathUnder(path, base)
-    path = normalizePath(path)
-    base = normalizePath(base)
-    local prefix = base == "/" and "/" or (base .. "/")
-    if path:sub(1, #prefix) == prefix then
-        return path:sub(#prefix + 1)
-    end
-    return nil
-end
-
-local function safeExternalPath(path)
-    path = normalizePath(path)
-    path = path:gsub("^/", "")
-    path = path:gsub(":", "")
-    path = path:gsub("[^%w%._%-%/]", "_")
-    local parts = {}
-    for segment in path:gmatch("[^/]+") do
-        if segment ~= "" and segment ~= "." and segment ~= ".." then
-            parts[#parts + 1] = segment
-        end
-    end
-    if #parts == 0 then
-        return normalizePath("external/" .. basename(path))
-    end
-    return normalizePath("external/" .. table.concat(parts, "/"))
+local function logicalSourceId(source, entry_dir, content_hash)
+    local relative = path.relativeWithin(source, entry_dir)
+    if relative then return normalizePath(relative) end
+    local name = basename(source):gsub("[^%w._-]", "_")
+    if name == "" or name == "." or name == ".." then name = "source" end
+    return normalizePath("external/" .. content_hash .. "/" .. name)
 end
 
 local function luaInfo(configured)
@@ -120,15 +101,6 @@ end
 
 local function fileEntry(path, destination_root, entry_dir, preserve_relative, source_hashes)
     local source = absolutePath(path)
-    local relative
-    if preserve_relative then
-        relative = entry_dir and relativePathUnder(source, entry_dir) or nil
-        if not relative then
-            relative = safeExternalPath(source)
-        end
-    else
-        relative = basename(source)
-    end
     local content_hash, hash_err = fileHash(source)
     if not content_hash then
         return nil, {
@@ -169,10 +141,116 @@ local function fileEntry(path, destination_root, entry_dir, preserve_relative, s
             }
         end
     end
+    local source_id = logicalSourceId(source, entry_dir, content_hash)
+    local relative = preserve_relative and source_id or basename(source)
     return {
         source_path = source,
+        source_id = source_id,
         destination_path = normalizePath(destination_root .. "/" .. relative),
         content_hash = content_hash,
+    }
+end
+
+local function copyValue(value)
+    if type(value) ~= "table" then return value end
+    local copied = {}
+    for key, child in pairs(value) do copied[key] = copyValue(child) end
+    return copied
+end
+
+local function distributionFileEntry(entry)
+    return {
+        source_id = entry.source_id,
+        destination_path = entry.destination_path,
+        content_hash = entry.content_hash,
+    }
+end
+
+local function sourceIdMap(manifest)
+    local ids = {}
+    local groups = {
+        { manifest.entry },
+        manifest.modules.lua or {},
+        manifest.modules.native or {},
+        manifest.modules.external or {},
+    }
+    for _, group in ipairs(groups) do
+        for _, entry in ipairs(group) do
+            if type(entry.source_path) == "string" and type(entry.source_id) == "string" then
+                ids[normalizePath(absolutePath(entry.source_path))] = entry.source_id
+            end
+        end
+    end
+    return ids
+end
+
+local function distributionTrace(manifest)
+    local ids = sourceIdMap(manifest)
+    local trace = {}
+    for _, item in ipairs(manifest.trace or {}) do
+        local record = {
+            requested = item.requested,
+            classification = item.classification,
+            selected_type = item.selected_type,
+            reason = item.reason,
+            optional = item.optional and true or nil,
+            source_line = item.source_line,
+        }
+        if type(item.selected_path) == "string" then
+            record.selected_source_id = ids[normalizePath(absolutePath(item.selected_path))]
+        end
+        if type(item.requiring_file) == "string" then
+            record.requiring_source_id = ids[normalizePath(absolutePath(item.requiring_file))]
+        end
+        trace[#trace + 1] = record
+    end
+    return trace
+end
+
+local function distributionEntries(entries)
+    local result = {}
+    for _, entry in ipairs(entries or {}) do
+        result[#result + 1] = distributionFileEntry(entry)
+    end
+    return result
+end
+
+--@description: Return the path-clean manifest that is written into artifacts.
+function M.distribution(manifest)
+    local runtime = manifest.launcher and manifest.launcher.lua_runtime or nil
+    local launcher = {
+        profile = manifest.launcher and manifest.launcher.profile or nil,
+    }
+    if runtime then
+        launcher.lua_runtime = {
+            source_id = runtime.source_id or ("runtime/" .. basename(
+                runtime.destination_path or runtime.source_path or "lua-runtime"
+            )),
+            destination_path = runtime.destination_path,
+            link_mode = runtime.link_mode,
+        }
+    end
+    return {
+        version = manifest.version,
+        hash_algorithm = manifest.hash_algorithm,
+        entry = distributionFileEntry(manifest.entry),
+        output = { mode = manifest.output and manifest.output.mode or "onedir" },
+        lua = copyValue(manifest.lua),
+        platform = copyValue(manifest.platform),
+        launcher = launcher,
+        modules = {
+            lua = distributionEntries(manifest.modules and manifest.modules.lua),
+            native = distributionEntries(manifest.modules and manifest.modules.native),
+            external = distributionEntries(manifest.modules and manifest.modules.external),
+        },
+        manual = {
+            depscan = manifest.manual and manifest.manual.depscan ~= false,
+            include_count = #(manifest.manual and manifest.manual.include or {}),
+            exclude_count = #(manifest.manual and manifest.manual.exclude or {}),
+        },
+        discovery = copyValue(manifest.discovery),
+        trace = distributionTrace(manifest),
+        compatibility = copyValue(manifest.compatibility),
     }
 end
 

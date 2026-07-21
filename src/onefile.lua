@@ -1157,9 +1157,12 @@ static int luai_run_inner(const char *exe_path, int argc, char **argv) {
     char cmd[32768] = "";
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info;
+    HANDLE job = NULL;
     DWORD exit_code = 1;
+    int child_completed = 0;
     int i;
-    if (luai_append_quoted(cmd, sizeof(cmd), exe_path) != 0) {
+    if (luai_append_quoted(cmd, sizeof(cmd), argc > 0 ? argv[0] : exe_path) != 0) {
         fprintf(stderr, "luainstaller-onefile: command line too long\n");
         return 1;
     }
@@ -1178,39 +1181,64 @@ static int luai_run_inner(const char *exe_path, int argc, char **argv) {
     }
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));
+    ZeroMemory(&job_info, sizeof(job_info));
     si.cb = sizeof(si);
-    if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        fprintf(stderr, "luainstaller-onefile: cannot start inner launcher\n");
+    job = CreateJobObjectA(NULL, NULL);
+    if (!job) {
+        fprintf(stderr, "luainstaller-onefile: cannot create child-containment job\n");
         return 1;
     }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    GetExitCodeProcess(pi.hProcess, &exit_code);
+    job_info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                 &job_info, sizeof(job_info))) {
+        fprintf(stderr, "luainstaller-onefile: cannot configure child-containment job\n");
+        CloseHandle(job);
+        return 1;
+    }
+    if (!CreateProcessA(exe_path, cmd, NULL, NULL, FALSE, CREATE_SUSPENDED,
+                        NULL, NULL, &si, &pi)) {
+        fprintf(stderr, "luainstaller-onefile: cannot start inner launcher\n");
+        CloseHandle(job);
+        return 1;
+    }
+    if (!AssignProcessToJobObject(job, pi.hProcess)) {
+        fprintf(stderr, "luainstaller-onefile: cannot contain inner launcher\n");
+        goto cleanup;
+    }
+    if (ResumeThread(pi.hThread) == (DWORD)-1) {
+        fprintf(stderr, "luainstaller-onefile: cannot resume inner launcher\n");
+        goto cleanup;
+    }
+    if (WaitForSingleObject(pi.hProcess, INFINITE) != WAIT_OBJECT_0
+        || !GetExitCodeProcess(pi.hProcess, &exit_code)) {
+        fprintf(stderr, "luainstaller-onefile: cannot wait for inner launcher\n");
+        goto cleanup;
+    }
+    child_completed = 1;
+
+cleanup:
+    if (!child_completed) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        exit_code = 1;
+    }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    CloseHandle(job);
     return (int)exit_code;
 }
 #else
 static int luai_run_inner(const char *exe_path, int argc, char **argv) {
-    pid_t pid;
-    int status = 0;
     char **child_argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
     int i;
     if (!child_argv) return 1;
-    child_argv[0] = (char *)exe_path;
+    child_argv[0] = argc > 0 ? argv[0] : (char *)exe_path;
     for (i = 1; i < argc; ++i) child_argv[i] = argv[i];
     child_argv[argc] = NULL;
-    pid = fork();
-    if (pid == 0) {
-        execv(exe_path, child_argv);
-        perror("luainstaller-onefile: execv");
-        _exit(127);
-    }
+    execv(exe_path, child_argv);
+    perror("luainstaller-onefile: execv");
     free(child_argv);
-    if (pid < 0) return 1;
-    if (waitpid(pid, &status, 0) < 0) return 1;
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return 1;
+    return 127;
 }
 #endif
 

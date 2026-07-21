@@ -103,6 +103,7 @@ local product_files = {
     "src/init.lua",
     "src/launcher.lua",
     "src/logger.lua",
+    "src/lock_owner.lua",
     "src/lua_abi.lua",
     "src/native_profile.lua",
     "src/manifest.lua",

@@ -52,6 +52,7 @@ local PRELOADS = {
     { "luainstaller.process", "src/process.lua" },
     { "luainstaller.toolchain", "src/toolchain.lua" },
     { "luainstaller.result", "src/result.lua" },
+    { "luainstaller.lock_owner", "src/lock_owner.lua" },
     { "luainstaller.lua_abi", "src/lua_abi.lua" },
     { "luainstaller.native_profile", "src/native_profile.lua" },
     { "luainstaller.logger", "src/logger.lua" },

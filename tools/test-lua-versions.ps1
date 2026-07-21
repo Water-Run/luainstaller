@@ -241,7 +241,8 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         Invoke-Native $lua @('-e','assert(loadfile(os.getenv([[LUAI_SYNTAX_FILE]])))')
     }
     foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','windows_native.lua','toolchain_native.lua',
-        'luarocks_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua')) {
+        'luarocks_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
+        'onefile_lifecycle.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
     Invoke-Native $LuaRocks @('lint','luainstaller-1.0.0-1.rockspec')

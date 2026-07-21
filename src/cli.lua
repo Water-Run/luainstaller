@@ -55,6 +55,7 @@ local function installSourcePreloads()
         "luainstaller.process",
         "luainstaller.path",
         "luainstaller.result",
+        "luainstaller.lock_owner",
         "luainstaller.lua_abi",
         "luainstaller.native_profile",
         "luainstaller.analyzer",
@@ -88,6 +89,9 @@ local function installSourcePreloads()
     end
     package.preload["luainstaller.result"] = package.preload["luainstaller.result"] or function()
         return dofile(sourcePath("result.lua"))
+    end
+    package.preload["luainstaller.lock_owner"] = package.preload["luainstaller.lock_owner"] or function()
+        return dofile(sourcePath("lock_owner.lua"))
     end
     package.preload["luainstaller.lua_abi"] = package.preload["luainstaller.lua_abi"] or function()
         return dofile(sourcePath("lua_abi.lua"))
@@ -645,7 +649,7 @@ local function runAction(style, ui, parser, action, first_entry)
     else
         writeClassicError(structuredErrorText(result))
     end
-    return 1
+    return result and result.error and result.error.type == "InterruptedError" and 130 or 1
 end
 
 local function parseLogOptions(parser, style, ui)

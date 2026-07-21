@@ -6,8 +6,8 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Checks before release. Evidence is native build and run on physical hosts—not
-VMs, Wine, MinGW, or cross-compilers as substitutes.
+Release evidence is a native build and run on physical hosts; VMs, Wine,
+MinGW, and cross-compilers are not substitutes for a mandatory physical class.
 
 toc::[]
 
@@ -23,6 +23,8 @@ LUA=${LUA:-lua}
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/production_edges.lua
+"$LUA" test/build_interruption.lua
+"$LUA" test/onefile_lifecycle.lua
 "$LUA" test/smoke_all.lua
 luarocks lint luainstaller-1.0.0-1.rockspec
 ----
@@ -42,6 +44,12 @@ luarocks lint luainstaller-1.0.0-1.rockspec
 
 |`test/production_edges.lua`
 |Boundary and safety-related behavior
+
+|`test/build_interruption.lua`
+|SIGINT finalization plus SIGKILL dead-owner recovery and retry
+
+|`test/onefile_lifecycle.lua`
+|POSIX process identity/signals and Windows child containment
 
 |`test/smoke_all.lua`
 |Samples, discovery, generated C, directory/single-file, and more

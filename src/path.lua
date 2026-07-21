@@ -87,6 +87,21 @@ function M.isWithin(path, root)
     return path:sub(1, #prefix) == prefix
 end
 
+--@description: Return a safe relative path when value is a strict descendant of root.
+function M.relativeWithin(value, root)
+    local absolute_value = M.normalize(M.absolute(value))
+    local absolute_root = M.normalize(M.absolute(root))
+    if absolute_value == absolute_root or not M.isWithin(absolute_value, absolute_root) then
+        return nil
+    end
+    local prefix = absolute_root:sub(-1) == "/" and absolute_root
+        or (absolute_root .. "/")
+    local relative = absolute_value:sub(#prefix + 1)
+    relative = M.normalize(relative)
+    if M.isSafeRelative(relative) then return relative end
+    return nil
+end
+
 --@description: True when path is a relative path with no empty, ".", or ".." segments.
 function M.isSafeRelative(value)
     local path = tostring(value or ""):gsub("\\", "/")

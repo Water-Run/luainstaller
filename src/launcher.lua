@@ -107,10 +107,11 @@ static int luai_executable_path(char *out, size_t out_size) {
 
 static void luai_push_arg(lua_State *L, int argc, char **argv) {
     char executable[4096];
-    const char *arg0 = argv[0];
+    const char *arg0 = argc > 0 && argv[0] != NULL ? argv[0] : "";
+    const char *executable_path = arg0;
     int i;
     if (luai_executable_path(executable, sizeof(executable)) == 0) {
-        arg0 = executable;
+        executable_path = executable;
     }
     lua_createtable(L, argc > 1 ? argc - 1 : 0, 1);
     lua_pushstring(L, arg0);
@@ -120,6 +121,8 @@ static void luai_push_arg(lua_State *L, int argc, char **argv) {
         lua_rawseti(L, -2, i);
     }
     lua_setglobal(L, "arg");
+    lua_pushstring(L, executable_path);
+    lua_setglobal(L, "__luai_executable_path");
 }
 
 static int luai_load_bootstrap(lua_State *L) {

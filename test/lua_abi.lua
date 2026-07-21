@@ -1,6 +1,14 @@
 --[[
-@file test/lua_abi.lua
-@brief Exact official-Lua ABI capability contract.
+Exact official-Lua ABI capability contract.
+
+Author:
+    WaterRun
+File:
+    lua_abi.lua
+Date:
+    2026-07-18
+Updated:
+    2026-07-18
 ]]
 
 local harness = dofile("test/support/harness.lua")

@@ -88,6 +88,8 @@ Values:
     LUA_SYNTAX: Entry or dependency contains invalid Lua syntax
     SOURCE_CHANGED: Source bytes changed after the manifest snapshot
     INVALID_MANIFEST: Manifest source or hash metadata is invalid
+    BUILD_FAILED: An internal build step raised an unexpected error
+    INTERRUPTED: A signal-visible build interruption was finalized
 ]]
 M.ErrorTypes = {
     SCRIPT_NOT_FOUND      = "ScriptNotFoundError",
@@ -109,6 +111,8 @@ M.ErrorTypes = {
     LUA_SYNTAX            = "LuaSyntaxError",
     SOURCE_CHANGED        = "SourceChangedError",
     INVALID_MANIFEST      = "InvalidManifestError",
+    BUILD_FAILED          = "BuildFailedError",
+    INTERRUPTED           = "InterruptedError",
 }
 
 

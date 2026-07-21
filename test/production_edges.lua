@@ -291,6 +291,14 @@ test("path roots and safe relatives", function()
     assert(path.isWithin("//server/share/foo", "//server/share"))
     assert(not path.isWithin("//server/other/foo", "//server/share"))
     assert(not path.isWithin("../foo", "."))
+    assertEqual(path.relativeWithin("/tmp/base/a/b.lua", "/tmp/base"),
+        "a/b.lua", "POSIX relative descendant")
+    assertEqual(path.relativeWithin("C:/base/a.lua", "C:/base"),
+        "a.lua", "drive relative descendant")
+    assertEqual(path.relativeWithin("//server/share/a.lua", "//server/share"),
+        "a.lua", "UNC relative descendant")
+    assert(path.relativeWithin("/tmp/base", "/tmp/base") == nil)
+    assert(path.relativeWithin("/tmp/other/a.lua", "/tmp/base") == nil)
     assert(not path.isSafeRelative("C:relative"))
     assert(not path.isSafeRelative("trailing/"))
     assert(not path.isSafeRelative("a//b"))
@@ -2096,8 +2104,327 @@ test("output lock release never removes a replacement lock", function()
     assert(call_ok, result)
     assert(injected, "lock release hook did not run")
     assert(not result.ok, "builder claimed success after its output lock was replaced")
+    assert(result.error and result.error.committed == true,
+        "post-publish lock failure was not marked committed")
+    assert(fileExists(out .. "/out"), "post-publish lock failure removed the artifact")
     assertEqual(readFile(replacement_lock .. "/OTHER-OWNER"), replacement_content, "replacement lock owner")
     removeTree(root)
+end)
+
+test("build transaction finalizes a thrown compiler failure", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-transaction-throw")
+    local out = root .. "/out"
+    local toolchain = require("luainstaller.toolchain")
+    local original_compile = toolchain.compile
+    local injected = false
+
+    toolchain.compile = function(...)
+        injected = true
+        error("forced compiler interruption", 0)
+    end
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    toolchain.compile = original_compile
+
+    local lock_path = root .. "/.luai-lock-"
+        .. require("luainstaller.hash").sha256(out)
+    local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+        .. " && test ! -L " .. shellQuote(lock_path))
+    local staging_count = tonumber(commandOutputTrimmed(
+        "find " .. shellQuote(root)
+            .. " -mindepth 1 -maxdepth 1 -name '.luai-staging-*' -print | wc -l"
+    ))
+    removeTree(root)
+
+    assert(injected, "compiler interruption hook did not run")
+    assert(call_ok, "bundle leaked a thrown compiler failure: " .. tostring(result))
+    assert(result and result.ok == false, "thrown compiler failure was not structured")
+    assert(lock_absent == true or lock_absent == 0, "interrupted build left its output lock")
+    assertEqual(staging_count, 0, "interrupted build staging count")
+end)
+
+test("build transaction finalizes thrown staging and publish failures", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local fs = require("luainstaller.fs")
+    local hash = require("luainstaller.hash")
+    for _, point in ipairs({ "staging", "publish" }) do
+        local root = makeTempDir("output-transaction-" .. point)
+        local out = root .. "/out"
+        local lock_path = root .. "/.luai-lock-" .. hash.sha256(out)
+        local original_create = fs.createDirectory
+        local original_rename = os.rename
+        local injected = false
+
+        if point == "staging" then
+            fs.createDirectory = function(candidate, ...)
+                if not injected and tostring(candidate):find("/.luai-staging-", 1, true) then
+                    injected = true
+                    error("forced staging interruption", 0)
+                end
+                return original_create(candidate, ...)
+            end
+        else
+            rawset(os, "rename", function(from, to)
+                if not injected and tostring(from):find("/.luai-staging-", 1, true)
+                    and to == out then
+                    injected = true
+                    error("forced publish interruption", 0)
+                end
+                return original_rename(from, to)
+            end)
+        end
+
+        local call_ok, result = pcall(require("luainstaller").bundle, {
+            entry = "test/single_file/01_hello_luainstaller.lua",
+            out = out,
+        })
+        fs.createDirectory = original_create
+        rawset(os, "rename", original_rename)
+
+        local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+            .. " && test ! -L " .. shellQuote(lock_path))
+        local staging_count = tonumber(commandOutputTrimmed(
+            "find " .. shellQuote(root)
+                .. " -mindepth 1 -maxdepth 1 -name '.luai-staging-*' -print | wc -l"
+        ))
+        local output_absent = os.execute("test ! -e " .. shellQuote(out)
+            .. " && test ! -L " .. shellQuote(out))
+        removeTree(root)
+
+        assert(injected, point .. " interruption hook did not run")
+        assert(call_ok, point .. " interruption escaped: " .. tostring(result))
+        assert(result and result.ok == false, point .. " interruption was not structured")
+        assert(lock_absent == true or lock_absent == 0, point .. " interruption left a lock")
+        assertEqual(staging_count, 0, point .. " interruption staging count")
+        assert(output_absent == true or output_absent == 0,
+            point .. " interruption published an output")
+    end
+end)
+
+test("output lock owner publication failure leaves no anonymous lock", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local fs = require("luainstaller.fs")
+    for _, mode in ipairs({ "return", "throw" }) do
+        local root = makeTempDir("output-owner-write-" .. mode)
+        local out = root .. "/out"
+        local lock_path = root .. "/.luai-lock-"
+            .. require("luainstaller.hash").sha256(out)
+        local original_write = fs.writeFile
+        local injected = false
+        fs.writeFile = function(candidate, ...)
+            if not injected and tostring(candidate):find("/.luai-lock-", 1, true)
+                and tostring(candidate):find("/owner.", 1, true) then
+                injected = true
+                if mode == "throw" then error("forced owner write interruption", 0) end
+                return nil, "forced owner write failure"
+            end
+            return original_write(candidate, ...)
+        end
+        local call_ok, result = pcall(require("luainstaller").bundle, {
+            entry = "test/single_file/01_hello_luainstaller.lua",
+            out = out,
+        })
+        fs.writeFile = original_write
+        local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+            .. " && test ! -L " .. shellQuote(lock_path))
+        removeTree(root)
+        assert(injected, mode .. " owner-write hook did not run")
+        assert(call_ok, mode .. " owner-write failure escaped: " .. tostring(result))
+        assert(result and not result.ok, mode .. " owner-write failure was not reported")
+        assert(lock_absent == true or lock_absent == 0,
+            mode .. " owner-write failure left an anonymous lock")
+    end
+end)
+
+test("build recovers an unchanged dead-owner lock and staging tree", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-dead-owner")
+    local out = root .. "/out"
+    local lock_hash = require("luainstaller.hash").sha256(out)
+    local token = string.rep("a", 64)
+    local lock_path = root .. "/.luai-lock-" .. lock_hash
+    local stage_path = root .. "/.luai-staging-" .. lock_hash:sub(1, 24) .. "-" .. token
+    local owner_content = assert(require("luainstaller.lock_owner").encode({
+        token = token,
+        pid = "99999999",
+        created = os.time() - 60,
+        output_hash = lock_hash,
+        staging = stage_path:match("[^/]+$"),
+    }))
+    makeDirectory(lock_path)
+    writeFile(lock_path .. "/owner." .. token, owner_content)
+    makeDirectory(stage_path)
+    writeFile(stage_path .. "/.luai-staging-owner." .. token, owner_content)
+    writeFile(stage_path .. "/partial", "abandoned compiler output\n")
+
+    local result = require("luainstaller").bundle({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    local stale_stage_absent = os.execute("test ! -e " .. shellQuote(stage_path)
+        .. " && test ! -L " .. shellQuote(stage_path))
+    local lock_absent = os.execute("test ! -e " .. shellQuote(lock_path)
+        .. " && test ! -L " .. shellQuote(lock_path))
+    local artifact_exists = fileExists(out .. "/out")
+    removeTree(root)
+
+    assert(result.ok, result.error and result.error.message)
+    assert(stale_stage_absent == true or stale_stage_absent == 0,
+        "dead owner's staging tree remains")
+    assert(lock_absent == true or lock_absent == 0, "dead owner's output lock remains")
+    assert(artifact_exists, "retry did not publish an artifact")
+end)
+
+test("build never steals live or malformed output locks", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local lock_owner = require("luainstaller.lock_owner")
+    local hash = require("luainstaller.hash")
+    for _, kind in ipairs({ "live", "malformed" }) do
+        local root = makeTempDir("output-lock-" .. kind)
+        local out = root .. "/out"
+        local lock_hash = hash.sha256(out)
+        local lock_path = root .. "/.luai-lock-" .. lock_hash
+        local token = string.rep(kind == "live" and "b" or "c", 64)
+        local stage_name = ".luai-staging-" .. lock_hash:sub(1, 24) .. "-" .. token
+        local owner_content
+        if kind == "live" then
+            owner_content = assert(lock_owner.encode({
+                token = token,
+                pid = assert(lock_owner.currentPid()),
+                created = os.time() - 3600,
+                output_hash = lock_hash,
+                staging = stage_name,
+            }))
+        else
+            owner_content = "version=1\ntoken=" .. token .. "\npid=not-a-pid\n"
+        end
+        makeDirectory(lock_path)
+        writeFile(lock_path .. "/owner." .. token, owner_content)
+
+        local result = require("luainstaller").bundle({
+            entry = "test/single_file/01_hello_luainstaller.lua",
+            out = out,
+        })
+        local preserved_owner = readFile(lock_path .. "/owner." .. token)
+        removeTree(root)
+
+        assert(not result.ok, kind .. " lock was stolen")
+        assertEqual(preserved_owner, owner_content, kind .. " owner record")
+    end
+end)
+
+test("build stale recovery preserves a replacement output lock", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-stale-aba")
+    local out = root .. "/out"
+    local hash = require("luainstaller.hash")
+    local lock_owner = require("luainstaller.lock_owner")
+    local lock_hash = hash.sha256(out)
+    local lock_path = root .. "/.luai-lock-" .. lock_hash
+    local stale_token = string.rep("d", 64)
+    local replacement_token = string.rep("e", 64)
+    local function encoded(token, pid)
+        return assert(lock_owner.encode({
+            token = token,
+            pid = pid,
+            created = os.time() - 60,
+            output_hash = lock_hash,
+            staging = ".luai-staging-" .. lock_hash:sub(1, 24) .. "-" .. token,
+        }))
+    end
+    makeDirectory(lock_path)
+    writeFile(lock_path .. "/owner." .. stale_token, encoded(stale_token, "99999999"))
+
+    local replacement = encoded(replacement_token, assert(lock_owner.currentPid()))
+    local original_rename = os.rename
+    local injected = false
+    rawset(os, "rename", function(from, to)
+        if not injected and from == lock_path
+            and tostring(to):find("/.luai-lock-stale-", 1, true) then
+            injected = true
+            assert(original_rename(lock_path, lock_path .. ".observed-stale"))
+            local made = os.execute("mkdir -m 700 " .. shellQuote(lock_path))
+            assert(made == true or made == 0)
+            writeFile(lock_path .. "/owner." .. replacement_token, replacement)
+            writeFile(lock_path .. "/SENTINEL", "replacement must survive\n")
+        end
+        return original_rename(from, to)
+    end)
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    rawset(os, "rename", original_rename)
+
+    local preserved_owner = readFile(lock_path .. "/owner." .. replacement_token)
+    local preserved_sentinel = readFile(lock_path .. "/SENTINEL")
+    removeTree(root)
+    assert(call_ok, result)
+    assert(injected, "stale-lock replacement hook did not run")
+    assert(not result.ok, "build stole the replacement lock")
+    assertEqual(preserved_owner, replacement, "replacement owner record")
+    assertEqual(preserved_sentinel, "replacement must survive\n", "replacement sentinel")
+end)
+
+test("build recovers an old empty pre-publication lock", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-empty-stale")
+    local out = root .. "/out"
+    local lock_path = root .. "/.luai-lock-"
+        .. require("luainstaller.hash").sha256(out)
+    makeDirectory(lock_path)
+    runCommand("touch -t 200001010000 " .. shellQuote(lock_path))
+    local result = require("luainstaller").bundle({
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    local artifact_exists = fileExists(out .. "/out")
+    removeTree(root)
+    assert(result.ok, result.error and result.error.message)
+    assert(artifact_exists, "empty-lock recovery did not publish an artifact")
+end)
+
+test("build empty-lock recovery preserves a replacement directory", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("output-lock-empty-aba")
+    local out = root .. "/out"
+    local lock_path = root .. "/.luai-lock-"
+        .. require("luainstaller.hash").sha256(out)
+    makeDirectory(lock_path)
+    runCommand("touch -t 200001010000 " .. shellQuote(lock_path))
+    local function identity(candidate)
+        local process = require("luainstaller.process")
+        return process.firstLine("stat -c '%d:%i' " .. shellQuote(candidate) .. " 2>/dev/null")
+            or process.firstLine("stat -f '%d:%i' " .. shellQuote(candidate) .. " 2>/dev/null")
+    end
+    local original_rename = os.rename
+    local replacement_identity
+    local injected = false
+    rawset(os, "rename", function(from, to)
+        if not injected and from == lock_path
+            and tostring(to):find("/.luai-lock-stale-", 1, true) then
+            injected = true
+            assert(original_rename(lock_path, lock_path .. ".observed-empty"))
+            local made = os.execute("mkdir -m 700 " .. shellQuote(lock_path))
+            assert(made == true or made == 0)
+            replacement_identity = identity(lock_path)
+        end
+        return original_rename(from, to)
+    end)
+    local call_ok, result = pcall(require("luainstaller").bundle, {
+        entry = "test/single_file/01_hello_luainstaller.lua",
+        out = out,
+    })
+    rawset(os, "rename", original_rename)
+    local final_identity = identity(lock_path)
+    removeTree(root)
+    assert(call_ok, result)
+    assert(injected, "empty-lock replacement hook did not run")
+    assert(not result.ok, "build stole the replacement empty lock")
+    assertEqual(final_identity, replacement_identity, "replacement empty-lock identity")
 end)
 
 test("internal bundle siblings support a near-NAME_MAX output basename", function()
@@ -3034,7 +3361,19 @@ assert(result.ok, result.error and result.error.message)
     assert(source:find("#define _DARWIN_C_SOURCE 1", 1, true),
         "extractor does not expose Darwin no-follow flags under strict C11")
     assert(source:find('#define LUAI_INNER_EXE "\\', 1, true))
-    assert(source:find("CreateProcessA(NULL, cmd, NULL, NULL, FALSE", 1, true))
+    assert(source:find("CreateProcessA(exe_path, cmd, NULL, NULL, FALSE", 1, true))
+    assert(source:find("CreateJobObjectA", 1, true),
+        "Windows onefile does not create a child-containment job")
+    assert(source:find("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE", 1, true),
+        "Windows onefile job does not kill children when the outer handle closes")
+    assert(source:find("AssignProcessToJobObject", 1, true),
+        "Windows onefile does not assign its child to the containment job")
+    assert(source:find("CREATE_SUSPENDED", 1, true),
+        "Windows onefile child can run before job assignment")
+    assert(not source:find("pid = fork();", 1, true),
+        "POSIX onefile retains an unnecessary supervising process")
+    assert(source:find("execv(exe_path, child_argv);", 1, true),
+        "POSIX onefile does not replace itself with the inner launcher")
     assert(source:find("else if (!backslash) pos = slash", 1, true))
     assert(source:find("luai_pin_absolute_chain", 1, true),
         "Windows extractor does not pin the temporary-path ancestor chain")
@@ -3480,6 +3819,92 @@ print("logger stale observation replacement ok")
 ]]
     local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
     assert(output:find("logger stale observation replacement ok", 1, true))
+    removeTree(root)
+end)
+
+test("logger never reclaims a recent dead-owner lock", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-recent-dead-owner")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local fs = require("luainstaller.fs")
+local lock_owner = require("luainstaller.lock_owner")
+local logger = require("luainstaller.logger")
+local process = require("luainstaller.process")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+assert(logger.clearLogs() == true)
+assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+local owner = assert(lock_owner.encode({
+    token = "recent-dead-owner-token",
+    pid = "4194303",
+    created = os.time(),
+}))
+assert(fs.writeFile(lock .. "/owner.recent-dead-owner-token", owner))
+assert(logger.clearLogs() == false, "a recent dead-owner lock was reclaimed")
+assert(fs.readFile(lock .. "/owner.recent-dead-owner-token") == owner,
+    "the recent dead-owner lock was changed")
+print("logger recent dead owner preserved")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    assert(output:find("logger recent dead owner preserved", 1, true))
+    removeTree(root)
+end)
+
+test("logger revalidates a stale lock after the liveness probe", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-liveness-revalidation")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local fs = require("luainstaller.fs")
+local lock_owner = require("luainstaller.lock_owner")
+local logger = require("luainstaller.logger")
+local process = require("luainstaller.process")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+assert(logger.clearLogs() == true)
+assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+local stale = assert(lock_owner.encode({
+    token = "observed-dead-owner-token",
+    pid = "4194303",
+    created = os.time() - 1000,
+}))
+assert(fs.writeFile(lock .. "/owner.observed-dead-owner-token", stale))
+
+local replacement = "created=" .. tostring(os.time()) .. "\ntoken=new-live-owner-token\n"
+local original_alive = lock_owner.isAlive
+local original_rename = os.rename
+local injected = false
+local replacement_moved = false
+lock_owner.isAlive = function(pid)
+    if not injected and tostring(pid) == "4194303" then
+        injected = true
+        assert(original_rename(lock, lock .. ".observed-stale"))
+        assert(os.execute("mkdir -m 700 " .. process.shellQuote(lock)))
+        assert(fs.writeFile(lock .. "/owner.new-live-owner-token", replacement))
+        return false
+    end
+    return original_alive(pid)
+end
+os.rename = function(from, to)
+    if injected and from == lock and tostring(to):find(".stale.", 1, true) then
+        replacement_moved = true
+    end
+    return original_rename(from, to)
+end
+
+local cleared = logger.clearLogs()
+lock_owner.isAlive = original_alive
+os.rename = original_rename
+assert(injected, "liveness replacement hook did not run")
+assert(cleared == false, "logger acquired a replacement lock")
+assert(not replacement_moved, "logger moved a lock replaced during the liveness probe")
+assert(fs.readFile(lock .. "/owner.new-live-owner-token") == replacement,
+    "the replacement lock was changed")
+print("logger liveness replacement preserved")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " lua -e " .. shellQuote(child))
+    assert(output:find("logger liveness replacement preserved", 1, true))
     removeTree(root)
 end)
 
