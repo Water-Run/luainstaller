@@ -89,6 +89,7 @@ local product_files = {
     "src/init.lua",
     "src/launcher.lua",
     "src/logger.lua",
+    "src/lua_abi.lua",
     "src/manifest.lua",
     "src/onefile.lua",
     "src/path.lua",

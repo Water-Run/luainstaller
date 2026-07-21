@@ -19,6 +19,7 @@ end
 local SOURCE_LOADER = [[
 package.preload["luainstaller.fs"] = function() return dofile("src/fs.lua") end
 package.preload["luainstaller.hash"] = function() return dofile("src/hash.lua") end
+package.preload["luainstaller.lua_abi"] = function() return dofile("src/lua_abi.lua") end
 package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
 package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end

@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-11
+    2026-07-18
 ]]
 
 local fs = require("luainstaller.fs")
@@ -99,6 +99,23 @@ end
 
 local function launcherProfile(profile)
     return profile.launcher_profile
+end
+
+local function discoveryInfo(discovery)
+    if type(discovery) ~= "table" then return nil end
+    local info = {
+        mode = discovery.mode,
+    }
+    local interpreter = discovery.interpreter
+    if type(interpreter) == "table" then
+        info.interpreter = {
+            command = type(interpreter.path) == "string"
+                and basename(interpreter.path) or nil,
+            abi = interpreter.abi,
+            version = interpreter.version,
+        }
+    end
+    return info
 end
 
 local function fileEntry(path, destination_root, entry_dir, preserve_relative, source_hashes)
@@ -280,6 +297,7 @@ function M.build(opts)
             exclude = opts.exclude or {},
             depscan = opts.depscan ~= false,
         },
+        discovery = discoveryInfo(opts.discovery),
         trace = opts.trace or {},
         -- Declared packaging requirement (not a host/target snapshot).
         -- Structured diagnostics live on trace/compatibility API results.

@@ -52,6 +52,7 @@ local PRELOADS = {
     { "luainstaller.process", "src/process.lua" },
     { "luainstaller.toolchain", "src/toolchain.lua" },
     { "luainstaller.result", "src/result.lua" },
+    { "luainstaller.lua_abi", "src/lua_abi.lua" },
     { "luainstaller.logger", "src/logger.lua" },
     { "luainstaller.analyzer", "src/analyzer.lua" },
     { "luainstaller.discovery", "src/discovery.lua" },

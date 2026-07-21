@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -731,6 +731,34 @@ test("runtime discovery uses the real loader path", function()
     assert(dependency_set[alt_dir .. "/choice.lua"], "actual loader path missing")
     assert(dependency_set[entry_dir .. "/consumer.lua"], "consumer loader path missing")
     assert(not dependency_set[entry_dir .. "/choice.lua"], "cached require used a false fallback path")
+    local identity = analyzed.dependencies.discovery
+        and analyzed.dependencies.discovery.interpreter
+    assert(type(identity) == "table", "verified interpreter identity is missing")
+    assertEqual(
+        identity.abi,
+        assert(require("luainstaller.lua_abi").current()),
+        "verified interpreter ABI"
+    )
+    assert(type(identity.path) == "string" and identity.path ~= "",
+        "verified interpreter path is missing")
+    local built_manifest = require("luainstaller.manifest").build({
+        entry = entry_dir .. "/main.lua",
+        dependencies = analyzed.dependencies,
+        trace = analyzed.trace,
+        discovery = analyzed.dependencies.discovery,
+        source_hashes = analyzed.dependencies.source_hashes,
+    })
+    assert(built_manifest.ok, built_manifest.error and built_manifest.error.message)
+    assertEqual(
+        built_manifest.manifest.discovery.interpreter.abi,
+        identity.abi,
+        "manifest discovery ABI"
+    )
+    assertEqual(
+        built_manifest.manifest.discovery.interpreter.command,
+        require("luainstaller.path").basename(identity.path),
+        "manifest stable interpreter command"
+    )
     local trace = analyzed.trace[1]
     assertEqual(trace.selected_path, alt_dir .. "/choice.lua", "trace loader path")
 
@@ -1079,6 +1107,39 @@ test("runtime discovery rejects a non-official Lua interpreter", function()
     })
     assert(not result.ok)
     assertEqual(result.error.type, "ToolchainError", "runtime interpreter ABI")
+end)
+
+test("runtime discovery rejects a different official Lua ABI", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+
+    local lua_abi = require("luainstaller.lua_abi")
+    local active_abi = assert(lua_abi.current())
+    local wrong_abi = active_abi == "5.4" and "5.3" or "5.4"
+    local lua_binary = commandOutputTrimmed("command -v lua")
+    assert(lua_binary ~= "", "cannot locate the active Lua interpreter")
+
+    local root = makeTempDir("runtime-cross-abi")
+    local wrapper = root .. "/lua-wrong-abi"
+    writeFile(wrapper, string.format([=[#!/bin/sh
+if [ "$1" = "-e" ]; then
+    printf 'Lua %s'
+    exit 0
+fi
+exec %s "$@"
+]=], wrong_abi, shellQuote(lua_binary)))
+    runCommand("chmod 700 " .. shellQuote(wrapper))
+
+    local result = require("luainstaller").analyze({
+        entry = "test/runtime_bundle/main.lua",
+        discovery_mode = "runtime",
+        lua = wrapper,
+        run_args = { "cross-abi" },
+    })
+    assert(not result.ok, "runtime discovery accepted a different Lua ABI")
+    assertEqual(result.error.type, "ToolchainError", "cross-ABI interpreter type")
+    assertEqual(result.error.expected_abi, active_abi, "cross-ABI expected ABI")
+    assertEqual(result.error.actual_abi, wrong_abi, "cross-ABI actual ABI")
+    removeTree(root)
 end)
 
 test("runtime discovery rejects an incomplete trace", function()
@@ -3352,6 +3413,10 @@ test("remote scripts are pinned and non-destructive", function()
         "POSIX matrix invokes Lua's readline-enabled Linux make target")
     assert(not posix_matrix:lower():find("readline", 1, true),
         "POSIX matrix requires the optional readline development headers")
+    assert(posix_matrix:find('"$lua" test/lua_abi.lua', 1, true),
+        "POSIX matrix omits the ABI capability contract")
+    assert(windows_matrix:find("'lua_abi.lua'", 1, true),
+        "Windows matrix omits the ABI capability contract")
     assert(posix_matrix:find(
         "245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37",
         1,

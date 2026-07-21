@@ -159,6 +159,7 @@ run_version() {
         LUAI_SYNTAX_FILE="$file" "$lua" \
             -e 'assert(loadfile(os.getenv("LUAI_SYNTAX_FILE")))'
     done
+    "$lua" test/lua_abi.lua
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua

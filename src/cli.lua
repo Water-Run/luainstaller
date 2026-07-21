@@ -55,6 +55,7 @@ local function installSourcePreloads()
         "luainstaller.process",
         "luainstaller.path",
         "luainstaller.result",
+        "luainstaller.lua_abi",
         "luainstaller.analyzer",
         "luainstaller.logger",
         "luainstaller.manifest",
@@ -86,6 +87,9 @@ local function installSourcePreloads()
     end
     package.preload["luainstaller.result"] = package.preload["luainstaller.result"] or function()
         return dofile(sourcePath("result.lua"))
+    end
+    package.preload["luainstaller.lua_abi"] = package.preload["luainstaller.lua_abi"] or function()
+        return dofile(sourcePath("lua_abi.lua"))
     end
     package.preload["luainstaller.analyzer"] = package.preload["luainstaller.analyzer"] or function()
         return dofile(sourcePath("analyzer.lua"))

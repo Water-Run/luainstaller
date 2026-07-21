@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -67,6 +67,14 @@ end
 
 local version_ok, version_output = installedCommand(luai, { "-v" })
 assert(version_ok and version_output == "luai 1.0.0\n", version_output)
+local runtime_ok, runtime_output = installedCommand(luai, {
+    "-a", path.join(project, "main.lua"),
+    "--discovery-mode", "runtime",
+    "--", "runtime",
+})
+assert(runtime_ok, runtime_output)
+assert(runtime_output:find("scripts: 1", 1, true), runtime_output)
+assert(runtime_output:find(path.join(project, "greeting.lua"), 1, true), runtime_output)
 local built, build_output = installedCommand(full, {
     "build", "--dir", path.join(project, "main.lua"),
     "-o", out, "--max-deps", "20",

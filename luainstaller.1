@@ -118,7 +118,13 @@ Set the maximum discovered Lua source dependency count. Default: 36.
 .TP
 .BI \-\-lua " path"
 Select the Lua interpreter used by runtime discovery. It must report exactly
-an official Lua 5.x version at least Lua 5.1.
+an official Lua 5.1 through Lua 5.5 version with the same major/minor ABI as
+the active luainstaller process. When omitted, launcher arguments and
+.B lua
+on
+.B PATH
+are accepted only after the same identity check; otherwise use this option
+explicitly.
 .TP
 .BI \-\-target-os " os"
 Assert the detected native host OS. A different OS is rejected; this option

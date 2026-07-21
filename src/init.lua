@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 
@@ -514,6 +514,7 @@ function M.bundle(opts)
         include = normalized.include,
         exclude = normalized.exclude,
         depscan = normalized.depscan,
+        discovery = context.dependencies.discovery,
         launcher_profile = normalized.launcher_profile,
         target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),
         lua_prefix = normalized.lua_prefix or os.getenv("LUAI_LUA_PREFIX"),

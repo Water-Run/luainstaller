@@ -8,12 +8,13 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-14
+    2026-07-18
 ]]
 
 local analyzer = require("luainstaller.analyzer")
 local fs = require("luainstaller.fs")
 local hash = require("luainstaller.hash")
+local lua_abi = require("luainstaller.lua_abi")
 local path = require("luainstaller.path")
 local process = require("luainstaller.process")
 local result = require("luainstaller.result")
@@ -87,23 +88,7 @@ local function cleanupWorkDir(path_value, failure)
     return failure or cleanup_err
 end
 
-local function luaInterpreter(opts)
-    opts = opts or {}
-    if type(opts.lua) == "string" and opts.lua ~= "" then
-        return opts.lua
-    end
-    local env_lua = os.getenv("LUAI_LUA")
-    if env_lua and env_lua ~= "" then
-        return env_lua
-    end
-    if type(arg) == "table" and type(arg[-1]) == "string" and arg[-1] ~= "" then
-        return arg[-1]
-    end
-    return "lua"
-end
-
-local function validateLuaInterpreter(interpreter)
-    local probe = table.concat({
+local LUA_IDENTITY_PROBE = table.concat({
         "local major, minor = tostring(_VERSION):match('Lua%s+(%d+)%.(%d+)')",
         "major, minor = tonumber(major), tonumber(minor)",
         "local j = rawget(_G, 'jit')",
@@ -113,16 +98,73 @@ local function validateLuaInterpreter(interpreter)
             .. "os.exit(42) end",
         "io.write(_VERSION)",
     }, ";")
-    local ok, output = process.outputCommand(interpreter, { "-e", probe })
-    local major, minor = tostring(output):match("^Lua%s+(%d+)%.(%d+)%s*$")
-    major, minor = tonumber(major), tonumber(minor)
-    if not ok or major ~= 5 or not minor or minor < 1 then
-        return makeError("ToolchainError", "Runtime discovery requires an official Lua 5.1+ interpreter", {
-            interpreter = interpreter,
-            output = output,
-        })
+
+local function validateLuaInterpreter(interpreter, expected_abi)
+    local ok, output = process.outputCommand(interpreter, {
+        "-e", LUA_IDENTITY_PROBE,
+    })
+    local actual_abi = lua_abi.normalize(output)
+    if not ok or actual_abi ~= expected_abi then
+        return nil, makeError(
+            "ToolchainError",
+            "Runtime discovery interpreter must be official Lua and match the active Lua ABI",
+            {
+                interpreter = interpreter,
+                expected_abi = expected_abi,
+                actual_abi = actual_abi,
+                output = output,
+            }
+        )
     end
-    return nil
+    local version = tostring(output):match("^%s*(.-)%s*$")
+    return {
+        path = interpreter,
+        abi = actual_abi,
+        version = version,
+    }
+end
+
+local function luaInterpreter(opts, expected_abi)
+    opts = opts or {}
+
+    local function explicit(candidate)
+        local identity, validation_err = validateLuaInterpreter(candidate, expected_abi)
+        if not identity then return nil, validation_err end
+        return identity
+    end
+
+    if type(opts.lua) == "string" and opts.lua ~= "" then
+        return explicit(opts.lua)
+    end
+    local env_lua = os.getenv("LUAI_LUA")
+    if env_lua and env_lua ~= "" then
+        return explicit(env_lua)
+    end
+
+    local seen = {}
+    if type(arg) == "table" then
+        for index = -1, -16, -1 do
+            local candidate = arg[index]
+            if type(candidate) == "string" and candidate ~= "" and not seen[candidate] then
+                seen[candidate] = true
+                local identity = validateLuaInterpreter(candidate, expected_abi)
+                if identity then return identity end
+            end
+        end
+    end
+
+    if not seen.lua then
+        local identity = validateLuaInterpreter("lua", expected_abi)
+        if identity then return identity end
+    end
+
+    return nil, makeError(
+        "ToolchainError",
+        "Cannot find a verified runtime discovery interpreter; use --lua with the active Lua ABI",
+        {
+            expected_abi = expected_abi,
+        }
+    )
 end
 
 local function listContains(list, value)
@@ -269,6 +311,7 @@ local function applyManualInputs(result, opts)
         libraries = libraries,
         trace = trace,
         source_hashes = source_hashes,
+        discovery = result.discovery,
     }
 end
 
@@ -633,9 +676,14 @@ local function parseTraceOutput(path)
 end
 
 local function runtimePlan(opts)
-    local interpreter = luaInterpreter(opts)
-    local interpreter_err = validateLuaInterpreter(interpreter)
-    if interpreter_err then
+    local expected_abi, abi_err = lua_abi.current()
+    if not expected_abi then
+        return nil, makeError("ToolchainError", tostring(abi_err), {
+            expected_abi = "official Lua 5.1 through 5.5",
+        })
+    end
+    local identity, interpreter_err = luaInterpreter(opts, expected_abi)
+    if not identity then
         return nil, interpreter_err
     end
     local work_dir, work_err = makePrivateWorkDir("require-trace")
@@ -653,9 +701,9 @@ local function runtimePlan(opts)
     for _, value in ipairs(opts.run_args or {}) do
         args[#args + 1] = value
     end
-    local command = process.command(interpreter, args) or interpreter
+    local command = process.command(identity.path, args) or identity.path
 
-    local ok, output = process.outputCommand(interpreter, args)
+    local ok, output = process.outputCommand(identity.path, args)
     if not ok then
         local message = "Runtime require tracing failed"
         if tostring(output):find(
@@ -831,6 +879,10 @@ local function runtimePlan(opts)
         libraries = libraries,
         trace = trace,
         source_hashes = source_hashes,
+        discovery = {
+            mode = "runtime",
+            interpreter = identity,
+        },
     }
 end
 
@@ -859,6 +911,7 @@ function M.plan(opts, config)
     if not raw then
         return nil, err
     end
+    raw.discovery = raw.discovery or { mode = mode }
 
     local planned, manual_err = applyManualInputs(raw, opts)
     if not planned then

@@ -20,6 +20,7 @@ local fs = require("luainstaller.fs")
 local hash = require("luainstaller.hash")
 local path = require("luainstaller.path")
 local compat = require("luainstaller.compat")
+local lua_abi = require("luainstaller.lua_abi")
 
 -- ============================================================
 -- Path Utilities
@@ -39,21 +40,6 @@ local NATIVE_EXTENSIONS = {
     [".so"]    = true,
     [".dll"]   = true,
     [".dylib"] = true,
-}
-
---@description: Set of Lua builtin module names that require no file
---@const: BUILTIN_MODULES
-local BUILTIN_MODULES = {
-    ["_G"]        = true,
-    ["coroutine"] = true,
-    ["debug"]     = true,
-    ["io"]        = true,
-    ["math"]      = true,
-    ["os"]        = true,
-    ["package"]   = true,
-    ["string"]    = true,
-    ["table"]     = true,
-    ["utf8"]      = true,
 }
 
 --@description: Default maximum dependency count
@@ -851,7 +837,8 @@ end
 --@param module_name: string - Dot-separated module name
 --@return: boolean - True when the module name is a builtin name
 function ModuleResolver:isBuiltin(module_name)
-    return BUILTIN_MODULES[module_name] == true
+    local abi = lua_abi.current()
+    return abi ~= nil and lua_abi.isBuiltin(abi, module_name)
 end
 
 --@description: Collect a deduplicated list of search directory descriptions

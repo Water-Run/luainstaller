@@ -218,7 +218,7 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         $env:LUAI_SYNTAX_FILE = $file.FullName
         Invoke-Native $lua @('-e','assert(loadfile(os.getenv([[LUAI_SYNTAX_FILE]])))')
     }
-    foreach ($test in @('version_contract.lua','cli_split_smoke.lua','windows_native.lua','toolchain_native.lua',
+    foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','windows_native.lua','toolchain_native.lua',
         'luarocks_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }

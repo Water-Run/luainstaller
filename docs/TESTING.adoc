@@ -19,6 +19,7 @@ From the repository root, with the official interpreter under test:
 [source,bash]
 ----
 LUA=${LUA:-lua}
+"$LUA" test/lua_abi.lua
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/production_edges.lua
@@ -29,6 +30,9 @@ luarocks lint luainstaller-1.0.0-1.rockspec
 [cols="2,3",options="header"]
 |===
 |Suite |Covers
+
+|`test/lua_abi.lua`
+|Exact official-Lua ABI and builtin-module capability table
 
 |`test/cli_split_smoke.lua`
 |`luai` vs `luainstaller` grammar split
@@ -98,7 +102,9 @@ powershell.exe -NoLogo -NoProfile -NonInteractive `
   -HostLabel <label>
 ----
 
-A release requires all five versions.
+A release requires all five versions. Each per-version evidence log must
+contain `lua ABI capabilities ok`, proving the ABI-specific `utf8` and `bit32`
+classification under the actual pinned interpreter.
 
 [#testing-systems]
 == Tested system types
