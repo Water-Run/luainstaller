@@ -69,7 +69,7 @@ A static-only Lua install without a shared library cannot satisfy the
 shared-runtime Linux profile. Custom installs may set `PKG_CONFIG_PATH`.
 Candidate filtering happens before the compiler probe: Linux/generic POSIX
 rejects static archives, macOS rejects shared liblua, and Windows rejects
-static archives. luainstaller 1.0 rejects Windows x86 and ARM64 with
+static archives. luainstaller 1.1 rejects Windows x86 and ARM64 with
 `UnsupportedPlatformError`; its Windows native profile is x86_64 only.
 
 MSVC builds use the static multithreaded CRT (`/MT`) for the Lua DLL, launcher,

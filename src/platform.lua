@@ -84,7 +84,7 @@ function M.profile(opts)
     if target_os == "windows" and target_arch ~= "x86_64" then
         return nil, result.error(
             "UnsupportedPlatformError",
-            "luainstaller 1.0 supports native Windows x86_64 builds only",
+            "luainstaller 1.1 supports native Windows x86_64 builds only",
             {
                 host_os = host.os,
                 host_arch = host_arch,

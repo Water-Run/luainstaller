@@ -43,7 +43,7 @@ local M = {}
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.0.0"
+M.VERSION = "1.1.0"
 
 --@description: Package author name
 --@const: AUTHOR
