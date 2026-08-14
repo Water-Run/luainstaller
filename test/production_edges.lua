@@ -6,8 +6,8 @@ Author:
 File:
     production_edges.lua
 Date:
-    2026-07-11
 Updated:
+    2026-07-29
     2026-07-29
     2026-07-29
 ]]
@@ -1105,6 +1105,53 @@ test("BOM and shebang normalization preserves source lines", function()
     assert(loadText(prepared, "=prepared", {}))
     assertEqual(#analyzer.LuaLexer.new(source, "shebang.lua"):extractRequires(), 0, "shebang requires")
     assertEqual(runtime.stripSource(source):sub(1, 1), "\n", "runtime shebang newline")
+end)
+
+test("embedded bootstrap and in-process runtime stay behaviorally equivalent", function()
+    local cgen = require("luainstaller.cgen")
+    local runtime = require("luainstaller.runtime")
+    local compat = require("luainstaller.compat")
+
+    local embedded_chunk = assert(compat.loadText(
+        cgen.runtimeSource
+            .. "\nreturn { stripSource = stripSource, install = install, run = run }",
+        "@embedded-runtime-probe",
+        _G
+    ))
+    local embedded = embedded_chunk()
+    for _, source in ipairs({
+        "plain source",
+        "\239\187\191bom",
+        "#!/usr/bin/env lua\nbody",
+        "#!shebang\r\nbody",
+        "#!shebang-no-newline",
+        "",
+        "#!\n",
+    }) do
+        assertEqual(runtime.stripSource(source), embedded.stripSource(source),
+            "stripSource drift: " .. tostring(source))
+    end
+
+    local payload = {
+        entry = {
+            path = "parity-entry.lua",
+            source = "local m = require('parity_module'); return m.value, 7",
+        },
+        modules = {
+            parity_module = {
+                path = "parity-module.lua",
+                source = "return { value = 41 }",
+            },
+        },
+    }
+    local runtime_results = compat.pack(runtime.run(payload, { "run-arg" }, "parity-arg0"))
+    local embedded_results = compat.pack(embedded.run(payload, { "run-arg" }, "parity-arg0"))
+    assertEqual(runtime_results.n, 2, "runtime return arity")
+    assertEqual(embedded_results.n, runtime_results.n, "return arity drift")
+    assertEqual(runtime_results[1], 41, "runtime first return")
+    assertEqual(runtime_results[2], 7, "runtime second return")
+    assertEqual(embedded_results[1], runtime_results[1], "first return drift")
+    assertEqual(embedded_results[2], runtime_results[2], "second return drift")
 end)
 
 test("bit32 resolution follows the selected Lua ABI", function()
@@ -3571,6 +3618,41 @@ test("target launcher enforces the selected Lua ABI", function()
             source_name .. " launcher does not separate arg[0] from its real path")
         assert(source:find('lua_setglobal(L, "__luai_executable_path");', 1, true),
             source_name .. " launcher cannot locate bundle metadata through symlinks")
+    end
+
+    if package.config:sub(1, 1) == "/" then
+        local toolchain = require("luainstaller.toolchain")
+        local process = require("luainstaller.process")
+        local config, config_err = toolchain.resolve()
+        assert(config, config_err and config_err.error and config_err.error.message)
+        local root = makeTempDir("launcher-template-parity")
+        local outputs = {}
+        for _, pair in ipairs({
+            { name = "embedded", source = generated },
+            { name = "file", source = file_template_source },
+        }) do
+            local source_path = root .. "/" .. pair.name .. ".c"
+            local exe = root .. "/" .. pair.name
+            writeFile(source_path, pair.source)
+            local compiled, compile_output = toolchain.compile(
+                config, source_path, exe, {
+                    work_dir = root,
+                    rpath = config.library_dir or "",
+                }
+            )
+            assert(compiled, pair.name .. " compile: " .. tostring(compile_output))
+            local run_environment = {
+                LUA_PATH = "", LUA_CPATH = "", LUA_INIT = "",
+            }
+            if config.library_dir then
+                run_environment.LD_LIBRARY_PATH = config.library_dir
+            end
+            local ran, output = process.outputCommand(exe, { "parity" }, run_environment)
+            assert(ran, pair.name .. " run: " .. tostring(output))
+            outputs[#outputs + 1] = output
+        end
+        assertEqual(outputs[1], outputs[2], "launcher template run parity")
+        removeTree(root)
     end
 
     local cgen = require("luainstaller.cgen")

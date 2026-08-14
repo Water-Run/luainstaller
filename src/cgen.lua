@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-11
+    2026-07-29
 ]]
 
 local fs = require("luainstaller.fs")
@@ -265,7 +265,8 @@ end
 
 -- RUNTIME_SOURCE is embedded into the C launcher bootstrap.
 -- Functionally similar to src/runtime.lua (Lua API / tests) but maintained
--- independently. When changing bootstrap behavior, check both files.
+-- independently. When changing bootstrap behavior, check both files; the
+-- equivalence contract lives in test/production_edges.lua.
 local RUNTIME_SOURCE = [=[
 local function pathDirname(path)
   path = tostring(path or ""):gsub("\\", "/")
@@ -383,6 +384,9 @@ local function run(payload, run_args, application_arg0)
   return unpackValues(results, 2, results.n)
 end
 ]=]
+
+-- Exposed for the runtime-pair equivalence contract in production_edges.
+M.runtimeSource = RUNTIME_SOURCE
 
 function M.generateBootstrap(opts)
     local payload = M.buildPayload(opts)
