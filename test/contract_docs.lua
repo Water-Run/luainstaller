@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-17
+    2026-07-29
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -531,6 +531,15 @@ local function check_documentation_contract()
     assert_contains(testing, "native build and run on physical hosts")
     assert_contains(testing, "cross-compilers are not substitutes")
     assert_contains(testing, "tip of `main`")
+
+    local benchmark = read_file("tools/benchmark-real-world.sh")
+    local realworld_cases = read_file("REALWORLD_TEST_CASES.txt")
+    assert_not_contains(testing, "--require-engine")
+    assert_not_contains(benchmark, "--require-engine")
+    assert_not_contains(realworld_cases, "--require-engine")
+    assert_contains(benchmark, [[-d "$discovery"]])
+    assert_contains(realworld_cases, "-d static")
+    assert_contains(realworld_cases, "-d <static|runtime>")
 
     local readme = read_file("README.adoc")
     assert_contains(readme, "luai")

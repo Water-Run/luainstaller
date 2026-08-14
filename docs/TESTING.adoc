@@ -245,7 +245,7 @@ The matrix covers:
 
 * baseline (hello world)
 * pure Lua multi-module
-* dynamic require (`--require-engine runtime`)
+* dynamic require (`-d runtime`)
 * native C modules (`lua-cjson`, `LuaSocket`)
 * luafilesystem (`luafilesystem`)
 * `neovim` `runtime/lua` scale stress

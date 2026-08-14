@@ -178,12 +178,12 @@ run_case() {
     fi
 
     run_cmd "$name analyze" "$out/analyze.log" "$expect_fail" \
-        env "${env_prefix[@]}" "$LUAI_BIN" -a "$entry" --require-engine "$discovery" --max-deps "$max_deps" || true
+        env "${env_prefix[@]}" "$LUAI_BIN" -a "$entry" -d "$discovery" --max-deps "$max_deps" || true
 
     run_cmd "$name bundle(dir)" "$out/bundle-dir.log" "$expect_fail" \
-        env "${env_prefix[@]}" "$LUAI_BIN" -b --dir "$entry" --require-engine "$discovery" -o "$out/dir" --max-deps "$max_deps" || true
+        env "${env_prefix[@]}" "$LUAI_BIN" -b --dir "$entry" -d "$discovery" -o "$out/dir" --max-deps "$max_deps" || true
     run_cmd "$name bundle(file)" "$out/bundle-onefile.log" "$expect_fail" \
-        env "${env_prefix[@]}" "$LUAI_BIN" -b --file "$entry" --require-engine "$discovery" -o "$out/onefile" --max-deps "$max_deps" || true
+        env "${env_prefix[@]}" "$LUAI_BIN" -b --file "$entry" -d "$discovery" -o "$out/onefile" --max-deps "$max_deps" || true
 
     local exe_dir_name launcher_dir
     exe_dir_name=$(basename "$out/dir")
