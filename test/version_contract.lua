@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -162,6 +162,50 @@ local jit_result = require("luainstaller").analyze({
 rawset(_G, "jit", original_jit)
 assert(not jit_result.ok and jit_result.error.type == "UnsupportedLuaVersionError",
     "LuaJIT-compatible runtimes must be rejected")
+
+-- v1.1: compiler classification pins clang-cl to the MSVC flag family.
+local toolchain = require("luainstaller.toolchain")
+for _, name in ipairs({ "cl", "cl.exe", "CL.EXE", "clang-cl", "clang-cl.exe" }) do
+    assert(toolchain.compilerFamily(name) == "msvc",
+        "compiler must classify as MSVC-family: " .. tostring(name))
+end
+for _, name in ipairs({ "clang", "clang.exe", "clang++" }) do
+    assert(toolchain.compilerFamily(name) == "clang",
+        "compiler must classify as clang: " .. tostring(name))
+end
+assert(toolchain.compilerFamily("gcc") == "gcc")
+assert(toolchain.compilerFamily("cc") == "gcc")
+
+-- v1.1: the toolchain layer itself rejects LuaJIT and Lua >= 5.6 ABIs
+-- (defense in depth below the analyze gate), before any compiler probe.
+for _, synthetic in ipairs({
+    { version = "Lua 5.6", major = 5, minor = 6, num = 506, official = true },
+    { version = "Lua 5.1", major = 5, minor = 1, num = 501, official = false },
+}) do
+    local resolved, resolve_error = toolchain.resolve({ lua_version = synthetic })
+    assert(resolved == nil, "toolchain must reject unsupported Lua versions")
+    assert(resolve_error and resolve_error.error
+        and resolve_error.error.type == "UnsupportedLuaVersionError",
+        "toolchain must report UnsupportedLuaVersionError, got: "
+            .. tostring(resolve_error and resolve_error.error and resolve_error.error.type))
+end
+
+-- v1.1: launcher generation applies the same ABI contract.
+local launcher = require("luainstaller.launcher")
+for _, synthetic in ipairs({
+    { version = "Lua 5.6", major = 5, minor = 6, num = 506, official = true },
+    { version = "Lua 5.1", major = 5, minor = 1, num = 501, official = false },
+}) do
+    local generated_ok, generated_error = pcall(launcher.generateSource, {
+        entry = "test/runtime_bundle/main.lua",
+        dependencies = { scripts = {}, libraries = {} },
+        lua_version = synthetic,
+    })
+    assert(not generated_ok, "launcher must reject unsupported Lua versions")
+    assert(type(generated_error) == "table"
+        and generated_error.type == "UnsupportedLuaVersionError",
+        "launcher must raise UnsupportedLuaVersionError")
+end
 
 local runtime = require("luainstaller.runtime")
 local returned = compat.pack(runtime.run({

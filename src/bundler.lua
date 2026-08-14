@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -600,8 +600,13 @@ local function selectedLuaVersion(manifest)
         major, minor = tostring(current and current.version or ""):match("Lua%s+(%d+)%.(%d+)")
         major, minor = tonumber(major), tonumber(minor)
     end
-    if major ~= 5 or not minor or minor < 1 then
-        return nil, makeError("UnsupportedLuaVersionError", "Bundle manifest requires an official Lua 5.1+ ABI", {
+    if current and current.official == false then
+        return nil, makeError("UnsupportedLuaVersionError", "Bundle manifest must use an official Lua interpreter", {
+            lua_version = current.version,
+        })
+    end
+    if major ~= 5 or not minor or minor < 1 or minor > 5 then
+        return nil, makeError("UnsupportedLuaVersionError", "Bundle manifest requires an official Lua 5.1 through 5.5 ABI", {
             lua_version = current and current.version,
         })
     end

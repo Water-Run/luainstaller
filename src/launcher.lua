@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-11
+    2026-07-29
 ]]
 
 local cgen = require("luainstaller.cgen")
@@ -202,10 +202,17 @@ local function luaVersionInfo(configured)
     local major = tonumber(current.major)
     local minor = tonumber(current.minor)
     local number = tonumber(current.num) or (major and minor and (major * 100 + minor))
-    if major ~= 5 or not minor or minor < 1 or not number then
+    if current.official == false then
         error({
             type = "UnsupportedLuaVersionError",
-            message = "A supported official Lua 5.1+ ABI is required to generate a launcher",
+            message = "LuaJIT and other non-official Lua runtimes are not supported",
+            lua_version = current.version,
+        })
+    end
+    if major ~= 5 or not minor or minor < 1 or minor > 5 or not number then
+        error({
+            type = "UnsupportedLuaVersionError",
+            message = "A supported official Lua 5.1 through 5.5 ABI is required to generate a launcher",
             lua_version = current.version,
         })
     end

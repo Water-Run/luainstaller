@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local compat = require("luainstaller.compat")
@@ -43,10 +43,17 @@ local function luaVersionInfo(configured)
         major, minor = tostring(current.version or ""):match("Lua%s+(%d+)%.(%d+)")
         major, minor = tonumber(major), tonumber(minor)
     end
-    if major ~= 5 or not minor or minor < 1 then
+    if current.official == false then
         return nil, makeError(
             "UnsupportedLuaVersionError",
-            "A supported official Lua 5.1+ ABI is required",
+            "LuaJIT and other non-official Lua runtimes are not supported",
+            { lua_version = current.version }
+        )
+    end
+    if major ~= 5 or not minor or minor < 1 or minor > 5 then
+        return nil, makeError(
+            "UnsupportedLuaVersionError",
+            "A supported official Lua 5.1 through 5.5 ABI is required",
             { lua_version = current.version }
         )
     end
@@ -83,11 +90,19 @@ end
 
 local function compilerFamily(command)
     local name = path.basename(command):lower()
-    if name == "cl" or name == "cl.exe" then return "msvc" end
+    if name == "cl" or name == "cl.exe"
+        or name == "clang-cl" or name == "clang-cl.exe" then
+        return "msvc"
+    end
     if name:find("clang", 1, true) then return "clang" end
     if name:find("gcc", 1, true) or name == "cc" then return "gcc" end
     return "cc"
 end
+
+--@description: Classify a compiler command into its flag family
+--@param command: string - Compiler command name or path
+--@return: string - "msvc", "clang", "gcc", or "cc"
+M.compilerFamily = compilerFamily
 
 local function commandAvailable(command, family, environment)
     local argument = family == "msvc" and "/?" or "--version"

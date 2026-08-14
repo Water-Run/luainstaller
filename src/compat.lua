@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-22
 Updated:
-    2026-07-14
+    2026-07-29
 ]]
 
 local platform = require("luainstaller.platform")
@@ -285,13 +285,6 @@ function M.diagnose(opts)
 
     if library_count > 0 then
         warnings[#warnings + 1] = "native Lua C modules may require external shared libraries that are not automatically closed over"
-    end
-
-    if profile.target_os ~= host.os then
-        warnings[#warnings + 1] = "target profile differs from the build host; verify with the target runtime"
-    end
-    if profile.target_arch ~= platform.normalizeArch(host.arch) then
-        warnings[#warnings + 1] = "target architecture differs from the build host; verify every native dependency"
     end
 
     if profile.target_os == "windows" then

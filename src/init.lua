@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 
@@ -366,10 +366,11 @@ local function analyzeContext(opts, config)
     config = config or {}
     local lua_version = compat.luaVersion()
     if lua_version.major ~= 5 or not lua_version.minor
-        or lua_version.minor < 1 or not lua_version.official then
+        or lua_version.minor < 1 or lua_version.minor > 5
+        or not lua_version.official then
         return nil, makeError(
             "UnsupportedLuaVersionError",
-            "luainstaller requires an official Lua 5.1 or newer interpreter",
+            "luainstaller requires an official Lua 5.1 through 5.5 interpreter",
             {
                 version = lua_version.version,
                 abi = lua_version.abi,
