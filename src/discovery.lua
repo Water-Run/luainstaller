@@ -9,6 +9,7 @@ Date:
     2026-06-21
 Updated:
     2026-07-29
+    2026-07-29
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -351,14 +352,18 @@ local function finalizeSourceSnapshots(plan, opts, initial_source_hashes)
         local canonical = normalizePath(absolutePath(source_path))
         if not verified[canonical] then
             verified[canonical] = true
-            local content, read_err = fs.readRegularFile(canonical)
             local expected_hash = source_hashes[canonical]
-            if content == nil then
+            if fs.pathType(canonical) ~= "file" then
                 return nil, sourceChanged(canonical, expected_hash, nil, {
-                    cause = read_err,
+                    cause = "path is not a regular file",
                 })
             end
-            local actual_hash = hash.sha256(content)
+            local actual_hash, hash_err = hash.sha256File(canonical)
+            if actual_hash == nil then
+                return nil, sourceChanged(canonical, expected_hash, nil, {
+                    cause = hash_err,
+                })
+            end
             if expected_hash and expected_hash ~= actual_hash then
                 return nil, sourceChanged(canonical, expected_hash, actual_hash)
             end

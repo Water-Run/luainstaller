@@ -9,6 +9,7 @@ Date:
     2026-06-21
 Updated:
     2026-07-29
+    2026-07-29
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -229,15 +230,15 @@ local function listTree(root)
         elseif listed_item.type == "directory" then
             item.kind = "dir"
         elseif listed_item.type == "file" then
-            local content, read_err = fs.readRegularFile(absolute)
-            if content == nil then
-                return nil, invalidOutputInventory(root, "Cannot read generated output file", {
+            local file_hash, hash_err = hash_mod.sha256File(absolute)
+            if file_hash == nil then
+                return nil, invalidOutputInventory(root, "Cannot hash generated output file", {
                     unexpected_path = absolute,
-                    cause = read_err,
+                    cause = hash_err,
                 })
             end
             item.kind = "file"
-            item.hash = hash_mod.sha256(content)
+            item.hash = file_hash
         else
             return nil, invalidOutputInventory(root, "Output tree contains an unsupported file type", {
                 unexpected_path = absolute,

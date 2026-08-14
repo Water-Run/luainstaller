@@ -9,6 +9,7 @@ Date:
     2026-07-11
 Updated:
     2026-07-29
+    2026-07-29
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -349,6 +350,16 @@ test("sha256 matches the host across block boundaries and binary data", function
         writeFile(path, content)
         local expected = commandOutputTrimmed("sha256sum " .. shellQuote(path)):match("^[0-9a-f]+")
         assertEqual(hash.sha256(content), expected, "SHA-256 size " .. size)
+        assertEqual(hash.sha256File(path), expected, "SHA-256 file size " .. size)
+        local state = hash.newSha256()
+        local chunk = 1
+        while chunk <= size do
+            local next_chunk = math.min(chunk + 3, size)
+            assert(hash.updateSha256(state, content:sub(chunk, next_chunk)) == true)
+            chunk = next_chunk + 1
+        end
+        assertEqual(hash.finalizeSha256(state), expected,
+            "SHA-256 streaming size " .. size)
     end
     removeTree(root)
 end)
