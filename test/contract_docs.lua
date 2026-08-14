@@ -565,6 +565,17 @@ local function check_documentation_contract()
     local rockspec = read_file("luainstaller-1.1.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 6.0"')
 
+    local tool_scripts = table.concat({
+        read_file("tools/test-lua-versions.sh"),
+        read_file("tools/test-lua-versions.ps1"),
+        read_file("tools/remote-test-linux.sh"),
+        read_file("tools/remote-test-macos.sh"),
+        read_file("tools/remote-test-windows.sh"),
+        read_file("tools/benchmark-real-world.sh"),
+    }, "\n")
+    assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
+
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",
         "docs",

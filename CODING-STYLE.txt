@@ -123,7 +123,13 @@ Required checks
 ---------------
 
     find src -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
-    find tools -type f -name '*.sh' -print0 | xargs -0 -n1 sh -n
+    for script in tools/*.sh; do
+        if head -1 "$script" | grep -q bash; then
+            bash -n "$script"
+        else
+            sh -n "$script"
+        fi
+    done
     git diff --check
     lua test/cli_split_smoke.lua
     lua test/contract_docs.lua

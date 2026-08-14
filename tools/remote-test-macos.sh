@@ -224,7 +224,7 @@ export LUAI_LUA_PREFIX LUAI_LUA_RELEASE PKG_CONFIG_PATH
 
 "$TEST_LUA" -e 'require("cjson"); require("lfs"); require("socket.core"); require("mimetypes"); require("zlib"); require("pegasus"); require("lsqlite3")'
 "$TEST_LUAROCKS" make --force --deps-mode=none --tree "$INSTALL_ROOT" \
-    luainstaller-1.0.0-1.rockspec
+    luainstaller-1.1.0-1.rockspec
 "$INSTALL_ROOT/bin/luai" -v
 
 bundle() {
