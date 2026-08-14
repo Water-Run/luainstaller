@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -894,7 +894,7 @@ local function check_remote_onefile_script_coverage()
     assert_contains(macos, "native-deps-5.4.8")
     assert_not_contains(macos, "command -v lua")
     assert_not_contains(macos, " install --force lua-")
-    assert_contains(macos, "git archive --format=tar HEAD")
+    assert_contains(macos, "git -c tar.umask=0022 archive --format=tar HEAD")
     assert_contains(macos, "tools/test-lua-versions.sh")
 
     local windows = read_file("tools/remote-test-windows.sh")
@@ -912,7 +912,7 @@ local function check_remote_onefile_script_coverage()
     assert_contains(linux, "make --force --deps-mode=none")
     assert_not_contains(linux, "command -v lua")
     assert_not_contains(linux, " install --force lua-")
-    assert_contains(linux, "git archive --format=tar HEAD")
+    assert_contains(linux, "git -c tar.umask=0022 archive --format=tar HEAD")
     assert_contains(linux, "tools/test-lua-versions.sh")
     print("remote onefile script coverage ok")
 end
