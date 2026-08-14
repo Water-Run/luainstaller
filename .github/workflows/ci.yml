@@ -13,7 +13,7 @@ on:
 
 jobs:
   local-suites:
-    name: local suites (system Lua)
+    name: local suites (pinned shared Lua 5.4)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,17 +21,17 @@ jobs:
       - name: Install build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y lua5.4 luarocks gcc liblua5.4-dev pkg-config
+          sudo apt-get install -y build-essential curl ca-certificates luarocks
+
+      - name: Build pinned shared Lua 5.4.8
+        run: |
+          sh tools/ci-build-lua54.sh
+          "$HOME/luai-lua/bin/lua" -v
 
       - name: Syntax and shell checks
         run: |
-          if command -v luac >/dev/null 2>&1; then
-            lua_compiler=luac
-          else
-            lua_compiler=luac5.4
-          fi
           find src -type f -name '*.lua' -print0 \
-            | xargs -0 -n1 "$lua_compiler" -p
+            | xargs -0 -n1 "$HOME/luai-lua/bin/luac" -p
           for script in tools/*.sh; do
             if head -1 "$script" | grep -q bash; then
               bash -n "$script"
@@ -42,13 +42,26 @@ jobs:
           git diff --check
 
       - name: Fast contract suites
+        env:
+          PATH: $HOME/luai-lua/bin:$PATH
+          LUAI_TEST_LUA: $HOME/luai-lua/bin/lua
+          LUAI_TEST_LUAC: $HOME/luai-lua/bin/luac
         run: |
+          lua -v
           lua test/lua_abi.lua
           lua test/version_contract.lua
           lua test/cli_split_smoke.lua
           lua test/contract_docs.lua
 
       - name: Edge and safety suites
+        env:
+          PATH: $HOME/luai-lua/bin:$PATH
+          LUAI_TEST_LUA: $HOME/luai-lua/bin/lua
+          LUAI_TEST_LUAC: $HOME/luai-lua/bin/luac
+          LUAI_LUA_PREFIX: $HOME/luai-lua
+          LUAI_LUA_RELEASE: 5.4.8
+          LUAI_LUA_SOURCE_SHA256: 4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
+          PKG_CONFIG_PATH: $HOME/luai-lua/lib/pkgconfig
         run: |
           lua test/production_edges.lua
           lua test/onefile_lifecycle.lua
@@ -56,7 +69,30 @@ jobs:
           lua test/reproducible_artifacts.lua
           lua test/build_interruption.lua
 
+      - name: Install sample native dependencies
+        run: sh tools/ci-install-sample-deps.sh
+
+      - name: Wire luarocks to the pinned Lua
+        run: |
+          sudo apt-get install -y --no-install-recommends lua5.4 liblua5.4-dev luarocks
+          mkdir -p "$HOME/bin"
+          printf '%s\n' '#!/bin/sh' \
+            'exec /usr/bin/luarocks-5.4 --lua-dir="$HOME/luai-lua" "$@"' \
+            > "$HOME/bin/luarocks"
+          chmod +x "$HOME/bin/luarocks"
+
       - name: Comprehensive smoke audit
+        env:
+          PATH: $HOME/bin:$HOME/luai-lua/bin:$PATH
+          LUAI_TEST_LUA: $HOME/luai-lua/bin/lua
+          LUAI_TEST_LUAC: $HOME/luai-lua/bin/luac
+          LUAI_LUA_PREFIX: $HOME/luai-lua
+          LUAI_LUA_RELEASE: 5.4.8
+          LUAI_LUA_SOURCE_SHA256: 4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
+          PKG_CONFIG_PATH: $HOME/luai-lua/lib/pkgconfig
+          LD_LIBRARY_PATH: $HOME/luai-lua/lib:$HOME/luai-rocks/lib/lua/5.4
+          LUA_PATH: $HOME/luai-rocks/share/lua/5.4/?.lua;;
+          LUA_CPATH: $HOME/luai-rocks/lib/lua/5.4/?.so;;
         run: lua test/smoke_all.lua
 
   version-matrix:
