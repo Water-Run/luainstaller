@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local function localFileExists(path)
@@ -248,10 +248,30 @@ function ArgumentParser:consume()
     return value
 end
 
+local KNOWN_OPTION_TOKENS = {
+    ["-a"] = true, ["-t"] = true, ["-b"] = true, ["-h"] = true, ["-v"] = true,
+    ["-o"] = true, ["-d"] = true,
+    ["--dir"] = true, ["--onedir"] = true, ["--file"] = true, ["--onefile"] = true,
+    ["--out"] = true, ["--include"] = true, ["--exclude"] = true,
+    ["--target-os"] = true, ["--lua"] = true, ["--lua-prefix"] = true,
+    ["--discovery-mode"] = true, ["--no-depscan"] = true, ["--max-deps"] = true,
+    ["--verbose"] = true, ["--"] = true,
+}
+
 function ArgumentParser:consumeValue(option_name)
     local value = self:consume()
     if value == nil then
         return nil, string.format("%s requires a value", option_name)
+    end
+    -- A value that is itself a recognized option token is almost always a
+    -- misplaced option (luai -b entry -o --dir). Dash-prefixed paths remain
+    -- valid values as long as they do not collide with a known option.
+    if type(value) == "string" and KNOWN_OPTION_TOKENS[value] then
+        return nil, string.format(
+            "%s requires a value; got the option-like token %s",
+            option_name,
+            value
+        )
     end
     return value
 end

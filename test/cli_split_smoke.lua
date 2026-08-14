@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-24
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 package.preload["luainstaller.lua_abi"] = function() return dofile("src/lua_abi.lua") end
@@ -125,6 +125,27 @@ assert_contains(out, "ok")
 assert_contains(out, "scripts:")
 assert_not_contains(out, "\27[")
 assert(err == "")
+
+code, out, err = run_cli("luai", {
+    "-a",
+    "test/runtime_bundle/main.lua",
+    "-o",
+    "--dir",
+})
+assert(code == 1)
+assert(out == "")
+assert_contains(err, "-o requires a value")
+assert_contains(err, "--dir")
+
+code, out, err = run_cli("luai", {
+    "-b",
+    "test/runtime_bundle/main.lua",
+    "--max-deps",
+    "--dir",
+})
+assert(code == 1)
+assert(out == "")
+assert_contains(err, "--max-deps requires a value")
 
 code, out, err = run_cli("luainstaller", {
     "analyze",

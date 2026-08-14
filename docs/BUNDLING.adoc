@@ -118,6 +118,11 @@ paths, the output path, and manual include paths remain only in the in-memory
 build result and diagnostics; they are not serialized into the bundle.
 Sources are re-read before embed/copy; mismatch → `SourceChangedError`.
 
+Pure-Lua destinations under `.luai/lua/` are logical identifiers for sources
+embedded in the launcher; no such directory exists in the tree. Native module
+destinations in `.luai/native/` are the real staged files, including nested
+alias copies such as `.luai/native/socket/core.so`.
+
 With identical inputs and toolchain, builds made under different checkout
 roots produce byte-identical onefile artifacts. Generated bootstrap chunk
 names and manifest trace references use the same logical source IDs, so
@@ -168,8 +173,12 @@ suspended, assigns it to a kill-on-close Job Object, and resumes it only after
 containment succeeds; forcefully terminating the outer process therefore also
 terminates the inner process tree.
 
-Cache hits require full-byte equality. After confirming no process uses the
-cache:
+Cache hits require full-byte equality. The embedded payload ID is a cache
+deduplication key, **not an integrity or authenticity boundary**: an unsigned
+single-file executable can be tampered with, and extraction reproduces
+whatever bytes the binary embeds. Sign or otherwise verify the executable
+itself when the distribution channel requires it. After confirming no process
+uses the cache:
 
 [source,bash]
 ----

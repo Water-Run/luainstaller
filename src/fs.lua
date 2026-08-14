@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-07-14
+    2026-07-29
 ]]
 
 local process = require("luainstaller.process")
@@ -80,7 +80,14 @@ local function trustedRootDirectoryLink(path)
     local listed, output = process.output("LC_ALL=C ls -ldn " .. quoted)
     if not listed then return false end
     local owner = tostring(output):match("^%S+%s+%d+%s+(%d+)%s+")
-    return owner == "0"
+    if owner ~= "0" then return false end
+    -- The resolved target must itself be a root-owned directory; a root-owned
+    -- link to a user-controlled directory is not a system path.
+    local resolved, target_output = process.output("LC_ALL=C ls -ldnL " .. quoted)
+    if not resolved then return false end
+    local target_line = tostring(target_output)
+    local target_owner = target_line:match("^%S+%s+%d+%s+(%d+)%s+")
+    return target_line:sub(1, 1) == "d" and target_owner == "0"
 end
 
 local function windowsPathExpression(path)
@@ -407,6 +414,9 @@ function M.copyFile(source, destination)
         return true
     end
     if M.pathType(source) ~= "file" then return nil, "source is not a regular file" end
+    if M.pathType(destination) ~= "missing" then
+        return nil, "destination already exists"
+    end
     local ok, output = process.output(
         "cp " .. process.quote(source) .. " " .. process.quote(destination)
     )

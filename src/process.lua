@@ -10,7 +10,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-14
+    2026-07-29
 ]]
 
 local M = {}
@@ -42,6 +42,13 @@ local function base64Encode(value)
     return table.concat(output)
 end
 
+-- CreateProcess-style argument quoting (backslash/double-quote rules). This
+-- is NOT safe for cmd.exe command lines: cmd.exe additionally interprets
+-- % ^ & | < > and () metacharacters. Product data paths use the PowerShell
+-- ProcessStartInfo backend (outputCommand) or base64-decoded PowerShell
+-- expressions, never a raw cmd.exe string built from external data. Callers
+-- that build raw strings for M.output on Windows remain responsible for
+-- cmd.exe quoting.
 local function windowsQuote(value)
     value = tostring(value or "")
     if value == "" then return '""' end
@@ -175,10 +182,16 @@ function M.windowsPowerShellPath()
     return root .. "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
 end
 
-function M.output(command)
+local hasTimeoutUtility
+local timeout_utility_available
+
+function M.output(command, opts)
     if type(io.popen) ~= "function" then
         return false, "io.popen is not available in this Lua runtime"
     end
+    -- On Windows the command string is interpreted by cmd.exe, whose
+    -- metacharacter set differs from CreateProcess quoting (see windowsQuote).
+    opts = opts or {}
     local invocation = command .. " 2>&1"
     local legacy_token
     if _VERSION == "Lua 5.1" then
@@ -187,6 +200,11 @@ function M.output(command)
         else
             invocation, legacy_token = legacyPosixInvocation(command)
         end
+    end
+    if not IS_WINDOWS and type(opts.timeout_seconds) == "number"
+        and opts.timeout_seconds > 0 and hasTimeoutUtility() then
+        invocation = "timeout " .. tostring(math.floor(opts.timeout_seconds))
+            .. " sh -c " .. M.quote(invocation)
     end
     local ok, pipe = pcall(io.popen, invocation, "r")
     if not ok or not pipe then
@@ -208,6 +226,18 @@ function M.output(command)
         return true, output
     end
     return false, output
+end
+
+hasTimeoutUtility = function()
+    if timeout_utility_available == nil then
+        if IS_WINDOWS then
+            timeout_utility_available = false
+        else
+            local ok, _ = M.output("command -v timeout >/dev/null 2>&1")
+            timeout_utility_available = (ok == true)
+        end
+    end
+    return timeout_utility_available
 end
 
 function M.quote(value)
@@ -327,7 +357,8 @@ function M.inputPowerShell(script, input)
     return true
 end
 
-local function windowsOutputCommand(validated)
+local function windowsOutputCommand(validated, opts)
+    opts = opts or {}
     local powershell = M.windowsPowerShellPath()
     if not powershell then return false, "absolute Windows PowerShell path is unavailable" end
     local quoted_arguments = {}
@@ -338,6 +369,8 @@ local function windowsOutputCommand(validated)
         return "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
             .. base64Encode(value) .. "'))"
     end
+    local timeout_seconds = type(opts.timeout_seconds) == "number"
+        and opts.timeout_seconds > 0 and opts.timeout_seconds or nil
     local script = {
         "$ErrorActionPreference='Stop'",
         "$Start=New-Object System.Diagnostics.ProcessStartInfo",
@@ -357,23 +390,33 @@ local function windowsOutputCommand(validated)
     end
     script[#script + 1] = "try{$Child=New-Object System.Diagnostics.Process;$Child.StartInfo=$Start;"
         .. "if(-not $Child.Start()){exit 127};$OutTask=$Child.StandardOutput.ReadToEndAsync();"
-        .. "$ErrTask=$Child.StandardError.ReadToEndAsync();$Child.WaitForExit();"
-        .. "$Stdout=$OutTask.Result;$Stderr=$ErrTask.Result;$Code=$Child.ExitCode;"
+        .. "$ErrTask=$Child.StandardError.ReadToEndAsync();"
+    if timeout_seconds then
+        script[#script + 1] = "if(-not $Child.WaitForExit("
+            .. tostring(math.floor(timeout_seconds * 1000)) .. ")){"
+            .. "$Child.Kill($true);$Child.WaitForExit();"
+            .. "[Console]::OutputEncoding=$Utf8;"
+            .. "[Console]::Error.Write('luainstaller: command timed out after "
+            .. tostring(timeout_seconds) .. "s');exit 124};"
+    else
+        script[#script + 1] = "$Child.WaitForExit();"
+    end
+    script[#script + 1] = "$Stdout=$OutTask.Result;$Stderr=$ErrTask.Result;$Code=$Child.ExitCode;"
         .. "[Console]::OutputEncoding=$Utf8;[Console]::Out.Write($Stdout);"
         .. "[Console]::Error.Write($Stderr);exit $Code}catch{[Console]::Error.Write($_.Exception.Message);exit 127}"
     return M.outputPowerShell(table.concat(script, ";"))
 end
 
-function M.outputCommand(executable, arguments, environment)
+function M.outputCommand(executable, arguments, environment, opts)
     local validated, validation_err = validateCommand(executable, arguments, environment)
     if not validated then return false, validation_err end
-    if IS_WINDOWS then return windowsOutputCommand(validated) end
+    if IS_WINDOWS then return windowsOutputCommand(validated, opts) end
     local command = assert(M.command(
         validated.executable,
         validated.arguments,
         validated.environment
     ))
-    return M.output(command)
+    return M.output(command, opts)
 end
 
 function M.firstLine(command)

@@ -1793,6 +1793,33 @@ local function bundleOnedir(opts, lifecycle)
         end
     end
 
+    -- Record every staged native alias destination in the distribution
+    -- manifest, so the recorded module map matches the real artifact tree.
+    local native_alias_entries = {}
+    for _, entry in ipairs(manifest.modules.native or {}) do
+        local canonical = normalizePath(absolutePath(entry.source_path))
+        local destinations, dest_err = nativeDestinations(
+            entry.source_path,
+            native_names[canonical] or native_names[normalizePath(entry.source_path)],
+            ".luai/native",
+            profile.target_os
+        )
+        if not destinations then
+            return abandon(dest_err)
+        end
+        for index = 2, #destinations do
+            native_alias_entries[#native_alias_entries + 1] = {
+                source_path = entry.source_path,
+                source_id = entry.source_id,
+                destination_path = destinations[index],
+                content_hash = entry.content_hash,
+            }
+        end
+    end
+    for _, alias_entry in ipairs(native_alias_entries) do
+        manifest.modules.native[#manifest.modules.native + 1] = alias_entry
+    end
+
     local compile_ok, compile_output, compile_cmd = toolchain.compile(
         native_toolchain,
         c_path,

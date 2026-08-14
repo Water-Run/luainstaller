@@ -6,7 +6,6 @@ Author:
 File:
     toolchain.lua
 Date:
-    2026-07-14
 Updated:
     2026-07-29
 ]]
@@ -24,6 +23,25 @@ local M = {}
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
 local makeError = result.error
 local normalizePath = path.normalize
+
+-- External commands must not hang a build forever (compilers waiting on
+-- stdin or license servers are the classic case). LUAI_CMD_TIMEOUT overrides
+-- the compile default; probe runs keep a tighter bound.
+local COMPILE_TIMEOUT_SECONDS = 900
+local PROBE_TIMEOUT_SECONDS = 120
+local configured_timeout = tonumber(os.getenv("LUAI_CMD_TIMEOUT"))
+local function compileTimeout()
+    if type(configured_timeout) == "number" and configured_timeout > 0 then
+        return configured_timeout
+    end
+    return COMPILE_TIMEOUT_SECONDS
+end
+local function probeTimeout()
+    if type(configured_timeout) == "number" and configured_timeout > 0 then
+        return configured_timeout
+    end
+    return PROBE_TIMEOUT_SECONDS
+end
 
 local function trimmed(value)
     return (tostring(value or ""):gsub("%s+$", ""))
@@ -720,7 +738,9 @@ function M.compile(config, source_path, output_path, opts)
         end
         for _, value in ipairs(config.link_args or {}) do arguments[#arguments + 1] = value end
     end
-    local ok, output = process.outputCommand(config.cc, arguments, config.environment)
+    local ok, output = process.outputCommand(config.cc, arguments, config.environment, {
+        timeout_seconds = compileTimeout(),
+    })
     local descriptor = process.command(config.cc, arguments)
     return ok, output, descriptor
 end
@@ -787,7 +807,9 @@ function M.compileNativeModule(config, source_path, output_path, opts)
             end
         end
     end
-    local ok, output = process.outputCommand(config.cc, arguments, config.environment)
+    local ok, output = process.outputCommand(config.cc, arguments, config.environment, {
+        timeout_seconds = compileTimeout(),
+    })
     return ok, output, process.command(config.cc, arguments)
 end
 
@@ -837,7 +859,9 @@ function M.compileStandalone(config, source_path, output_path, opts)
             arguments[#arguments + 1] = "-ladvapi32"
         end
     end
-    local ok, output = process.outputCommand(config.cc, arguments, config.environment)
+    local ok, output = process.outputCommand(config.cc, arguments, config.environment, {
+        timeout_seconds = compileTimeout(),
+    })
     return ok, output, process.command(config.cc, arguments)
 end
 
@@ -961,7 +985,9 @@ local function verifyCandidate(config, candidate)
     elseif config.host.os == "macos" and config.library_dir then
         environment.DYLD_LIBRARY_PATH = config.library_dir
     end
-    local ran, run_output = process.outputCommand(executable_path, {}, environment)
+    local ran, run_output = process.outputCommand(executable_path, {}, environment, {
+        timeout_seconds = probeTimeout(),
+    })
     if not ran then
         cleanupProbeDirectory(directory)
         return nil, makeError("ToolchainError", "Linked Lua runtime or C-module probe failed", {

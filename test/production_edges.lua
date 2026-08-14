@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -21,6 +21,8 @@ local removeTree = harness.remove_tree
 local readFile = harness.read_file
 local writeFile = harness.write_file
 local shellQuote = harness.shell_quote
+local assert_contains = harness.assert_contains
+local assert_not_contains = harness.assert_not_contains
 local commandOutputTrimmed = harness.command_output_trimmed
 local runCommand = harness.run
 local commandResult = harness.command_result
@@ -136,6 +138,52 @@ test("native fixture exercises version-specific Lua C APIs", function()
     end
 end)
 
+test("onedir manifest records native alias destinations", function()
+    if package.config:sub(1, 1) ~= "/" then
+        return
+    end
+    local root = makeTempDir("native-alias-manifest")
+    local socket_dir = root .. "/socket"
+    makeDirectory(socket_dir)
+    local toolchain = require("luainstaller.toolchain")
+    compileNativeFixture("test/fixtures/native_probe.c", root .. "/warmup.so")
+    local extension = toolchain.nativeModuleExtension(native_fixture_config)
+    local module_path = socket_dir .. "/core." .. extension
+    compileNativeFixture("test/fixtures/native_probe.c", module_path)
+    writeFile(root .. "/main.lua", "local m = require('socket.core')\nprint(type(m))\n")
+
+    local previous_cpath = package.cpath
+    package.cpath = root .. "/?.so;" .. previous_cpath
+    local built_ok, built = pcall(function()
+        return require("luainstaller").bundle({
+            entry = root .. "/main.lua",
+            out = root .. "/out",
+            mode = "onedir",
+        })
+    end)
+    package.cpath = previous_cpath
+    assert(built_ok, built)
+    assert(built.ok, built.error and built.error.message)
+
+    local destinations = {}
+    for _, entry in ipairs(built.manifest.modules.native or {}) do
+        destinations[#destinations + 1] = entry.destination_path
+    end
+    table.sort(destinations)
+    local expected = {
+        ".luai/native/core." .. extension,
+        ".luai/native/socket/core." .. extension,
+    }
+    table.sort(expected)
+    assertEqual(table.concat(destinations, ","), table.concat(expected, ","),
+        "manifest native destinations")
+    assert(fileExists(root .. "/out/.luai/native/socket/core." .. extension),
+        "native alias copy is missing from the artifact")
+    assert_contains(readFile(root .. "/out/.luai/manifest.lua"),
+        ".luai/native/socket/core." .. extension)
+    removeTree(root)
+end)
+
 test("test harness preserves child output and nonzero exit status", function()
     local command
     if package.config:sub(1, 1) == "\\" then
@@ -147,6 +195,22 @@ test("test harness preserves child output and nonzero exit status", function()
     assert(not ok, "nonzero child status was reported as success")
     assertEqual(status, 7, "child exit status")
     assertEqual(output, "harness-status-output", "child output")
+end)
+
+test("external command timeouts kill runaway children", function()
+    if package.config:sub(1, 1) ~= "/" then
+        return
+    end
+    local process = require("luainstaller.process")
+    local probe_ok, _ = process.output("command -v timeout >/dev/null 2>&1")
+    if probe_ok ~= true then
+        return -- the timeout utility is optional on non-Linux hosts
+    end
+    local started = os.time()
+    local ok, output = process.output("sleep 30", { timeout_seconds = 1 })
+    local elapsed = os.time() - started
+    assert(ok == false, "a timed-out command must not succeed: " .. tostring(output))
+    assert(elapsed < 20, string.format("timeout took %d seconds", elapsed))
 end)
 
 test("full edge-coverage prerequisites are available", function()
@@ -383,6 +447,18 @@ test("Windows PowerShell helper is absolute and rejects shell metacharacters", f
         "WINDIR fallback path"
     )
     assert(unsafe_ok and unsafe == nil, "unsafe SystemRoot reached a shell command")
+end)
+
+test("Windows process primitives document cmd.exe quoting hazards", function()
+    local process_source = readFile("src/process.lua")
+    assert(process_source:find("CreateProcess", 1, true),
+        "process layer does not document CreateProcess quoting semantics")
+    assert(process_source:find("cmd.exe", 1, true),
+        "process layer does not document cmd.exe interpretation of M.output")
+    assert(process_source:find("% ^ & | < >", 1, true),
+        "process layer does not list the cmd.exe metacharacters")
+    assert(process_source:find("base64", 1, true),
+        "process layer does not document the encoded PowerShell data path")
 end)
 
 test("Windows logger delegates encoded filesystem operations", function()
@@ -880,6 +956,73 @@ test("require lexer rejects computed call arguments", function()
         assert(type(err) == "table" and err.type == "DynamicRequireError", source)
     end
 end)
+
+test("require lexer tracks shadowed bindings and scope exits", function()
+    local LuaLexer = require("luainstaller.analyzer").LuaLexer
+    local cases = {
+        { name = "parameter shadowing", source = "function f(require) return require('x') end", expected = 0 },
+        { name = "anonymous parameter shadowing", source = "local g = function(require) return require('y') end", expected = 0 },
+        { name = "pcall parameter shadowing", source = "function f(require) return pcall(require, 'z') end", expected = 0 },
+        { name = "local rebinding", source = "local require = function(n) return n end require('a')", expected = 0 },
+        { name = "global rebinding", source = "require = function(n) return n end require('b')", expected = 0 },
+        { name = "local function named require", source = "local function require(name) return name end", expected = 0 },
+        { name = "function named require", source = "function require(name) return name end", expected = 0 },
+        { name = "multi-name local rebinding", source = "local a, require = 1, function() end require('c')", expected = 0 },
+        { name = "bare local require declaration", source = "local require\nrequire('d')", expected = 0 },
+        { name = "passthrough stays followed", source = "local require = require\nrequire('e')", expected = 1 },
+        { name = "passthrough of a call stays shadowed", source = "local require = require() require('f')", expected = 0 },
+        { name = "do block shadow exits", source = "do local require = g end require('g')", expected = 1 },
+        { name = "if block shadow exits", source = "if x then local require = g end require('h')", expected = 1 },
+        { name = "for block shadow exits", source = "for i=1,2 do local require = g end require('i')", expected = 1 },
+        { name = "while block shadow exits", source = "while x do local require = g end require('j')", expected = 1 },
+        { name = "repeat block shadow exits", source = "repeat local require = g until x require('k')", expected = 1 },
+        { name = "elseif keeps block shadow", source = "if a then local require = g elseif b then require('l') end require('m')", expected = 1 },
+        { name = "nested function param shadow stays inside", source = "function outer() return function(require) return require('n') end end require('o')", expected = 1 },
+    }
+    for _, case in ipairs(cases) do
+        assert(loadText(case.source, "=" .. case.name, {}), case.name)
+        local actual = LuaLexer.new(case.source, case.name .. ".lua"):extractRequires()
+        assertEqual(#actual, case.expected, case.name)
+    end
+end)
+
+test("require lexer keeps ignoring require value references", function()
+    local LuaLexer = require("luainstaller.analyzer").LuaLexer
+    local sources = {
+        "return require[1]",
+        "return require .. 'x'",
+        "return require == other",
+        "local t = { x = require }",
+        "local saved = require; return saved('foo')",
+    }
+    for _, source in ipairs(sources) do
+        assert(loadText(source, "=value", {}), source)
+        local actual = LuaLexer.new(source, "value.lua"):extractRequires()
+        assertEqual(#actual, 0, source)
+    end
+end)
+
+local goto_label_available = loadText("::probe:: return true", "=goto-probe", {})
+if goto_label_available then
+    test("require lexer follows a require after a goto label", function()
+        local LuaLexer = require("luainstaller.analyzer").LuaLexer
+        local cases = {
+            { name = "label same line", source = "::label:: require('p')", expected = { { name = "p", line = 1 } } },
+            { name = "label new line", source = "::label::\nrequire('q')", expected = { { name = "q", line = 2 } } },
+            { name = "label pcall", source = "::label:: pcall(require, 'r')", expected = { { name = "r", line = 1, optional = true } } },
+        }
+        for _, case in ipairs(cases) do
+            assert(loadText(case.source, "=" .. case.name, {}), case.name)
+            local actual = LuaLexer.new(case.source, case.name .. ".lua"):extractRequires()
+            assertEqual(#actual, #case.expected, case.name)
+            for index, expected in ipairs(case.expected) do
+                assertEqual(actual[index].name, expected.name, case.name .. " name")
+                assertEqual(actual[index].line, expected.line, case.name .. " line")
+                assertEqual(actual[index].optional == true, expected.optional == true, case.name .. " optional")
+            end
+        end
+    end)
+end
 
 test("invalid Lua never produces a bundle", function()
     local root = makeTempDir("invalid-lua")
@@ -1826,6 +1969,41 @@ test("Source changed between discovery and manifest creation is rejected", funct
     assert(not result.ok, "post-discovery source mutation must fail the build")
     assertEqual(result.error.type, "SourceChangedError", "post-discovery mutation")
     assert(not bundler_called, "unsafe manifest reached the bundler")
+    removeTree(root)
+end)
+
+test("copyFile refuses to overwrite on every platform", function()
+    local fs = require("luainstaller.fs")
+    local root = makeTempDir("copy-no-overwrite")
+    local source = root .. "/source.txt"
+    local destination = root .. "/destination.txt"
+    local fresh = root .. "/fresh.txt"
+    writeFile(source, "new\n")
+    writeFile(destination, "old\n")
+
+    local copied, err = fs.copyFile(source, destination)
+    assert(copied == nil, "copyFile must refuse an existing destination")
+    assert(type(err) == "string" and err ~= "")
+    assert_contains(readFile(destination), "old")
+
+    assert(fs.copyFile(source, fresh) == true, "a missing destination must copy")
+    assert_contains(readFile(fresh), "new")
+    removeTree(root)
+end)
+
+test("API rejects symbolic-link entry scripts", function()
+    if package.config:sub(1, 1) ~= "/" then
+        return
+    end
+    local root = makeTempDir("symlink-entry")
+    local target = root .. "/real-main.lua"
+    local link = root .. "/main.lua"
+    writeFile(target, "return true\n")
+    runCommand("ln -s " .. shellQuote(target) .. " " .. shellQuote(link))
+
+    local analyzed = require("luainstaller").analyze({ entry = link })
+    assert(not analyzed.ok, "a symlink entry must not be analyzed")
+    assertEqual(analyzed.error.type, "ScriptNotFoundError", "symlink entry error")
     removeTree(root)
 end)
 
@@ -4055,14 +4233,19 @@ test("logger stale recovery preserves a lock replaced after observation", functi
     makeDirectory(home)
     local child = harness.loader_prelude() .. [[
 local fs = require("luainstaller.fs")
+local lock_owner = require("luainstaller.lock_owner")
 local logger = require("luainstaller.logger")
 local process = require("luainstaller.process")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
 local replacement = "created=" .. tostring(os.time()) .. "\ntoken=new-active\n"
 assert(logger.clearLogs() == true)
 assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
-assert(fs.writeFile(lock .. "/owner",
-    "created=" .. tostring(os.time() - 1000) .. "\ntoken=observed-stale\n"))
+local stale = assert(lock_owner.encode({
+    token = "observed-stale-token",
+    pid = "4194303",
+    created = os.time() - 1000,
+}))
+assert(fs.writeFile(lock .. "/owner.observed-stale-token", stale))
 
 local original_rename = os.rename
 local injected = false
@@ -4197,7 +4380,7 @@ assert(os.rename(path, backup))
 assert(require("luainstaller.process").output(
     "mkdir " .. require("luainstaller.process").shellQuote(lock)))
 local owner = assert(io.open(lock .. "/owner", "wb"))
-assert(owner:write("created=" .. tostring(os.time() - 1000) .. "\ntoken=abandoned\n"))
+assert(owner:write("created=" .. tostring(os.time() - 10000) .. "\ntoken=abandoned\n"))
 assert(owner:close())
 assert(logger.logInfo("edge", "recover", "after") == true)
 local logs = logger.getLogs({ descending = false })
@@ -4235,6 +4418,32 @@ print("logger empty stale lock recovery ok")
     local output = runCommand("HOME=" .. shellQuote(home) .. " "
         .. luaCommand .. " -e " .. shellQuote(child))
     assert(output:find("logger empty stale lock recovery ok", 1, true))
+    removeTree(root)
+end)
+
+test("logger never reclaims a recent pid-less legacy lock", function()
+    if package.config:sub(1, 1) ~= "/" then
+        return
+    end
+    local root = makeTempDir("logger-legacy-recent")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local fs = require("luainstaller.fs")
+local logger = require("luainstaller.logger")
+local process = require("luainstaller.process")
+local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+assert(logger.clearLogs() == true)
+assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
+local owner = "created=" .. tostring(os.time() - 1000) .. "\ntoken=legacy-recent\n"
+assert(fs.writeFile(lock .. "/owner", owner))
+assert(logger.clearLogs() == false, "a recent pid-less legacy lock was reclaimed")
+assert(fs.readFile(lock .. "/owner") == owner, "the legacy lock was changed")
+print("logger recent legacy lock preserved")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
+    assert(output:find("logger recent legacy lock preserved", 1, true))
     removeTree(root)
 end)
 

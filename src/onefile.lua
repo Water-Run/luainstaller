@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -656,7 +656,34 @@ static int luai_join(char *out, size_t out_size, const char *left, const char *r
     return n >= 0 && (size_t)n < out_size ? 0 : -1;
 }
 
-/* Reject absolute paths and any empty/./.. segment (zip-slip prevention). */
+/* Reject absolute paths and any empty/./.. segment (zip-slip prevention).
+   Mirrors the build-time validator: on Windows it also rejects invalid
+   characters, trailing spaces/dots, overlong segments, and reserved device
+   names, so a tampered payload cannot reach console/device targets. */
+#ifdef _WIN32
+static int luai_segment_is_reserved(const char *start, size_t len) {
+    char stem[16];
+    size_t stem_len = 0;
+    size_t i;
+    while (stem_len < len && start[stem_len] != '.') stem_len++;
+    while (stem_len > 0 && (start[stem_len - 1] == ' ' || start[stem_len - 1] == '.')) stem_len--;
+    if (stem_len == 0 || stem_len >= sizeof(stem)) return 0;
+    for (i = 0; i < stem_len; ++i) {
+        char c = start[i];
+        stem[i] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
+    }
+    stem[stem_len] = '\0';
+    if (strcmp(stem, "CON") == 0 || strcmp(stem, "PRN") == 0
+        || strcmp(stem, "AUX") == 0 || strcmp(stem, "NUL") == 0
+        || strcmp(stem, "CONIN$") == 0 || strcmp(stem, "CONOUT$") == 0
+        || strcmp(stem, "CLOCK$") == 0) return 1;
+    if (stem_len == 4 && stem[3] >= '1' && stem[3] <= '9'
+        && ((stem[0] == 'C' && stem[1] == 'O' && stem[2] == 'M')
+            || (stem[0] == 'L' && stem[1] == 'P' && stem[2] == 'T'))) return 1;
+    return 0;
+}
+#endif
+
 static int luai_path_is_safe_relative(const char *path) {
     const char *p;
     if (!path || !*path) return 0;
@@ -669,12 +696,21 @@ static int luai_path_is_safe_relative(const char *path) {
         while (*p && *p != '/' && *p != '\\') {
             unsigned char byte = (unsigned char)*p;
             if (byte < 32 || byte == 127) return 0;
+#ifdef _WIN32
+            if (byte == '<' || byte == '>' || byte == ':' || byte == '"'
+                || byte == '|' || byte == '?' || byte == '*') return 0;
+#endif
             p++;
         }
         len = (size_t)(p - start);
         if (len == 0) return 0;
         if (len == 1 && start[0] == '.') return 0;
         if (len == 2 && start[0] == '.' && start[1] == '.') return 0;
+        if (len > 255) return 0;
+#ifdef _WIN32
+        if (start[len - 1] == ' ' || start[len - 1] == '.') return 0;
+        if (luai_segment_is_reserved(start, len)) return 0;
+#endif
         if (*p) p++;
     }
     return 1;
@@ -937,6 +973,17 @@ static int luai_write_relative_file(int root_fd, const char *full_path,
     if (close(parent_fd) != 0) return -1;
     return write_result;
 }
+
+static int luai_unlink_relative(int root_fd, const char *relative) {
+    char name[256];
+    int parent_fd;
+    int result;
+    parent_fd = luai_open_relative_parent(root_fd, relative, name, sizeof(name));
+    if (parent_fd < 0) return -1;
+    result = unlinkat(parent_fd, name, 0);
+    close(parent_fd);
+    return result;
+}
 #endif
 
 #ifdef _WIN32
@@ -1106,6 +1153,28 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
             fprintf(stderr, "luainstaller-onefile: cannot extract %s\n", luai_files[i].path);
             extract_result = -1;
             break;
+        }
+    }
+#ifndef _WIN32
+    if (extract_result == 0 && fsync(payload_fd) != 0) {
+        fprintf(stderr, "luainstaller-onefile: cannot persist extraction directory\n");
+        extract_result = -1;
+    }
+#endif
+    if (extract_result != 0) {
+        /* Best-effort removal of the files this run created or repaired;
+           the next run re-extracts from the embedded payload. */
+        size_t created;
+        for (created = i; created > 0; --created) {
+#ifdef _WIN32
+            char target[4096];
+            if (luai_join(target, sizeof(target), bundle_dir,
+                           luai_files[created - 1].path) == 0) {
+                DeleteFileA(target);
+            }
+#else
+            luai_unlink_relative(payload_fd, luai_files[created - 1].path);
+#endif
         }
     }
 #ifndef _WIN32

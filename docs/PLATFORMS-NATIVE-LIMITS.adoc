@@ -132,6 +132,8 @@ yourself. Full gates: xref:TESTING.adoc[Testing].
 * cross-compilation / one binary for many platforms
 * automatic closure of all native system libraries
 * bytecode-only packaging, encryption, obfuscation
+* signing, tamper-proofing, or authenticity verification of the produced
+  executable (the onefile payload ID is a cache key only)
 * loading native modules from single-file without extraction
 * macOS universal / signing / notarization
 * MSI / PKG / DEB / RPM generation

@@ -8,7 +8,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-14
+    2026-07-29
 ]]
 
 local fs = require("luainstaller.fs")
@@ -27,6 +27,10 @@ local LogLevel = {
 local MAX_LOGS = 1000
 local LOCK_TIMEOUT_SECONDS = 5
 local LOCK_STALE_SECONDS = 120
+-- PID-less legacy owner records cannot be liveness-probed. Locks are normally
+-- held for milliseconds, so a much longer age floor is required before one of
+-- those records may be reclaimed as abandoned.
+local LEGACY_LOCK_STALE_SECONDS = 12 * LOCK_STALE_SECONDS
 local LOCK_RETRY_SECONDS = 0.05
 local MAX_SERIALIZE_DEPTH = 64
 
@@ -401,7 +405,13 @@ local function recoverStaleLock(lock_path)
     -- owner immediately before normal release and then race with a fresh
     -- owner at the same public lock name.  The age floor prevents that live
     -- hand-off from being treated as crash recovery.
-    if created > os.time() - LOCK_STALE_SECONDS then
+    local stale_floor = LOCK_STALE_SECONDS
+    if observed and observed.pid == nil and observed.kind ~= "unowned" then
+        -- PID-less records skip the liveness probe below; require the
+        -- longer legacy floor before reclaiming them.
+        stale_floor = LEGACY_LOCK_STALE_SECONDS
+    end
+    if created > os.time() - stale_floor then
         return false
     end
     if observed and observed.pid then

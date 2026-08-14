@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local fs = require("luainstaller.fs")
@@ -27,6 +27,13 @@ local basename = path.basename
 local dirname = path.dirname
 
 local function readFile(path)
+    -- Same regular-file policy as the bundler and the generated-C embedders:
+    -- snapshot hashes must not follow symbolic links. When the process layer
+    -- is unavailable (io.popen removed), degrade to the pure-read path so
+    -- manifest building keeps working in minimal environments.
+    if type(io.popen) == "function" then
+        return fs.readRegularFile(path)
+    end
     return fs.readFile(path)
 end
 

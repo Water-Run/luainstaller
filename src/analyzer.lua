@@ -13,7 +13,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-11
+    2026-07-29
 ]]
 
 local fs = require("luainstaller.fs")
@@ -244,6 +244,17 @@ function LuaLexer.new(source_code, file_path)
     self.pos           = 1
     self.line          = 1
     self.previous_token = nil
+    -- require-binding tracking: a shadowed require call is not a module load.
+    self.require_shadowed = false
+    self.shadow_stack = {}
+    self.local_pending = false
+    self.local_names = 0
+    self.local_has_require = false
+    self.awaiting_passthrough = false
+    self.pending_function_params = false
+    self.in_params = false
+    self.param_paren = 0
+    self.suppress_then_push = false
     return self
 end
 
@@ -358,9 +369,16 @@ end
 --@param self: LuaLexer - Lexer instance
 function LuaLexer:advanceCharacter()
     local ch = self:currentChar()
-    if ch == "\r" then
+    if ch == "\r" or ch == "\n" then
+        -- A statement break ends a pending local name list.
+        if self.local_pending then
+            self.local_pending = false
+            if self.local_has_require then
+                self.require_shadowed = true
+            end
+        end
         self.pos = self.pos + 1
-        if self:currentChar() == "\n" then
+        if self:currentChar() == "\n" and ch == "\r" then
             self.pos = self.pos + 1
         end
         self.line = self.line + 1
@@ -516,6 +534,100 @@ function LuaLexer:extractLongStringLiteral(level, start_line)
     ))
 end
 
+--@description: Track scope and require-binding keywords read as identifiers
+--@param self: LuaLexer - Lexer instance
+--@param identifier: string - Identifier text
+function LuaLexer:trackKeyword(identifier)
+    if self.in_params then
+        if identifier == "require" then
+            self.require_shadowed = true
+        end
+        return
+    end
+    if self.pending_function_params then
+        -- Function name (including method names); naming a function
+        -- "require" rebinds it for the function body.
+        if identifier == "require" then
+            self.require_shadowed = true
+        end
+        return
+    end
+    if self.local_pending then
+        if identifier == "require" then
+            self.local_names = self.local_names + 1
+            self.local_has_require = true
+            return
+        end
+        local terminates = {
+            ["end"] = true, ["until"] = true, ["then"] = true, ["do"] = true,
+            ["else"] = true, ["elseif"] = true, ["function"] = true,
+            ["local"] = true, ["return"] = true, ["repeat"] = true,
+            ["if"] = true, ["for"] = true, ["while"] = true, ["in"] = true,
+        }
+        if terminates[identifier] then
+            self.local_pending = false
+            if self.local_has_require then
+                self.require_shadowed = true
+            end
+        else
+            self.local_names = self.local_names + 1
+        end
+    end
+    if identifier == "local" then
+        self.local_pending = true
+        self.local_names = 0
+        self.local_has_require = false
+    elseif identifier == "function" then
+        self.shadow_stack[#self.shadow_stack + 1] = self.require_shadowed
+        self.pending_function_params = true
+    elseif identifier == "do" or identifier == "repeat" then
+        self.shadow_stack[#self.shadow_stack + 1] = self.require_shadowed
+    elseif identifier == "then" then
+        if self.suppress_then_push then
+            self.suppress_then_push = false
+        else
+            self.shadow_stack[#self.shadow_stack + 1] = self.require_shadowed
+        end
+    elseif identifier == "elseif" then
+        self.suppress_then_push = true
+    elseif identifier == "end" or identifier == "until" then
+        if #self.shadow_stack > 0 then
+            self.require_shadowed = table.remove(self.shadow_stack)
+        end
+    end
+end
+
+--@description: Track a require token before call parsing
+--@param self: LuaLexer - Lexer instance
+function LuaLexer:onRequireToken()
+    if self.in_params then
+        self.require_shadowed = true
+        return
+    end
+    if self.pending_function_params then
+        self.require_shadowed = true
+        return
+    end
+    if self.awaiting_passthrough then
+        -- The right-hand side of \`local require = require\`: the binding
+        -- stays the real require only when it is a plain function reference.
+        self.awaiting_passthrough = false
+        local saved_pos = self.pos
+        local saved_line = self.line
+        self.pos = self.pos + #"require"
+        self:skipTrivia()
+        local ch = self:currentChar()
+        self.pos = saved_pos
+        self.line = saved_line
+        self.require_shadowed = (ch == "(" or ch == "." or ch == ":")
+        return
+    end
+    if self.local_pending then
+        self.local_names = self.local_names + 1
+        self.local_has_require = true
+    end
+end
+
 --@description: Parse a pcall(require, 'module') statement
 --@param self: LuaLexer - Lexer instance
 --@return: string|nil - Module name when valid, nil otherwise
@@ -523,7 +635,8 @@ function LuaLexer:parsePcallRequire()
     local saved_pos  = self.pos
     local saved_line = self.line
 
-    if self.previous_token == "function"
+    if self.require_shadowed
+        or self.previous_token == "function"
         or self.previous_token == "."
         or self.previous_token == ":" then
         self.pos = self.pos + #"pcall"
@@ -611,9 +724,30 @@ function LuaLexer:parseRequire()
     local saved_pos  = self.pos
     local saved_line = self.line
 
-    if self.previous_token == "function"
+    if self.require_shadowed
+        or self.previous_token == "function"
         or self.previous_token == "."
         or self.previous_token == ":" then
+        self.pos = self.pos + #"require"
+        return nil
+    end
+    if self.previous_token == "local" then
+        -- Declaration position (local require = ...); the local-name
+        -- machinery owns the shadow state from here on.
+        self.pos = self.pos + #"require"
+        return nil
+    end
+
+    -- Assignment target: \`require = <value>\` rebinds the global function
+    -- and suppresses every later call in the file.
+    local peek_pos = self.pos + #"require"
+    while peek_pos <= self.source_len
+        and self.source:sub(peek_pos, peek_pos):match("%s") do
+        peek_pos = peek_pos + 1
+    end
+    local peek_char = self.source:sub(peek_pos, peek_pos)
+    if peek_char == "=" and self.source:sub(peek_pos + 1, peek_pos + 1) ~= "=" then
+        self.require_shadowed = true
         self.pos = self.pos + #"require"
         return nil
     end
@@ -668,6 +802,10 @@ function LuaLexer:parseRequire()
     end
 
     if not has_paren and ch ~= "{" then
+        -- require used as a plain value (local x = require, f(require),
+        -- require[1], require == x) is a reference, not a call. Lua has no
+        -- bare-identifier argument form, so every computed call in valid
+        -- code goes through the parentheses or table paths above.
         return nil
     end
 
@@ -689,6 +827,15 @@ function LuaLexer:extractRequires()
 
     while self.pos <= self.source_len do
         local char = self:currentChar()
+        -- A pending \`local require = require\` passthrough only survives
+        -- trivia; any other non-require token cancels it.
+        if self.awaiting_passthrough
+            and not char:match("%s")
+            and not (char == "-" and self:peekChar() == "-") then
+            if not (char:match("[%a_]") and self:matchKeyword("require")) then
+                self.awaiting_passthrough = false
+            end
+        end
         if char:match("%s") then
             self:skipWhitespace()
         elseif char == "-" and self:peekChar() == "-" then
@@ -709,6 +856,7 @@ function LuaLexer:extractRequires()
             end
             self.previous_token = "pcall"
         elseif self:matchKeyword("require") then
+            self:onRequireToken()
             local record = self:parseRequire()
             if record then
                 result[#result + 1] = record
@@ -716,14 +864,60 @@ function LuaLexer:extractRequires()
             self.previous_token = "require"
         elseif char:match("[%a_]") then
             local identifier = self.source:match("^([%a_][%w_]*)", self.pos)
-            self.previous_token = identifier
             self.pos = self.pos + #identifier
+            self:trackKeyword(identifier)
+            self.previous_token = identifier
         elseif self.source:sub(self.pos, self.pos + 2) == "..." then
             self.previous_token = "..."
             self.pos = self.pos + 3
         elseif self.source:sub(self.pos, self.pos + 1) == ".." then
             self.previous_token = ".."
             self.pos = self.pos + 2
+        elseif char == ":" and self.previous_token == ":" then
+            -- Closing colon of a goto label; labels end a statement, so a
+            -- following require is a real module load, not a method call.
+            self.previous_token = "::"
+            self:advanceCharacter()
+        elseif char == "(" then
+            if self.pending_function_params then
+                self.pending_function_params = false
+                self.in_params = true
+                self.param_paren = 1
+            elseif self.in_params then
+                self.param_paren = self.param_paren + 1
+            end
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == ")" then
+            if self.in_params then
+                self.param_paren = self.param_paren - 1
+                if self.param_paren == 0 then
+                    self.in_params = false
+                end
+            end
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == "=" then
+            if self.local_pending then
+                self.local_pending = false
+                if self.local_has_require then
+                    self.require_shadowed = true
+                    if self.local_names == 1 then
+                        self.awaiting_passthrough = true
+                    end
+                end
+            end
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == ";" then
+            if self.local_pending then
+                self.local_pending = false
+                if self.local_has_require then
+                    self.require_shadowed = true
+                end
+            end
+            self.previous_token = char
+            self:advanceCharacter()
         else
             self.previous_token = char
             self:advanceCharacter()
