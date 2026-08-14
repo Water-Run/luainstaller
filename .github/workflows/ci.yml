@@ -1,0 +1,64 @@
+# Continuous integration smoke gate.
+#
+# This workflow is a fast pre-push/PR gate, NOT a release gate. Release
+# evidence still requires the physical-host matrix described in
+# docs/TESTING.adoc; CI results never substitute for it.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  local-suites:
+    name: local suites (system Lua)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4 luarocks gcc liblua5.4-dev pkg-config
+
+      - name: Syntax and shell checks
+        run: |
+          find src -type f -name '*.lua' -print0 | xargs -0 -n1 luac -p
+          find tools -type f -name '*.sh' -print0 | xargs -0 -n1 sh -n
+          git diff --check
+
+      - name: Fast contract suites
+        run: |
+          lua test/lua_abi.lua
+          lua test/version_contract.lua
+          lua test/cli_split_smoke.lua
+          lua test/contract_docs.lua
+
+      - name: Edge and safety suites
+        run: |
+          lua test/production_edges.lua
+          lua test/onefile_lifecycle.lua
+          lua test/distribution_licenses.lua
+          lua test/reproducible_artifacts.lua
+          lua test/build_interruption.lua
+
+      - name: Comprehensive smoke audit
+        run: lua test/smoke_all.lua
+
+  version-matrix:
+    name: official Lua matrix (POSIX runner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install matrix prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libreadline-dev \
+            unzip curl ca-certificates
+
+      - name: Run the pinned five-version matrix
+        run: HOST_LABEL=ci sh tools/test-lua-versions.sh
+        timeout-minutes: 120
