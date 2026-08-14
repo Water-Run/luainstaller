@@ -391,10 +391,9 @@ local function parsePositiveInteger(value, option_name)
     return number
 end
 
-local function parseActionOptions(parser, action, first_entry)
+local function parseActionOptions(parser, action)
     local opts = newOptions()
     opts.action = action
-    opts.entry = first_entry
 
     while parser:hasNext() do
         local item = parser:consume()
@@ -616,8 +615,8 @@ local function renderModernBundle(ui, result, opts)
     end
 end
 
-local function runAction(style, ui, parser, action, first_entry)
-    local opts, err = parseActionOptions(parser, action, first_entry)
+local function runAction(style, ui, parser, action)
+    local opts, err = parseActionOptions(parser, action)
     if not opts then
         if style == "modern" then
             writeModernError(ui, err)
@@ -683,7 +682,7 @@ local function parseLogOptions(parser, style, ui)
 
     while parser:hasNext() do
         local item = parser:consume()
-        if item == "--limit" or item == "-limit" then
+        if item == "--limit" then
             local value, value_err = parser:consumeValue(item)
             if not value then
                 return nil, value_err
@@ -694,7 +693,7 @@ local function parseLogOptions(parser, style, ui)
             end
         elseif item == "--asc" then
             ascending = true
-        elseif item == "--level" or item == "-level" then
+        elseif item == "--level" then
             local value, value_err = parser:consumeValue(item)
             if not value then
                 return nil, value_err

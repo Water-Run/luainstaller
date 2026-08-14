@@ -461,6 +461,34 @@ test("Windows process primitives document cmd.exe quoting hazards", function()
         "process layer does not document the encoded PowerShell data path")
 end)
 
+test("result and helper contracts keep strict shapes", function()
+    local result = require("luainstaller.result")
+    local made = result.error("T", "m", { type = "X", message = "y", path = "p" })
+    assertEqual(made.error.type, "T", "reserved error type must win")
+    assertEqual(made.error.message, "m", "reserved error message must win")
+    assertEqual(made.error.path, "p", "detail passthrough")
+
+    local native_profile = require("luainstaller.native_profile")
+    local accepted, reason = native_profile.acceptsLibrary(
+        { target_os = "linux", launcher_profile = "shared-lua" },
+        "liblua.so"
+    )
+    assertEqual(accepted, true, "shared POSIX library accepted")
+    assert(reason == nil, "accepted library must not carry a rejection reason")
+    local rejected, reject_reason = native_profile.acceptsLibrary(
+        { target_os = "linux", launcher_profile = "shared-lua" },
+        "liblua.a"
+    )
+    assertEqual(rejected, false, "static archive rejected on shared profiles")
+    assert(type(reject_reason) == "string" and reject_reason ~= "",
+        "rejection reason")
+
+    local logger = require("luainstaller.logger")
+    local logged, log_err = logger.log(42, "edge", "shape", "message")
+    assertEqual(logged, false, "invalid log fields must be rejected")
+    assert(type(log_err) == "string" and log_err ~= "", "log rejection reason")
+end)
+
 test("Windows logger delegates encoded filesystem operations", function()
     local logger_source = readFile("src/logger.lua")
     local fs_source = readFile("src/fs.lua")

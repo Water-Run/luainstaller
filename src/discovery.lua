@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -592,9 +592,6 @@ require = function(name)
     end
     if record then
         recorded_names[module_key] = true
-    end
-    if record and type(result[3]) == "string" then
-        record.loader_path = result[3]
     end
     return unpack_values(result, 2, result.n)
 end

@@ -302,7 +302,6 @@ local EXTRACTOR_TEMPLATE = [=[
 
 #ifdef _WIN32
 static int luai_mkdir_one(const char *path) {
-#ifdef _WIN32
     if (_mkdir(path) == 0) return 0;
     if (errno == EEXIST) {
         DWORD attrs = GetFileAttributesA(path);
@@ -310,13 +309,6 @@ static int luai_mkdir_one(const char *path) {
             (attrs & FILE_ATTRIBUTE_DIRECTORY) &&
             !(attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
     }
-#else
-    if (mkdir(path, 0700) == 0) return 0;
-    if (errno == EEXIST) {
-        struct stat st;
-        if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) return 0;
-    }
-#endif
     return -1;
 }
 
@@ -625,7 +617,6 @@ static int luai_pin_matching_file(const char *path, const unsigned char *expecte
 }
 
 static int luai_remove_unsafe_existing(const char *path) {
-#ifdef _WIN32
     DWORD attrs = GetFileAttributesA(path);
     if (attrs == INVALID_FILE_ATTRIBUTES) {
         DWORD status = GetLastError();
@@ -638,14 +629,6 @@ static int luai_remove_unsafe_existing(const char *path) {
         return DeleteFileA(path) ? 0 : -1;
     }
     if ((attrs & FILE_ATTRIBUTE_DIRECTORY) || (attrs & FILE_ATTRIBUTE_DEVICE)) return -1;
-#else
-    struct stat st;
-    if (lstat(path, &st) != 0) return errno == ENOENT ? 0 : -1;
-    if (S_ISLNK(st.st_mode)) {
-        return unlink(path);
-    }
-    if (!S_ISREG(st.st_mode)) return -1;
-#endif
     return 0;
 }
 

@@ -9,6 +9,7 @@ File:
 Date:
     2026-06-27
 Updated:
+    2026-07-29
     2026-06-27
 ]]
 
@@ -21,7 +22,9 @@ function M.error(err_type, message, details)
     }
     if details then
         for k, v in pairs(details) do
-            err[k] = v
+            if k ~= "type" and k ~= "message" then
+                err[k] = v
+            end
         end
     end
     return {

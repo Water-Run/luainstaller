@@ -660,9 +660,11 @@ local function executableName(out_path, entry, profile)
         name = stem(entry)
     end
     local suffix = profile and profile.executable_suffix or ""
-    if suffix ~= "" and not name:lower():match(suffix:gsub("%.", "%%.") .. "$") then
+    local lower_name = name:lower()
+    local plain_end = suffix ~= "" and lower_name:sub(-#suffix) == suffix:lower()
+    if suffix ~= "" and not plain_end then
         name = name .. suffix
-    elseif IS_WINDOWS and suffix == "" and not name:lower():match("%.exe$") then
+    elseif IS_WINDOWS and suffix == "" and lower_name:sub(-4) ~= ".exe" then
         name = name .. ".exe"
     end
     return name
@@ -679,7 +681,7 @@ local function uniqueSiblingPath(final_path, label)
         local suffix = tostring(os.time())
             .. tostring(os.clock()):gsub("%.", "")
             .. "-"
-            .. tostring(math.random(100000, 999999))
+            .. tostring({}):gsub("[^%w]", "")
         local candidate = normalizePath(parent .. "/.luai-" .. label .. "-"
             .. output_id .. "-" .. suffix)
         if not pathExists(candidate) then

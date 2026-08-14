@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-07-18
+    2026-07-29
 ]]
 
 local M = {}
@@ -32,16 +32,18 @@ function M.acceptsLibrary(profile, candidate)
 
     if profile.target_os == "windows" or launcher_profile == "windows-shared-lua" then
         local accepted = kind == "shared-windows" or kind == "import-windows"
-        return accepted, accepted and nil
-            or "Windows requires a Lua DLL and MSVC import library"
+        if accepted then return true end
+        return false, "Windows requires a Lua DLL and MSVC import library"
     end
     if profile.target_os == "macos" or launcher_profile == "static-lua" then
         local accepted = kind == "static"
-        return accepted, accepted and nil or "macOS requires static liblua.a"
+        if accepted then return true end
+        return false, "macOS requires static liblua.a"
     end
     if profile.target_os == "linux" or launcher_profile == "shared-lua" then
         local accepted = kind == "shared-posix"
-        return accepted, accepted and nil or "Linux/POSIX requires a shared liblua"
+        if accepted then return true end
+        return false, "Linux/POSIX requires a shared liblua"
     end
     return false, "unsupported native Lua runtime profile"
 end

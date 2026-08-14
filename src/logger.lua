@@ -785,6 +785,13 @@ local M = {}
 M.LogLevel = LogLevel
 
 function M.log(level, source, action, message, details)
+    -- Fail loudly instead of serializing an entry that validateLogs will
+    -- later reject as a whole-file parse failure.
+    if type(level) ~= "string" or type(source) ~= "string"
+        or type(action) ~= "string" or type(message) ~= "string"
+        or (details ~= nil and type(details) ~= "table") then
+        return false, "log fields must be strings and details a table"
+    end
     local entry = {
         timestamp = getTimestamp(),
         level = level,

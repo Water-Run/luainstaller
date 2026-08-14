@@ -718,7 +718,7 @@ function M.compile(config, source_path, output_path, opts)
                 config,
                 normalizePath(opts.work_dir or path.dirname(output_path))
             )
-            if not import then return false, import_err.error.message, nil, import_err end
+            if not import then return false, import_err.error.message end
             arguments[#arguments + 1] = import:gsub("/", "\\")
         end
         arguments[#arguments + 1] = "/link"
@@ -774,7 +774,7 @@ function M.compileNativeModule(config, source_path, output_path, opts)
         if not linked then
             local import, import_err = generateMsvcImportLibrary(config, object_dir)
             if not import then
-                return false, import_err.error.message, nil, import_err
+                return false, import_err.error.message
             end
             arguments[#arguments + 1] = import:gsub("/", "\\")
         end
@@ -797,7 +797,9 @@ function M.compileNativeModule(config, source_path, output_path, opts)
                 arguments[#arguments + 1] = "-fPIC"
             end
         end
-        arguments[#arguments + 1] = "-I" .. config.include_dir
+        if config.include_dir then
+            arguments[#arguments + 1] = "-I" .. config.include_dir
+        end
         arguments[#arguments + 1] = source_path
         arguments[#arguments + 1] = "-o"
         arguments[#arguments + 1] = output_path

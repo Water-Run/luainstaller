@@ -383,7 +383,7 @@ function M.makePrivateDirectory(label, parent)
         local suffix = table.concat({
             tostring(os.time()),
             tostring(math.floor(os.clock() * 1000000000)),
-            tostring(math.random(100000, 999999)),
+            tostring({}):gsub("[^%w]", ""),
             tostring(attempt),
         }, "-")
         local separator = parent:match("[/\\]$") and "" or package.config:sub(1, 1)

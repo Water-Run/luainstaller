@@ -12,7 +12,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-11
+    2026-07-29
 ]]
 
 local compat = require("luainstaller.compat")
@@ -116,11 +116,12 @@ function M.run(payload, run_args, application_arg0)
         rawset(loaded, name, nil)
     end
 
-    local install_ok, uninstall = pcall(M.install, payload)
+    local install_ok, install_result = pcall(M.install, payload)
     if not install_ok then
         restoreLoadedModules(loaded, previous_modules)
-        error(uninstall, 0)
+        error(install_result, 0)
     end
+    local uninstall = install_result
     local old_arg = _G.arg
     local runtime_arg = { [0] = application_arg0
         or (type(old_arg) == "table" and old_arg[0])
