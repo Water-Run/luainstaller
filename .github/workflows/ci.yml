@@ -24,7 +24,9 @@ jobs:
       - name: Install build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential curl ca-certificates luarocks
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl liblua5.4-dev lua5.4 \
+            luarocks unzip zlib1g-dev
 
       - name: Build pinned shared Lua 5.4.8
         run: |
@@ -73,23 +75,17 @@ jobs:
           lua test/reproducible_artifacts.lua
           lua test/build_interruption.lua
 
-      - name: Install sample native dependencies
+      - name: Install pinned sample dependencies
         run: sh tools/ci-install-sample-deps.sh
 
       - name: Wire luarocks to the pinned Lua
         run: |
-          sudo apt-get install -y --no-install-recommends lua5.4 liblua5.4-dev luarocks
           mkdir -p "$HOME/bin"
           printf '%s\n' '#!/bin/sh' \
-            'exec /usr/bin/luarocks-5.4 --lua-dir="$HOME/luai-lua" "$@"' \
+            'exec /usr/bin/luarocks --lua-dir="$HOME/luai-lua" "$@"' \
             > "$HOME/bin/luarocks"
           chmod +x "$HOME/bin/luarocks"
           echo "$HOME/bin" >> "$GITHUB_PATH"
-          {
-            echo "LUA_PATH=$HOME/luai-rocks/share/lua/5.4/?.lua;;"
-            echo "LUA_CPATH=$HOME/luai-rocks/lib/lua/5.4/?.so;;"
-            echo "LD_LIBRARY_PATH=$HOME/luai-rocks/lib/lua/5.4:$LD_LIBRARY_PATH"
-          } >> "$GITHUB_ENV"
 
       - name: Comprehensive smoke audit
         run: lua test/smoke_all.lua

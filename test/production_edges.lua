@@ -4792,6 +4792,7 @@ test("remote scripts are pinned and non-destructive", function()
     local macos_runner = readFile("tools/remote-test-macos.sh")
     local windows_runner = readFile("tools/remote-test-windows.sh")
     local ci_workflow = readFile(".github/workflows/ci.yml")
+    local ci_sample_deps = readFile("tools/ci-install-sample-deps.sh")
     local benchmark_runner = readFile("tools/benchmark-real-world.sh")
     local interruption_test = readFile("test/build_interruption.lua")
     assert(not interruption_test:find(
@@ -4837,6 +4838,25 @@ test("remote scripts are pinned and non-destructive", function()
         "CI Lua ABI jobs stop after the first failure")
     assert(ci_workflow:find("VERSION_FILTER='${{ matrix.lua }}'", 1, true),
         "CI still runs all Lua ABIs serially inside one timeout")
+    assert(ci_sample_deps:find("--deps-mode=none", 1, true),
+        "local CI sample install permits unpinned dependency resolution")
+    assert(ci_sample_deps:find("config deploy_lib_dir", 1, true),
+        "local CI assumes a distribution-specific LuaRocks library directory")
+    for _, dependency in ipairs({
+        "lua-cjson-2.1.0.10-1.src.rock",
+        "luafilesystem-1.9.0-1.src.rock",
+        "luasocket-3.1.0-1.src.rock",
+        "mimetypes-1.1.0-2.src.rock",
+        "lzlib-0.4.1.53-4.src.rock",
+        "pegasus-1.1.0-0.src.rock",
+        "lsqlite3-0.9.6.c",
+        "sqlite-amalgamation-3530200.zip",
+    }) do
+        assert(ci_sample_deps:find(dependency, 1, true),
+            "local CI sample install omits pinned input " .. dependency)
+    end
+    assert(ci_sample_deps:find('require("pegasus")', 1, true),
+        "local CI sample install does not load-test the full dependency graph")
     for _, version in ipairs({ "5.1.5", "5.2.4", "5.3.6", "5.4.8", "5.5.1" }) do
         assert(posix_matrix:find(version, 1, true), "POSIX matrix omits Lua " .. version)
         assert(windows_matrix:find(version, 1, true), "Windows matrix omits Lua " .. version)

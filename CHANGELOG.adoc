@@ -49,8 +49,9 @@ truth for the exact contents of a published version.
 * Align the LuaRocks dependency with the implementation contract: official Lua
   `>= 5.1` and `< 5.6`.
 * Repair the GitHub Actions gates: use a pinned shared Lua 5.4.8 and pinned
-  native sample inputs, export paths through the environment files so `$HOME`
-  and `$PATH` are expanded by the shell, update the checkout action, and make
+  sample inputs, install the complete offline dependency graph needed by every
+  bundled example, export paths through the environment files so `$HOME` and
+  `$PATH` are expanded by the shell, update the checkout action, and make
   downloads retry without publishing or retaining partial files. Run the five
   official Lua ABIs as independent jobs so their comprehensive suites do not
   share one 120-minute timeout.
