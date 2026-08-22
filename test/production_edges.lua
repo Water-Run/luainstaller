@@ -4120,6 +4120,8 @@ assert(result.ok, result.error and result.error.message)
         "POSIX extractor trusts a non-writable ancestor owned by another user")
     local payload_include = readFile(root .. "/payload.inc")
     assert(payload_include:match("luai_file_%d+, 0, 0 }"), "empty file record missing")
+    assert(payload_include:sub(-1) == "\n",
+        "generated payload include is not a complete C source line")
 
     local hooked = source
     local function_body = [[

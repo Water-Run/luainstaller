@@ -73,6 +73,8 @@ truth for the exact contents of a published version.
 * Make Windows Unicode process coverage independent of the machine's active
   ANSI code page while retaining native Unicode argv, environment, and
   filesystem checks.
+* Terminate generated `payload.inc` files with a newline so current Clang
+  accepts both original and relinked onefile sources under strict warnings.
 * Correct reproducibility and distribution-license fixtures so every declared
   nested checkout and output component is actually part of the tested path.
 * Stop Windows path adapters from leaking `string.gsub`'s replacement count.

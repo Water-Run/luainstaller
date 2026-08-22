@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-29
+    2026-08-22
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -1370,7 +1370,7 @@ local function generatePayloadInclude(files, payload_id)
         )
     end
     lines[#lines + 1] = "};"
-    return table.concat(lines, "\n\n")
+    return table.concat(lines, "\n\n") .. "\n"
 end
 
 local function serializePayloadFiles(files)

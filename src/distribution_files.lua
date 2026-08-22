@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-08-16
+    2026-08-22
 ]]
 
 return {
@@ -1206,7 +1206,7 @@ for index, file in ipairs(files) do
     )
 end
 lines[#lines + 1] = "};"
-writeFile(output_path, table.concat(lines, "\n\n"))
+writeFile(output_path, table.concat(lines, "\n\n") .. "\n")
 print(payload_id)
 ]====],
     },
