@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-18
+    2026-08-22
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -118,18 +118,36 @@ end
 local special = path.join(root, "&A%caret^bang!-测试")
 assert(fs.makeDirectory(special))
 
-local child = path.join(special, "argv.lua")
+-- Official Lua uses the narrow CRT entry point on Windows, so asking it to
+-- open a script through a non-ASCII path depends on the machine's active code
+-- page. Exercise luainstaller's Unicode argv/environment bridge with a native
+-- Unicode-aware child instead; the filesystem operations below still cover
+-- the non-ASCII directory itself.
+local child = path.join(root, "unicode-process-child.ps1")
 assert(fs.writeFile(child, [[
-io.write(arg[1] or "")
-io.write("\31")
-io.write(os.getenv("LUAI_WINDOWS_ENV") or "")
+param([string]$Value)
+$ExpectedValue=[Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('c2F5ICJoZWxsbyJcdHJhaWxcICYgcGVyY2VudCUgY2FyZXReIGJhbmchIOa1i+ivlQ=='))
+$ExpectedEnvironment=[Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('dmFsdWUgJiAlIF4gISDmtYvor5U='))
+if($Value -cne $ExpectedValue){exit 31}
+if([Environment]::GetEnvironmentVariable('LUAI_WINDOWS_ENV','Process') `
+    -cne $ExpectedEnvironment){exit 32}
+[Console]::Write('windows unicode process ok')
 ]]))
 
-local ok, output = process.outputCommand(lua, { child, argument }, {
+local ok, output = process.outputCommand(powershell, {
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy", "Bypass",
+    "-File", child,
+    argument,
+}, {
     LUAI_WINDOWS_ENV = "value & % ^ ! 测试",
 })
 assert(ok, output)
-assert(output == argument .. "\31value & % ^ ! 测试", output)
+assert(output == "windows unicode process ok", output)
 
 local failed = process.outputCommand(lua, { "-e", "os.exit(7)" })
 assert(failed == false, "non-zero child exit was reported as success")
@@ -188,7 +206,7 @@ assert(seen_original, "listTree omitted a regular file")
 
 local logger_home = path.join(root, "home &A%caret^bang!-日志")
 assert(fs.makeDirectory(logger_home))
-local logger_child = path.join(special, "logger-child.lua")
+local logger_child = path.join(root, "logger-child.lua")
 assert(fs.writeFile(logger_child, [[
 local harness = dofile("test/support/harness.lua")
 harness.install_loader()

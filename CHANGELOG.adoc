@@ -70,6 +70,9 @@ truth for the exact contents of a published version.
 * Make direct MSVC builds use the compatibility defines from each official Lua
   source Makefile. In particular, Lua 5.3 now registers the expected `bit32`
   library, and cache identities invalidate binaries built without those flags.
+* Make Windows Unicode process coverage independent of the machine's active
+  ANSI code page while retaining native Unicode argv, environment, and
+  filesystem checks.
 * Correct reproducibility and distribution-license fixtures so every declared
   nested checkout and output component is actually part of the tested path.
 * Stop Windows path adapters from leaking `string.gsub`'s replacement count.

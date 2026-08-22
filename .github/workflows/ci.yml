@@ -143,17 +143,21 @@ jobs:
         env:
           LUA_VERSION: ${{ matrix.lua }}
         run: |
+          $evidenceDir = Join-Path $env:TEMP 'luainstaller-lua-evidence'
+          "WINDOWS_EVIDENCE_DIR=$evidenceDir" | Out-File `
+            -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & powershell.exe -NoLogo -NoProfile -NonInteractive `
             -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1 `
             -HostLabel ci-windows-2022-x86_64 `
+            -EvidenceDir $evidenceDir `
             -VersionFilter $env:LUA_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: windows-lua-${{ matrix.lua }}-evidence
-          path: ${{ runner.temp }}/luainstaller-lua-evidence/*.log
+          path: ${{ env.WINDOWS_EVIDENCE_DIR }}/*.log
           if-no-files-found: warn
           retention-days: 14
