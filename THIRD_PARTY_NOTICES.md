@@ -7,7 +7,7 @@ application.
 
 ## Official Lua release-qualification sources
 
-- Copyright: Copyright © 1994–2025 Lua.org, PUC-Rio.
+- Copyright: Copyright © 1994–2026 Lua.org, PUC-Rio.
 - License: MIT; reproduced in `.luai/licenses/Lua-MIT.txt`
 - License page: https://www.lua.org/license.html
 
@@ -19,7 +19,7 @@ The native release matrix verifies these archives before use:
 | Lua 5.2.4 | https://www.lua.org/ftp/lua-5.2.4.tar.gz | `b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b` |
 | Lua 5.3.6 | https://www.lua.org/ftp/lua-5.3.6.tar.gz | `fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60` |
 | Lua 5.4.8 | https://www.lua.org/ftp/lua-5.4.8.tar.gz | `4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae` |
-| Lua 5.5.0 | https://www.lua.org/ftp/lua-5.5.0.tar.gz | `57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d` |
+| Lua 5.5.1 | https://www.lua.org/ftp/lua-5.5.1.tar.gz | `1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce` |
 
 A generated bundle's `.luai/manifest.lua` identifies the actual Lua
 major/minor ABI and runtime link mode selected from its build environment.

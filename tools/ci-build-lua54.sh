@@ -14,12 +14,20 @@ ARCHIVE=$WORK/lua-$VERSION.tar.gz
 SOURCE=$WORK/lua-$VERSION
 
 mkdir -p "$WORK"
-curl -fsSL "https://www.lua.org/ftp/lua-$VERSION.tar.gz" -o "$ARCHIVE"
+ARCHIVE_PART=$ARCHIVE.part.$$
+rm -f "$ARCHIVE_PART"
+trap 'rm -f "$ARCHIVE_PART"' EXIT HUP INT TERM
+curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+    --connect-timeout 30 --max-time 240 \
+    "https://www.lua.org/ftp/lua-$VERSION.tar.gz" -o "$ARCHIVE_PART"
 if command -v sha256sum >/dev/null 2>&1; then
-    printf '%s  %s\n' "$SHA256" "$ARCHIVE" | sha256sum -c - >/dev/null
+    printf '%s  %s\n' "$SHA256" "$ARCHIVE_PART" | sha256sum -c - >/dev/null
 else
-    shasum -a 256 "$ARCHIVE" | grep -F "$SHA256" >/dev/null
+    actual=$(shasum -a 256 "$ARCHIVE_PART" | awk '{ print $1 }')
+    [ "$actual" = "$SHA256" ]
 fi
+mv -f "$ARCHIVE_PART" "$ARCHIVE"
+trap - EXIT HUP INT TERM
 rm -rf "$SOURCE" "$PREFIX"
 tar -xzf "$ARCHIVE" -C "$WORK"
 

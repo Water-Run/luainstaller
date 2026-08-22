@@ -19,7 +19,7 @@ $Versions = @(
     @{ Version='5.2.4'; Sha256='b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b' },
     @{ Version='5.3.6'; Sha256='fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60' },
     @{ Version='5.4.8'; Sha256='4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae' },
-    @{ Version='5.5.0'; Sha256='57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d' }
+    @{ Version='5.5.1'; Sha256='1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce' }
 )
 
 function Assert-SafeRoot([string]$Path) {
@@ -70,8 +70,30 @@ function Write-CacheMarker([string]$Marker, [string]$Value) {
 }
 
 function Test-ExactLuaRelease([string]$Lua, [string]$Version) {
-    $banner = (& $Lua -v 2>&1 | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0) { return $false }
+    # Lua writes its version banner to stderr. Windows PowerShell 5.1 turns
+    # redirected native stderr into an ErrorRecord, which becomes terminating
+    # while this runner uses ErrorActionPreference=Stop. Capture both streams
+    # through Process instead so a successful `lua -v` remains a normal probe.
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $Lua
+    $startInfo.Arguments = '-v'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) { return $false }
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+    } finally {
+        $process.Dispose()
+    }
+    if ($exitCode -ne 0) { return $false }
+    $banner = ($stdout + $stderr).Trim()
     return $banner -eq "Lua $Version" -or $banner.StartsWith("Lua $Version ",
         [StringComparison]::Ordinal)
 }
@@ -159,15 +181,33 @@ function Assert-PeClosure([string]$Dumpbin, [string]$Artifact) {
     }
 }
 
+function Get-LuaDefaultCompilerFlags([string]$Version) {
+    # Match the compatibility defines in each official source Makefile. The
+    # Windows matrix invokes cl.exe directly, so those defaults are not picked
+    # up implicitly as they are by the POSIX make-based build.
+    switch ($Version) {
+        '5.2.4' { return @('/DLUA_COMPAT_ALL') }
+        '5.3.6' { return @('/DLUA_COMPAT_5_2') }
+        '5.4.8' { return @('/DLUA_COMPAT_5_3') }
+        default { return @() }
+    }
+}
+
 function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     $version = $Spec.Version
     $abi = ($version -split '\.')[0..1] -join '.'
     $compact = $abi.Replace('.', '')
+    $compatibilityFlags = @(Get-LuaDefaultCompilerFlags $version)
+    $compatibilityId = if ($compatibilityFlags.Count -eq 0) {
+        'none'
+    } else {
+        $compatibilityFlags -join ','
+    }
     $prefix = Join-Path $WorkRoot "lua-$version"
     $lua = Join-Path $prefix 'lua.exe'
     $marker = Join-Path $prefix '.luainstaller-matrix-cache'
     $compilerHash = (Get-FileHash -LiteralPath $Msvc.Cl -Algorithm SHA256).Hash
-    $buildId = "$CacheSchema|component=lua|version=$version|source=$($Spec.Sha256)|host=windows-x86_64|cl=$compilerHash|recipe=official-msvc-v3-luac"
+    $buildId = "$CacheSchema|component=lua|version=$version|source=$($Spec.Sha256)|host=windows-x86_64|cl=$compilerHash|compat=$compatibilityId|recipe=official-msvc-v4-makefile-compat-luac"
     $luac = Join-Path $prefix 'luac.exe'
     $required = @(
         $lua,
@@ -210,8 +250,8 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     foreach ($file in Get-ChildItem -LiteralPath $source -Filter '*.c' -File |
         Where-Object { $_.Name -notin @('lua.c', 'luac.c') }) {
         $object = Join-Path $objects ($file.BaseName + '.obj')
-        Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MT','/DLUA_BUILD_AS_DLL',
-            "/I$source", "/Fo$object", $file.FullName) | Out-Host
+        Invoke-Native $Msvc.Cl (@('/nologo','/c','/O2','/MT','/DLUA_BUILD_AS_DLL') +
+            $compatibilityFlags + @("/I$source", "/Fo$object", $file.FullName)) | Out-Host
         $objectFiles += $object
     }
     $null = New-Item -ItemType Directory -Path $prefix
@@ -222,13 +262,13 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     Invoke-Native $Msvc.Link (@('/nologo','/DLL','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
         "/OUT:$dll", "/IMPLIB:$library") + $objectFiles) | Out-Host
     $luaObject = Join-Path $objects 'lua.obj'
-    Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MT',"/I$source",
-        "/Fo$luaObject",(Join-Path $source 'lua.c')) | Out-Host
+    Invoke-Native $Msvc.Cl (@('/nologo','/c','/O2','/MT') + $compatibilityFlags +
+        @("/I$source", "/Fo$luaObject", (Join-Path $source 'lua.c'))) | Out-Host
     Invoke-Native $Msvc.Link @('/nologo','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
         "/OUT:$lua",$luaObject,$library) | Out-Host
     $luacObject = Join-Path $objects 'luac.obj'
-    Invoke-Native $Msvc.Cl @('/nologo','/c','/O2','/MT',"/I$source",
-        "/Fo$luacObject",(Join-Path $source 'luac.c')) | Out-Host
+    Invoke-Native $Msvc.Cl (@('/nologo','/c','/O2','/MT') + $compatibilityFlags +
+        @("/I$source", "/Fo$luacObject", (Join-Path $source 'luac.c'))) | Out-Host
     Invoke-Native $Msvc.Link (@('/nologo','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
         "/OUT:$luac",$luacObject) + $objectFiles) | Out-Host
     Copy-Item -LiteralPath $dll -Destination (Join-Path $prefix "bin\lua$compact.dll")
@@ -294,7 +334,7 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         'onefile_lifecycle.lua','distribution_licenses.lua','reproducible_artifacts.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
-    Invoke-Native $LuaRocks @('lint','luainstaller-1.1.0-1.rockspec')
+    Invoke-Native $LuaRocks @('lint','luainstaller-1.1.1-1.rockspec')
     "PASS host=$HostLabel lua=$version abi=Lua $abi"
 }
 

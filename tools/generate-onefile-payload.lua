@@ -40,7 +40,10 @@ local function safeRelative(value)
 end
 
 local function native(value)
-    if windows then return tostring(value):gsub("/", "\\") end
+    if windows then
+        local converted = tostring(value):gsub("/", "\\")
+        return converted
+    end
     return value
 end
 

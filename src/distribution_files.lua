@@ -8,14 +8,14 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-07-18
+    2026-08-16
 ]]
 
 return {
     {
         source = "LICENSES/Lua-MIT.txt",
         destination = ".luai/licenses/Lua-MIT.txt",
-        content = [====[Copyright © 1994–2025 Lua.org, PUC-Rio.
+        content = [====[Copyright © 1994–2026 Lua.org, PUC-Rio.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -897,7 +897,7 @@ application.
 
 ## Official Lua release-qualification sources
 
-- Copyright: Copyright © 1994–2025 Lua.org, PUC-Rio.
+- Copyright: Copyright © 1994–2026 Lua.org, PUC-Rio.
 - License: MIT; reproduced in `.luai/licenses/Lua-MIT.txt`
 - License page: https://www.lua.org/license.html
 
@@ -909,7 +909,7 @@ The native release matrix verifies these archives before use:
 | Lua 5.2.4 | https://www.lua.org/ftp/lua-5.2.4.tar.gz | `b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b` |
 | Lua 5.3.6 | https://www.lua.org/ftp/lua-5.3.6.tar.gz | `fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60` |
 | Lua 5.4.8 | https://www.lua.org/ftp/lua-5.4.8.tar.gz | `4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae` |
-| Lua 5.5.0 | https://www.lua.org/ftp/lua-5.5.0.tar.gz | `57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d` |
+| Lua 5.5.1 | https://www.lua.org/ftp/lua-5.5.1.tar.gz | `1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce` |
 
 A generated bundle's `.luai/manifest.lua` identifies the actual Lua
 major/minor ABI and runtime link mode selected from its build environment.
@@ -959,7 +959,7 @@ under LGPL-3.0-or-later. It is not a substitute for the license texts in
 . Use an official Lua interpreter, headers, and library with the same
   major/minor ABI shown in `../manifest.lua`.
 . Use a native compiler for the target OS and architecture. Cross-compilation
-  is not part of the supported 1.0 relinking profile.
+  is outside the supported native relinking profile.
 . Compile `launcher.c` as strict C11, link the selected Lua library and its
   platform dependencies, and preserve the loader search path used by the
   target profile.
@@ -1051,7 +1051,10 @@ local function safeRelative(value)
 end
 
 local function native(value)
-    if windows then return tostring(value):gsub("/", "\\") end
+    if windows then
+        local converted = tostring(value):gsub("/", "\\")
+        return converted
+    end
     return value
 end
 

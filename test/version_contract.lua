@@ -55,7 +55,7 @@ if exact_release or source_sha256 then
         ["5.2.4"] = "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
         ["5.3.6"] = "fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60",
         ["5.4.8"] = "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
-        ["5.5.0"] = "57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d",
+        ["5.5.1"] = "1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce",
     }
     assert(type(exact_release) == "string" and pinned_sources[exact_release],
         "matrix did not identify a pinned exact Lua release")

@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-29
+    2026-08-22
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -514,7 +514,7 @@ local function check_documentation_contract()
     assert_not_contains(bundling, "32-bit FNV-1a")
 
     local usage = read_file("docs/USAGE.adoc")
-    assert_contains(usage, "official Lua `>= 5.1` and `< 6.0`")
+    assert_contains(usage, "official Lua `>= 5.1` and `< 5.6`")
     assert_contains(usage, "LuaJIT is rejected")
     assert_contains(usage, "entry-rooted")
     assert_contains(usage, "same environment")
@@ -522,15 +522,24 @@ local function check_documentation_contract()
     local testing = read_file("docs/TESTING.adoc")
     assert_contains(testing, "test/production_edges.lua")
     assert_contains(testing, "tools/test-lua-versions.ps1")
-    assert_contains(testing, "Windows 11")
-    assert_contains(testing, "macOS 26.x")
+    assert_contains(testing, "Windows with MSVC and the Windows SDK")
+    assert_contains(testing, "`windows-2022`")
+    assert_contains(testing, "GitHub-hosted runners are accepted")
+    assert_contains(testing, "not release prerequisites")
+    assert_not_contains(testing, "Windows 11")
+    assert_not_contains(testing, "mandatory physical")
     assert_contains(testing, "SHA-256")
     assert_contains(testing, "private empty directory")
     assert_contains(testing, "lua-cjson-2.1.0.10-1.src.rock")
     assert_contains(testing, "LUAI_REQUIRE_FULL_EDGE_COVERAGE=1")
-    assert_contains(testing, "native build and run on physical hosts")
-    assert_contains(testing, "cross-compilers are not substitutes")
+    assert_contains(testing, "do not substitute for the Windows MSVC job")
     assert_contains(testing, "tip of `main`")
+
+    local ci = read_file(".github/workflows/ci.yml")
+    assert_contains(ci, "runs-on: windows-2022")
+    assert_contains(ci, "tools\\test-lua-versions.ps1")
+    assert_contains(ci, "windows-lua-${{ matrix.lua }}-evidence")
+    assert_contains(ci, "actions/upload-artifact@")
 
     local benchmark = read_file("tools/benchmark-real-world.sh")
     local realworld_cases = read_file("REALWORLD_TEST_CASES.txt")
@@ -538,17 +547,37 @@ local function check_documentation_contract()
     assert_not_contains(benchmark, "--require-engine")
     assert_not_contains(realworld_cases, "--require-engine")
     assert_contains(benchmark, [[-d "$discovery"]])
+    assert_contains(benchmark, "https://github.com/lunarmodules/luacheck")
+    assert_contains(benchmark, "tp.connect")
+    assert_contains(benchmark, [[exit "$benchmark_status"]])
+    assert_not_contains(benchmark, "adnzzzzZ/tinykeep")
+    assert_not_contains(benchmark, "tp.gettime")
+    assert_contains(testing, "\nbash tools/benchmark-real-world.sh")
+    assert_not_contains(testing, "\nsh tools/benchmark-real-world.sh")
     assert_contains(realworld_cases, "-d static")
     assert_contains(realworld_cases, "-d <static|runtime>")
+    assert_contains(realworld_cases, "bash tools/benchmark-real-world.sh")
+    assert_not_contains(realworld_cases, " sh tools/benchmark-real-world.sh")
+    assert_contains(realworld_cases, "https://github.com/lunarmodules/luacheck")
+    assert_contains(realworld_cases, "tp.connect")
+    assert_not_contains(realworld_cases, "adnzzzzZ/tinykeep")
+    assert_not_contains(realworld_cases, "tp.gettime")
 
     local readme = read_file("README.adoc")
     assert_contains(readme, "luai")
     assert_contains(readme, "require(\"luainstaller\")")
     assert_contains(readme, "documentation-index")
+    assert_contains(readme, "CHANGELOG.adoc")
     assert_contains(readme, "docs/RELINKING.adoc")
 
+    local changelog = read_file("CHANGELOG.adoc")
+    assert_contains(changelog, "== Unreleased")
+    assert_contains(changelog, "== 1.1.1")
+    assert_contains(changelog, "== 1.1.0")
+    assert_contains(changelog, "=== Upgrade notes")
+
     local platform_limits = read_file("docs/PLATFORMS-NATIVE-LIMITS.adoc")
-    assert_contains(platform_limits, "official Lua `>= 5.1` and `< 6.0`")
+    assert_contains(platform_limits, "official Lua `>= 5.1` and `< 5.6`")
     assert_contains(platform_limits, "evidence, not a platform allowlist")
     assert_contains(platform_limits, "There is no cross-build mode")
 
@@ -562,8 +591,8 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.1.0-1.rockspec")
-    assert_contains(rockspec, '"lua >= 5.1, < 6.0"')
+    local rockspec = read_file("luainstaller-1.1.1-1.rockspec")
+    assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
         read_file("tools/test-lua-versions.sh"),
@@ -574,7 +603,8 @@ local function check_documentation_contract()
         read_file("tools/benchmark-real-world.sh"),
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
+    assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.1.1-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

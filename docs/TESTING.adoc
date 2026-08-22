@@ -6,8 +6,11 @@
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Release evidence is a native build and run on physical hosts; VMs, Wine,
-MinGW, and cross-compilers are not substitutes for a mandatory physical class.
+Required release evidence comes from the GitHub Actions workflow: native Linux
+x86_64 builds and native Windows x86_64 builds with MSVC and the Windows SDK.
+GitHub-hosted runners are accepted. Supplemental lab and local runs broaden
+coverage but are not release prerequisites. Wine, MinGW, and cross-compilers
+do not substitute for the Windows MSVC job.
 
 toc::[]
 
@@ -29,7 +32,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.1.0-1.rockspec
+luarocks lint luainstaller-1.1.1-1.rockspec
 ----
 
 [cols="2,3",options="header"]
@@ -52,7 +55,8 @@ luarocks lint luainstaller-1.1.0-1.rockspec
 |Boundary and safety-related behavior
 
 |`test/build_interruption.lua`
-|SIGINT finalization plus SIGKILL dead-owner recovery and retry
+|Relayed SIGINT compiler shutdown, bounded SIGKILL descendants, dead-owner
+recovery, and clean retry
 
 |`test/onefile_lifecycle.lua`
 |POSIX process identity/signals and Windows child containment
@@ -103,7 +107,7 @@ install, invoking commands outside the checkout, and running artifacts with
 |5.4.8
 
 |5.5
-|5.5.0
+|5.5.1
 |===
 
 Archives are verified with SHA-256 before extract. The POSIX runner accepts
@@ -140,28 +144,32 @@ module from that ABI's isolated tree:
 |`pegasus-1.1.0-0.src.rock`
 |`0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746`
 
-|`lsqlite3_v096.zip`
-|`ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82`
+|`lsqlite3-0.9.6.c`
+|`a3de0d56dcdd7df85e334174cd46e70451f996bc843e735ab1d8a8e8804f9486`
 
 |`sqlite-amalgamation-3530200.zip`
 |`8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32`
 |===
 
-The native-dependency cache identity binds both this source list and its exact
-installation order. The runner extracts lsqlite3 and the pinned SQLite
-amalgamation into distinct roots, rejects any selected source outside its
-expected root, and records each archive name, SHA-256, internal C source member,
-cache identity, and cache hit/rebuild result in every evidence log. A cold
-compile additionally records both exact extraction paths; a cache hit never
-pretends that its already-removed build directory still exists.
+The lsqlite3 C source is fetched from immutable mirror commit
+`72cf3d38f6df7ac995f6db05d8ffeb78c25c9179`; its hash matches the source in
+the upstream `v0.9.6` Fossil snapshot without relying on Fossil's
+server-generated ZIP bytes. The native-dependency cache identity binds both
+this source list and its exact installation order. The runner stages lsqlite3
+and extracts the pinned SQLite amalgamation into distinct roots, rejects any
+selected source outside its expected root, and records each input name,
+SHA-256, internal archive member where applicable, cache identity, and cache
+hit/rebuild result in every evidence log. A cold compile additionally records
+the exact staged/extraction paths; a cache hit never pretends that its
+already-removed build directory still exists.
 Direct Linux matrix runs default to the strict `full` edge-coverage mode and
 set `LUAI_REQUIRE_FULL_EDGE_COVERAGE=1`, so missing sanitizer, alternate
 compiler, LuaJIT, PE cross-inspection, `/dev/full`, or permission probes fail
-the local release gate instead of appearing as a pass. Physical-host runners
-set `LUAI_MATRIX_EDGE_COVERAGE_MODE=available`: they still run the complete
-production edge suite and every probe supported by that host, while each
-evidence log explicitly lists unavailable strict prerequisites. A physical
-host that has every prerequisite automatically runs the same strict gate.
+the local gate instead of appearing as a pass. CI and supplemental runners use
+`LUAI_MATRIX_EDGE_COVERAGE_MODE=available`: they still run the complete
+production edge suite and every probe supported by that runner, while each
+evidence log explicitly lists unavailable strict prerequisites. A runner with
+every prerequisite automatically runs the same strict gate.
 
 Each source-built Lua prefix publishes its own `lua.pc`, and the runner pins
 `PKG_CONFIG_PATH` to that file. Native fixtures therefore compile against the
@@ -186,36 +194,35 @@ powershell.exe -NoLogo -NoProfile -NonInteractive `
   -HostLabel <label>
 ----
 
-A release requires all five versions. Every POSIX version runs the complete
-local, native, interruption, onefile, license/relinking, reproducibility,
-production-edge, and smoke gates. Every Windows version runs all applicable
-native Windows gates, including lifecycle, license/relinking, and
-reproducibility. Each per-version evidence log must contain both `lua ABI
+A release requires all five versions in both required GitHub Actions jobs:
+Linux x86_64 and Windows x86_64 with MSVC. Every POSIX version runs the
+complete local, native, interruption, onefile, license/relinking,
+reproducibility, production-edge, and smoke gates. Every Windows version runs
+all applicable native Windows gates, including lifecycle, license/relinking,
+and reproducibility. Each per-version evidence log must contain both `lua ABI
 capabilities ok` and the final `PASS` record; `version_contract.lua` also
 matches the interpreter's exact patch banner to the pinned source digest.
 
 [#testing-systems]
-== Tested system types
+== Required CI runner classes
 
-[cols="2,1",options="header"]
+[cols="2,1,2",options="header"]
 |===
-|System |Architecture
+|Runner |Architecture |Workflow label
 
-|Windows 11
+|Windows with MSVC and the Windows SDK
 |x86_64
+|`windows-2022`
 
-|Debian 13
+|Linux
 |x86_64
-
-|Rocky Linux 10
-|x86_64
-
-|Ubuntu 24.04 LTS
-|ARM64
-
-|macOS 26.x
-|ARM64
+|`ubuntu-latest`
 |===
+
+Supplemental compatibility runs currently cover Debian 13 x86_64, Rocky Linux
+10 x86_64, Ubuntu 24.04 LTS ARM64, and macOS ARM64. These runs are retained as
+useful additional evidence but do not block a release when the required CI
+jobs are green.
 
 [#testing-orchestration]
 == Orchestration (maintainers)
@@ -226,10 +233,11 @@ sh tools/remote-test-linux.sh
 MAC_HOST=<host alias from local lab config> sh tools/remote-test-macos.sh
 ----
 
-On Windows run `tools/test-lua-versions.ps1` on the target machine. Transfers
-use `git archive`; temporary paths are constrained under patterns such as
+On Windows, CI and local native environments run
+`tools/test-lua-versions.ps1`. Transfers used by supplemental lab scripts use
+`git archive`; temporary paths are constrained under patterns such as
 `/tmp/luainstaller-*`. Default SSH targets in scripts are lab-local and are not
-part of the user-facing contract.
+part of the user-facing contract or required release infrastructure.
 
 [#testing-real-world-benchmarks]
 == Real-world benchmark matrix (manual)
@@ -238,7 +246,7 @@ For realistic shipping scenarios beyond the contract suites, run:
 
 [source,bash]
 ----
-sh tools/benchmark-real-world.sh
+bash tools/benchmark-real-world.sh
 ----
 
 The matrix covers:
@@ -248,12 +256,13 @@ The matrix covers:
 * dynamic require (`-d runtime`)
 * native C modules (`lua-cjson`, `LuaSocket`)
 * luafilesystem (`luafilesystem`)
+* the Luacheck parser dependency graph
 * `neovim` `runtime/lua` scale stress
 * synthetic large trees (`100`, `1000`, `10000` modules)
 
 Useful options:
 
-* `--skip-external` to skip GitHub network projects (`tinykeep`, `neovim`)
+* `--skip-external` to skip GitHub network projects (`luacheck`, `neovim`)
 * `--skip-native` to skip native module install/cases
 * `--fake-scales "100 1000 10000"` to adjust pressure sets
 * `--keep-workspace` to preserve fixtures and logs
@@ -271,14 +280,16 @@ Summary and logs are written to:
 == Release checklist
 
 . rockspec lint and isolated install
+. Green `local-suites`, five-entry Linux matrix, and five-entry Windows/MSVC
+  matrix in GitHub Actions
 . Production sources parse on all five pinned versions
 . Every required local suite above without required skips
-. Five-version matrix on each verified environment class
 . Directory and single-file runs with `PATH` set to a private empty directory,
   without system `lua`, and without `LUA_PATH` / `LUA_CPATH`
 . Repeated single-file build and extract checks
 . Byte-identical cross-checkout artifacts and bundled-license relinking checks
-. Native modules and system libraries inspected on target
+. Native modules and system libraries inspected on both required CI runner
+  classes
 . Documentation does not prescribe cross-build or a device allowlist
 . `git diff --check` and clean-checkout review
 

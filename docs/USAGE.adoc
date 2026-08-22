@@ -10,7 +10,7 @@ Day-to-day packaging. Platforms and ABI:
 xref:PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules]. Install and
 CLI/library overview: xref:../README.adoc[README].
 
-Supports official Lua `>= 5.1` and `< 6.0`. LuaJIT is rejected. The running
+Supports official Lua `>= 5.1` and `< 5.6`. LuaJIT is rejected. The running
 interpreter defines the bundle Lua major/minor ABI; headers, libraries,
 discovery, native modules, and the linked runtime must match. Lua 5.5 needs
 LuaRocks `>= 3.13.0`.

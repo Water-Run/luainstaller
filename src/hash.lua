@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-07-29
+    2026-08-16
 ]]
 
 local compat = require("luainstaller.compat")
@@ -132,8 +132,11 @@ end
 
 local function paddedTail(buffer, total_length)
     local zero_count = (56 - ((total_length + 1) % 64)) % 64
-    local high = rshift(total_length, 29)
-    local low = lshift(total_length, 3)
+    -- Do not use the 32-bit compatibility shifts for the byte count: they
+    -- truncate before shifting and therefore encode the wrong SHA-256 length
+    -- for files of 4 GiB or more.
+    local high = math.floor(total_length / 0x20000000) % 0x100000000
+    local low = (total_length % 0x20000000) * 8
     return buffer
         .. "\128"
         .. string.rep("\0", zero_count)
@@ -314,21 +317,32 @@ end
 --@param path: string - File path
 --@return: string|nil - Hex digest, or nil plus an error message
 function M.sha256File(path)
-    local handle = io.open(path, "rb")
-    if not handle then
-        return nil, "cannot open file for hashing: " .. tostring(path)
+    local opened, handle, open_err = pcall(io.open, path, "rb")
+    if not opened or not handle then
+        return nil, "cannot open file for hashing: "
+            .. tostring(opened and open_err or handle)
     end
     local state = newSha256State()
     while true do
-        local chunk = handle:read(64 * 1024)
+        local read_ok, chunk, read_err = pcall(handle.read, handle, 64 * 1024)
+        if not read_ok or (chunk == nil and read_err ~= nil) then
+            pcall(handle.close, handle)
+            return nil, "cannot read file for hashing: "
+                .. tostring(read_ok and read_err or chunk)
+        end
         if chunk == nil then
             break
         end
-        updateSha256(state, chunk)
+        local updated, update_err = updateSha256(state, chunk)
+        if not updated then
+            pcall(handle.close, handle)
+            return nil, update_err
+        end
     end
-    local closed, close_err = handle:close()
-    if not closed then
-        return nil, "cannot close file after hashing: " .. tostring(close_err)
+    local close_ok, closed, close_err = pcall(handle.close, handle)
+    if not close_ok or not closed then
+        return nil, "cannot close file after hashing: "
+            .. tostring(close_ok and close_err or closed)
     end
     return finalizeSha256(state)
 end

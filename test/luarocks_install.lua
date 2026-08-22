@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-18
+    2026-08-22
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -39,7 +39,7 @@ print(require("greeting").message(arg[1] or "missing"))
 local installed, install_output = process.outputCommand("luarocks", {
     "make",
     "--tree", tree,
-    path.absolute("luainstaller-1.1.0-1.rockspec"),
+    path.absolute("luainstaller-1.1.1-1.rockspec"),
 })
 assert(installed, install_output)
 
@@ -70,7 +70,7 @@ local function installedCommand(command, arguments, environment)
 end
 
 local version_ok, version_output = installedCommand(luai, { "-v" })
-assert(version_ok and version_output == "luai 1.1.0\n", version_output)
+assert(version_ok and version_output == "luai 1.1.1\n", version_output)
 local runtime_ok, runtime_output = installedCommand(luai, {
     "-a", path.join(project, "main.lua"),
     "--discovery-mode", "runtime",

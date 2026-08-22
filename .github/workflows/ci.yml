@@ -1,8 +1,7 @@
-# Continuous integration smoke gate.
+# Required continuous-integration and release gate.
 #
-# This workflow is a fast pre-push/PR gate, NOT a release gate. Release
-# evidence still requires the physical-host matrix described in
-# docs/TESTING.adoc; CI results never substitute for it.
+# The pinned Lua matrix runs natively on Linux and Windows/MSVC. Additional
+# lab hosts broaden coverage but are not prerequisites for a release.
 
 name: ci
 
@@ -10,13 +9,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   local-suites:
     name: local suites (pinned shared Lua 5.4)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install build prerequisites
         run: |
@@ -27,6 +30,19 @@ jobs:
         run: |
           sh tools/ci-build-lua54.sh
           "$HOME/luai-lua/bin/lua" -v
+
+      - name: Export pinned Lua environment
+        run: |
+          echo "$HOME/luai-lua/bin" >> "$GITHUB_PATH"
+          {
+            echo "LUAI_TEST_LUA=$HOME/luai-lua/bin/lua"
+            echo "LUAI_TEST_LUAC=$HOME/luai-lua/bin/luac"
+            echo "LUAI_LUA_PREFIX=$HOME/luai-lua"
+            echo "LUAI_LUA_RELEASE=5.4.8"
+            echo "LUAI_LUA_SOURCE_SHA256=4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae"
+            echo "PKG_CONFIG_PATH=$HOME/luai-lua/lib/pkgconfig"
+            echo "LD_LIBRARY_PATH=$HOME/luai-lua/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          } >> "$GITHUB_ENV"
 
       - name: Syntax and shell checks
         run: |
@@ -42,10 +58,6 @@ jobs:
           git diff --check
 
       - name: Fast contract suites
-        env:
-          PATH: $HOME/luai-lua/bin:$PATH
-          LUAI_TEST_LUA: $HOME/luai-lua/bin/lua
-          LUAI_TEST_LUAC: $HOME/luai-lua/bin/luac
         run: |
           lua -v
           lua test/lua_abi.lua
@@ -54,14 +66,6 @@ jobs:
           lua test/contract_docs.lua
 
       - name: Edge and safety suites
-        env:
-          PATH: $HOME/luai-lua/bin:$PATH
-          LUAI_TEST_LUA: $HOME/luai-lua/bin/lua
-          LUAI_TEST_LUAC: $HOME/luai-lua/bin/luac
-          LUAI_LUA_PREFIX: $HOME/luai-lua
-          LUAI_LUA_RELEASE: 5.4.8
-          LUAI_LUA_SOURCE_SHA256: 4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
-          PKG_CONFIG_PATH: $HOME/luai-lua/lib/pkgconfig
         run: |
           lua test/production_edges.lua
           lua test/onefile_lifecycle.lua
@@ -80,26 +84,30 @@ jobs:
             'exec /usr/bin/luarocks-5.4 --lua-dir="$HOME/luai-lua" "$@"' \
             > "$HOME/bin/luarocks"
           chmod +x "$HOME/bin/luarocks"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          {
+            echo "LUA_PATH=$HOME/luai-rocks/share/lua/5.4/?.lua;;"
+            echo "LUA_CPATH=$HOME/luai-rocks/lib/lua/5.4/?.so;;"
+            echo "LD_LIBRARY_PATH=$HOME/luai-rocks/lib/lua/5.4:$LD_LIBRARY_PATH"
+          } >> "$GITHUB_ENV"
 
       - name: Comprehensive smoke audit
-        env:
-          PATH: $HOME/bin:$HOME/luai-lua/bin:$PATH
-          LUAI_TEST_LUA: $HOME/luai-lua/bin/lua
-          LUAI_TEST_LUAC: $HOME/luai-lua/bin/luac
-          LUAI_LUA_PREFIX: $HOME/luai-lua
-          LUAI_LUA_RELEASE: 5.4.8
-          LUAI_LUA_SOURCE_SHA256: 4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
-          PKG_CONFIG_PATH: $HOME/luai-lua/lib/pkgconfig
-          LD_LIBRARY_PATH: $HOME/luai-lua/lib:$HOME/luai-rocks/lib/lua/5.4
-          LUA_PATH: $HOME/luai-rocks/share/lua/5.4/?.lua;;
-          LUA_CPATH: $HOME/luai-rocks/lib/lua/5.4/?.so;;
         run: lua test/smoke_all.lua
 
   version-matrix:
-    name: official Lua matrix (POSIX runner)
+    name: official Lua ${{ matrix.lua }} (POSIX runner)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lua:
+          - "5.1.5"
+          - "5.2.4"
+          - "5.3.6"
+          - "5.4.8"
+          - "5.5.1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install matrix prerequisites
         run: |
@@ -107,8 +115,45 @@ jobs:
           sudo apt-get install -y build-essential pkg-config libreadline-dev \
             unzip curl ca-certificates clang luajit gcc-mingw-w64-x86-64
 
-      - name: Run the pinned five-version matrix
+      - name: Run the pinned Lua version
         run: |
-          LUAI_MATRIX_EDGE_COVERAGE_MODE=available HOST_LABEL=ci \
+          VERSION_FILTER='${{ matrix.lua }}' \
+            LUAI_MATRIX_EDGE_COVERAGE_MODE=available HOST_LABEL=ci \
             sh tools/test-lua-versions.sh
         timeout-minutes: 120
+
+  windows-version-matrix:
+    name: official Lua ${{ matrix.lua }} (Windows MSVC)
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        lua:
+          - "5.1.5"
+          - "5.2.4"
+          - "5.3.6"
+          - "5.4.8"
+          - "5.5.1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run the pinned Lua version with MSVC
+        shell: powershell
+        timeout-minutes: 120
+        env:
+          LUA_VERSION: ${{ matrix.lua }}
+        run: |
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1 `
+            -HostLabel ci-windows-2022-x86_64 `
+            -VersionFilter $env:LUA_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-lua-${{ matrix.lua }}-evidence
+          path: ${{ runner.temp }}/luainstaller-lua-evidence/*.log
+          if-no-files-found: warn
+          retention-days: 14

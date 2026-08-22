@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-29
+    2026-08-16
 ]]
 
 local fs = require("luainstaller.fs")
@@ -41,6 +41,12 @@ end
 M.fnv1a32 = hash.fnv1a32
 
 local function fileHash(path)
+    if type(io.popen) == "function" then
+        if fs.pathType(path) ~= "file" then
+            return nil, "path is not a regular file"
+        end
+        return hash.sha256File(path)
+    end
     local content, read_err = readFile(path)
     if not content then
         return nil, read_err

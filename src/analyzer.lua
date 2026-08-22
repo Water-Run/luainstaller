@@ -13,7 +13,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-29
+    2026-08-16
 ]]
 
 local fs = require("luainstaller.fs")
@@ -248,13 +248,20 @@ function LuaLexer.new(source_code, file_path)
     self.require_shadowed = false
     self.shadow_stack = {}
     self.local_pending = false
+    self.local_expect_name = false
     self.local_names = 0
     self.local_has_require = false
-    self.awaiting_passthrough = false
     self.pending_function_params = false
     self.in_params = false
     self.param_paren = 0
-    self.suppress_then_push = false
+    self.suppress_then_depths = {}
+    self.require_declaration_token = false
+    self.pending_require_assignment = false
+    self.local_outer_shadowed = false
+    self.local_attribute = false
+    self.for_trackers = {}
+    self.expression_trackers = {}
+    self.table_constructor_scopes = {}
     return self
 end
 
@@ -370,13 +377,6 @@ end
 function LuaLexer:advanceCharacter()
     local ch = self:currentChar()
     if ch == "\r" or ch == "\n" then
-        -- A statement break ends a pending local name list.
-        if self.local_pending then
-            self.local_pending = false
-            if self.local_has_require then
-                self.require_shadowed = true
-            end
-        end
         self.pos = self.pos + 1
         if self:currentChar() == "\n" and ch == "\r" then
             self.pos = self.pos + 1
@@ -440,6 +440,328 @@ function LuaLexer:skipTrivia()
             return
         end
     end
+end
+
+local EXPRESSION_OPERATOR_KEYWORDS = {
+    ["and"] = true,
+    ["or"] = true,
+    ["not"] = true,
+}
+
+local EXPRESSION_VALUE_KEYWORDS = {
+    ["false"] = true,
+    ["nil"] = true,
+    ["true"] = true,
+}
+
+local STATEMENT_KEYWORDS = {
+    ["break"] = true,
+    ["do"] = true,
+    ["else"] = true,
+    ["elseif"] = true,
+    ["end"] = true,
+    ["for"] = true,
+    ["goto"] = true,
+    ["if"] = true,
+    ["in"] = true,
+    ["local"] = true,
+    ["repeat"] = true,
+    ["return"] = true,
+    ["then"] = true,
+    ["until"] = true,
+    ["while"] = true,
+}
+
+local LUA_KEYWORDS = {
+    ["and"] = true,
+    ["break"] = true,
+    ["do"] = true,
+    ["else"] = true,
+    ["elseif"] = true,
+    ["end"] = true,
+    ["false"] = true,
+    ["for"] = true,
+    ["function"] = true,
+    ["goto"] = true,
+    ["if"] = true,
+    ["in"] = true,
+    ["local"] = true,
+    ["nil"] = true,
+    ["not"] = true,
+    ["or"] = true,
+    ["repeat"] = true,
+    ["return"] = true,
+    ["then"] = true,
+    ["true"] = true,
+    ["until"] = true,
+    ["while"] = true,
+}
+
+-- `goto` became reserved in Lua 5.2.  On 5.1 it remains a legal local,
+-- parameter, and loop-variable name, so declaration tracking must treat it
+-- like any other identifier there.
+if _VERSION == "Lua 5.1" then
+    STATEMENT_KEYWORDS["goto"] = nil
+    LUA_KEYWORDS["goto"] = nil
+end
+
+function LuaLexer:pushShadowScope(kind, local_declaration)
+    self.shadow_stack[#self.shadow_stack + 1] = {
+        shadowed = self.require_shadowed,
+        kind = kind,
+        local_declaration = local_declaration == true,
+        post_shadowed = false,
+        post_global_rebind = false,
+        body_global_rebound = false,
+    }
+end
+
+function LuaLexer:shadowScopeOuter(entry)
+    if type(entry) == "table" then return entry.shadowed end
+    return entry
+end
+
+function LuaLexer:applyShadowScopeExit(entry)
+    self.require_shadowed = self:shadowScopeOuter(entry)
+    if type(entry) ~= "table" then return entry end
+
+    local global_rebound = entry.post_global_rebind
+        or (entry.kind ~= "function" and entry.body_global_rebound)
+    if entry.post_shadowed or global_rebound then
+        self.require_shadowed = true
+    end
+    if global_rebound then
+        local parent = self.shadow_stack[#self.shadow_stack]
+        if type(parent) == "table" and parent.kind ~= "function" then
+            parent.body_global_rebound = true
+        end
+    end
+    return entry
+end
+
+function LuaLexer:popShadowScope()
+    local entry = table.remove(self.shadow_stack)
+    if entry == nil then return nil end
+    return self:applyShadowScopeExit(entry)
+end
+
+function LuaLexer:markVisibleRequireAssignment()
+    if not self.require_shadowed then
+        local scope = self.shadow_stack[#self.shadow_stack]
+        if type(scope) == "table" then
+            scope.body_global_rebound = true
+        end
+    end
+    self.require_shadowed = true
+end
+
+function LuaLexer:finishPendingLocalDeclaration()
+    if not self.local_pending then return end
+    self.local_pending = false
+    self.local_expect_name = false
+    self.local_attribute = false
+    if self.local_has_require then
+        self.require_shadowed = true
+    end
+end
+
+function LuaLexer:recordLocalName(is_require)
+    self.local_names = self.local_names + 1
+    self.local_expect_name = false
+    if is_require then
+        self.local_has_require = true
+        self.require_declaration_token = true
+    end
+end
+
+function LuaLexer:currentForTracker()
+    local tracker = self.for_trackers[#self.for_trackers]
+    if tracker and tracker.scope_depth == #self.shadow_stack then
+        return tracker
+    end
+    return nil
+end
+
+function LuaLexer:trackerAtCurrentScope(tracker)
+    return tracker ~= nil and tracker.scope_depth == #self.shadow_stack
+end
+
+function LuaLexer:trackerAtBoundary(tracker)
+    return self:trackerAtCurrentScope(tracker)
+        and tracker.delimiter_depth == 0
+end
+
+function LuaLexer:finishExpressionTracker()
+    local tracker = table.remove(self.expression_trackers)
+    if not tracker then return end
+    if tracker.kind == "local" then
+        local passthrough = tracker.passthrough_candidate
+            and tracker.plain_require_only
+            and tracker.saw_plain_require
+        if passthrough then
+            self.require_shadowed = tracker.outer_shadowed
+        else
+            self.require_shadowed = true
+        end
+    elseif tracker.kind == "assignment" then
+        local passthrough = tracker.plain_require_only
+            and tracker.saw_plain_require
+        if passthrough then
+            self.require_shadowed = tracker.outer_shadowed
+        else
+            self:markVisibleRequireAssignment()
+        end
+    elseif tracker.kind == "until" then
+        self:applyShadowScopeExit(tracker.scope_entry)
+    end
+end
+
+function LuaLexer:finishTrackersBeforeValue()
+    while true do
+        local tracker = self.expression_trackers[#self.expression_trackers]
+        if not self:trackerAtBoundary(tracker) or tracker.expect_operand then
+            return
+        end
+        self:finishExpressionTracker()
+    end
+end
+
+function LuaLexer:finishTrackersAtStatementBoundary()
+    while true do
+        local tracker = self.expression_trackers[#self.expression_trackers]
+        if not self:trackerAtBoundary(tracker) then return end
+        self:finishExpressionTracker()
+    end
+end
+
+function LuaLexer:forCurrentExpressionTrackers(callback)
+    local depth = #self.shadow_stack
+    for _, tracker in ipairs(self.expression_trackers) do
+        if tracker.scope_depth == depth then callback(tracker) end
+    end
+end
+
+function LuaLexer:markExpressionOperator()
+    self:forCurrentExpressionTrackers(function(tracker)
+        tracker.expect_operand = true
+        if tracker.kind == "local" or tracker.kind == "assignment" then
+            tracker.plain_require_only = false
+        end
+    end)
+end
+
+function LuaLexer:markExpressionValue()
+    self:forCurrentExpressionTrackers(function(tracker)
+        tracker.expect_operand = false
+        if tracker.kind == "local" or tracker.kind == "assignment" then
+            tracker.plain_require_only = false
+        end
+    end)
+end
+
+function LuaLexer:markPlainRequireValue()
+    self:forCurrentExpressionTrackers(function(tracker)
+        tracker.expect_operand = false
+        if tracker.kind == "local" or tracker.kind == "assignment" then
+            if tracker.saw_plain_require then
+                tracker.plain_require_only = false
+            else
+                tracker.saw_plain_require = true
+            end
+        end
+    end)
+end
+
+function LuaLexer:openExpressionDelimiter()
+    self:forCurrentExpressionTrackers(function(tracker)
+        tracker.delimiter_depth = tracker.delimiter_depth + 1
+        tracker.expect_operand = true
+        if tracker.kind == "local" or tracker.kind == "assignment" then
+            tracker.plain_require_only = false
+        end
+    end)
+end
+
+function LuaLexer:closeExpressionDelimiter()
+    self:forCurrentExpressionTrackers(function(tracker)
+        if tracker.delimiter_depth > 0 then
+            tracker.delimiter_depth = tracker.delimiter_depth - 1
+        end
+        tracker.expect_operand = false
+    end)
+end
+
+function LuaLexer:startLocalInitializer()
+    self.expression_trackers[#self.expression_trackers + 1] = {
+        kind = "local",
+        scope_depth = #self.shadow_stack,
+        delimiter_depth = 0,
+        expect_operand = true,
+        outer_shadowed = self.local_outer_shadowed,
+        passthrough_candidate = self.local_names == 1,
+        plain_require_only = true,
+        saw_plain_require = false,
+    }
+end
+
+function LuaLexer:startRequireAssignment()
+    self.expression_trackers[#self.expression_trackers + 1] = {
+        kind = "assignment",
+        scope_depth = #self.shadow_stack,
+        delimiter_depth = 0,
+        expect_operand = true,
+        outer_shadowed = self.require_shadowed,
+        plain_require_only = true,
+        saw_plain_require = false,
+    }
+end
+
+function LuaLexer:startUntilCondition(scope_entry)
+    self.expression_trackers[#self.expression_trackers + 1] = {
+        kind = "until",
+        scope_depth = #self.shadow_stack,
+        delimiter_depth = 0,
+        expect_operand = true,
+        scope_entry = scope_entry,
+    }
+end
+
+function LuaLexer:atTableFieldScope()
+    local scope_depth = self.table_constructor_scopes[
+        #self.table_constructor_scopes
+    ]
+    return scope_depth ~= nil and scope_depth == #self.shadow_stack
+end
+
+function LuaLexer:plainRequireReference()
+    local saved_pos = self.pos
+    local saved_line = self.line
+    local saved_local_pending = self.local_pending
+    local saved_require_shadowed = self.require_shadowed
+    self.pos = self.pos + #"require"
+    self:skipTrivia()
+    local character = self:currentChar()
+    local plain = character ~= "(" and character ~= "'" and character ~= '"'
+        and character ~= "[" and character ~= "{" and character ~= "."
+        and character ~= ":"
+    self.pos = saved_pos
+    self.line = saved_line
+    self.local_pending = saved_local_pending
+    self.require_shadowed = saved_require_shadowed
+    return plain
+end
+
+function LuaLexer:consumeNumber()
+    local source = self.source:sub(self.pos)
+    local number = source:match("^0[xX][%da-fA-F]*%.?[%da-fA-F]+[pP][%+%-]?%d+")
+        or source:match("^0[xX][%da-fA-F]+")
+        or source:match("^%d+%.?%d*[eE][%+%-]?%d+")
+        or source:match("^%d+%.?%d*")
+        or source:match("^%.%d+[eE][%+%-]?%d+")
+        or source:match("^%.%d+")
+    if not number or number == "" then return false end
+    self.pos = self.pos + #number
+    return true
 end
 
 --@description: Extract a quoted string literal and return its content
@@ -537,7 +859,10 @@ end
 --@description: Track scope and require-binding keywords read as identifiers
 --@param self: LuaLexer - Lexer instance
 --@param identifier: string - Identifier text
-function LuaLexer:trackKeyword(identifier)
+function LuaLexer:trackKeyword(identifier, local_function)
+    if self.local_attribute then
+        return
+    end
     if self.in_params then
         if identifier == "require" then
             self.require_shadowed = true
@@ -545,86 +870,109 @@ function LuaLexer:trackKeyword(identifier)
         return
     end
     if self.pending_function_params then
-        -- Function name (including method names); naming a function
-        -- "require" rebinds it for the function body.
-        if identifier == "require" then
-            self.require_shadowed = true
-        end
+        -- A require token in an unqualified function name is handled by
+        -- onRequireToken.  Reaching this identifier path means it was a
+        -- qualified field after `.` or `:`, which does not rebind require.
         return
     end
-    if self.local_pending then
-        if identifier == "require" then
-            self.local_names = self.local_names + 1
-            self.local_has_require = true
-            return
-        end
-        local terminates = {
-            ["end"] = true, ["until"] = true, ["then"] = true, ["do"] = true,
-            ["else"] = true, ["elseif"] = true, ["function"] = true,
-            ["local"] = true, ["return"] = true, ["repeat"] = true,
-            ["if"] = true, ["for"] = true, ["while"] = true, ["in"] = true,
-        }
-        if terminates[identifier] then
-            self.local_pending = false
-            if self.local_has_require then
-                self.require_shadowed = true
-            end
-        else
-            self.local_names = self.local_names + 1
-        end
-    end
     if identifier == "local" then
+        self.local_outer_shadowed = self.require_shadowed
         self.local_pending = true
+        self.local_expect_name = true
         self.local_names = 0
         self.local_has_require = false
     elseif identifier == "function" then
-        self.shadow_stack[#self.shadow_stack + 1] = self.require_shadowed
+        self:pushShadowScope("function", local_function)
         self.pending_function_params = true
-    elseif identifier == "do" or identifier == "repeat" then
-        self.shadow_stack[#self.shadow_stack + 1] = self.require_shadowed
+    elseif identifier == "for" then
+        self.for_trackers[#self.for_trackers + 1] = {
+            scope_depth = #self.shadow_stack,
+            names = true,
+            has_require = false,
+        }
+    elseif identifier == "in" then
+        local tracker = self:currentForTracker()
+        if tracker then tracker.names = false end
+    elseif identifier == "do" then
+        local tracker = self:currentForTracker()
+        if tracker then table.remove(self.for_trackers) end
+        self:pushShadowScope("do")
+        if tracker then
+            self.require_shadowed = self.require_shadowed
+                or tracker.has_require
+        end
+    elseif identifier == "repeat" then
+        self:pushShadowScope("repeat")
     elseif identifier == "then" then
-        if self.suppress_then_push then
-            self.suppress_then_push = false
+        local depth = #self.shadow_stack
+        if self.suppress_then_depths[depth] then
+            self.suppress_then_depths[depth] = nil
         else
-            self.shadow_stack[#self.shadow_stack + 1] = self.require_shadowed
+            self:pushShadowScope("then")
         end
     elseif identifier == "elseif" then
-        self.suppress_then_push = true
-    elseif identifier == "end" or identifier == "until" then
         if #self.shadow_stack > 0 then
-            self.require_shadowed = table.remove(self.shadow_stack)
+            self.require_shadowed = self:shadowScopeOuter(
+                self.shadow_stack[#self.shadow_stack]
+            )
         end
+        self.suppress_then_depths[#self.shadow_stack] = true
+    elseif identifier == "else" then
+        if #self.shadow_stack > 0 then
+            self.require_shadowed = self:shadowScopeOuter(
+                self.shadow_stack[#self.shadow_stack]
+            )
+        end
+    elseif identifier == "end" then
+        self:popShadowScope()
+    elseif identifier == "until" then
+        local scope_entry = table.remove(self.shadow_stack)
+        if scope_entry ~= nil then self:startUntilCondition(scope_entry) end
     end
 end
 
 --@description: Track a require token before call parsing
 --@param self: LuaLexer - Lexer instance
 function LuaLexer:onRequireToken()
+    local for_tracker = self:currentForTracker()
+    if for_tracker and for_tracker.names then
+        for_tracker.has_require = true
+        self.require_declaration_token = true
+        return
+    end
     if self.in_params then
         self.require_shadowed = true
         return
     end
     if self.pending_function_params then
-        self.require_shadowed = true
-        return
-    end
-    if self.awaiting_passthrough then
-        -- The right-hand side of \`local require = require\`: the binding
-        -- stays the real require only when it is a plain function reference.
-        self.awaiting_passthrough = false
+        -- Only `function require(...)` replaces the global/local binding.
+        -- A qualified name such as object.require or require.member defines a
+        -- table field and leaves the ordinary require visible in the body.
         local saved_pos = self.pos
         local saved_line = self.line
         self.pos = self.pos + #"require"
         self:skipTrivia()
-        local ch = self:currentChar()
+        local next_character = self:currentChar()
         self.pos = saved_pos
         self.line = saved_line
-        self.require_shadowed = (ch == "(" or ch == "." or ch == ":")
+        if self.previous_token ~= "." and self.previous_token ~= ":"
+            and next_character ~= "." and next_character ~= ":" then
+            local was_shadowed = self.require_shadowed
+            self.require_shadowed = true
+            local function_scope = self.shadow_stack[#self.shadow_stack]
+            if type(function_scope) == "table"
+                and function_scope.kind == "function" then
+                function_scope.post_shadowed = true
+                if not function_scope.local_declaration
+                    and not was_shadowed then
+                    function_scope.post_global_rebind = true
+                end
+            end
+        end
         return
     end
-    if self.local_pending then
-        self.local_names = self.local_names + 1
-        self.local_has_require = true
+    if self.local_pending and self.local_expect_name then
+        self:recordLocalName(true)
     end
 end
 
@@ -724,6 +1072,12 @@ function LuaLexer:parseRequire()
     local saved_pos  = self.pos
     local saved_line = self.line
 
+    if self.require_declaration_token then
+        self.require_declaration_token = false
+        self.pos = self.pos + #"require"
+        return nil
+    end
+
     if self.require_shadowed
         or self.previous_token == "function"
         or self.previous_token == "."
@@ -740,14 +1094,17 @@ function LuaLexer:parseRequire()
 
     -- Assignment target: \`require = <value>\` rebinds the global function
     -- and suppresses every later call in the file.
-    local peek_pos = self.pos + #"require"
-    while peek_pos <= self.source_len
-        and self.source:sub(peek_pos, peek_pos):match("%s") do
-        peek_pos = peek_pos + 1
-    end
-    local peek_char = self.source:sub(peek_pos, peek_pos)
-    if peek_char == "=" and self.source:sub(peek_pos + 1, peek_pos + 1) ~= "=" then
-        self.require_shadowed = true
+    local peek_saved_pos = self.pos
+    local peek_saved_line = self.line
+    self.pos = self.pos + #"require"
+    self:skipTrivia()
+    local peek_char = self:currentChar()
+    local assignment = peek_char == "=" and self:peekChar() ~= "="
+        and not self:atTableFieldScope()
+    self.pos = peek_saved_pos
+    self.line = peek_saved_line
+    if assignment then
+        self.pending_require_assignment = true
         self.pos = self.pos + #"require"
         return nil
     end
@@ -827,58 +1184,121 @@ function LuaLexer:extractRequires()
 
     while self.pos <= self.source_len do
         local char = self:currentChar()
-        -- A pending \`local require = require\` passthrough only survives
-        -- trivia; any other non-require token cancels it.
-        if self.awaiting_passthrough
-            and not char:match("%s")
-            and not (char == "-" and self:peekChar() == "-") then
-            if not (char:match("[%a_]") and self:matchKeyword("require")) then
-                self.awaiting_passthrough = false
-            end
-        end
         if char:match("%s") then
             self:skipWhitespace()
         elseif char == "-" and self:peekChar() == "-" then
             self:skipComment()
         elseif char == "'" or char == '"' then
+            self:finishPendingLocalDeclaration()
             self:extractStringLiteral(self.line)
+            self:markExpressionValue()
             self.previous_token = "string"
         elseif char == "[" and self:countBracketLevel(0) >= 0 then
+            self:finishPendingLocalDeclaration()
             self:extractLongStringLiteral(self:countBracketLevel(0), self.line)
+            self:markExpressionValue()
             self.previous_token = "string"
         elseif self:matchKeyword("pcall") then
-            local pcall_pos = self.pos
-            local record = self:parsePcallRequire()
-            if record then
-                result[#result + 1] = record
-            elseif self.pos == pcall_pos then
+            if self.local_attribute then
                 self.pos = self.pos + #"pcall"
+            elseif self.local_pending and self.local_expect_name then
+                self:recordLocalName(false)
+                self.pos = self.pos + #"pcall"
+            else
+                self:finishPendingLocalDeclaration()
+                self:finishTrackersBeforeValue()
+                local pcall_pos = self.pos
+                local record = self:parsePcallRequire()
+                if record then
+                    result[#result + 1] = record
+                elseif self.pos == pcall_pos then
+                    self.pos = self.pos + #"pcall"
+                end
+                self:markExpressionValue()
             end
             self.previous_token = "pcall"
         elseif self:matchKeyword("require") then
-            self:onRequireToken()
-            local record = self:parseRequire()
-            if record then
-                result[#result + 1] = record
+            if self.local_attribute then
+                self.pos = self.pos + #"require"
+            elseif self.local_pending and self.local_expect_name then
+                self:onRequireToken()
+                self:parseRequire()
+            else
+                self:finishPendingLocalDeclaration()
+                self:finishTrackersBeforeValue()
+                local plain_reference = self:plainRequireReference()
+                self:onRequireToken()
+                local record = self:parseRequire()
+                if record then
+                    result[#result + 1] = record
+                end
+                if plain_reference then
+                    self:markPlainRequireValue()
+                else
+                    self:markExpressionValue()
+                end
             end
             self.previous_token = "require"
         elseif char:match("[%a_]") then
             local identifier = self.source:match("^([%a_][%w_]*)", self.pos)
-            self.pos = self.pos + #identifier
-            self:trackKeyword(identifier)
+            local local_function = self.local_pending
+                and self.local_expect_name
+                and self.local_names == 0
+                and identifier == "function"
+            if self.local_attribute then
+                self.pos = self.pos + #identifier
+            elseif self.local_pending and self.local_expect_name
+                and not LUA_KEYWORDS[identifier] then
+                self:recordLocalName(false)
+                self.pos = self.pos + #identifier
+            else
+                self:finishPendingLocalDeclaration()
+                if EXPRESSION_OPERATOR_KEYWORDS[identifier] then
+                    self:markExpressionOperator()
+                elseif EXPRESSION_VALUE_KEYWORDS[identifier] then
+                    self:finishTrackersBeforeValue()
+                    self:markExpressionValue()
+                elseif identifier == "function" then
+                    self:finishTrackersBeforeValue()
+                    self:markExpressionOperator()
+                elseif STATEMENT_KEYWORDS[identifier] then
+                    self:finishTrackersAtStatementBoundary()
+                else
+                    self:finishTrackersBeforeValue()
+                    self:markExpressionValue()
+                end
+                self.pos = self.pos + #identifier
+                self:trackKeyword(identifier, local_function)
+                if identifier == "end" then self:markExpressionValue() end
+            end
             self.previous_token = identifier
+        elseif char:match("%d")
+            or (char == "." and self:peekChar():match("%d")) then
+            self:finishPendingLocalDeclaration()
+            self:finishTrackersBeforeValue()
+            self:markExpressionValue()
+            assert(self:consumeNumber())
+            self.previous_token = "number"
         elseif self.source:sub(self.pos, self.pos + 2) == "..." then
+            self:finishPendingLocalDeclaration()
+            self:finishTrackersBeforeValue()
+            self:markExpressionValue()
             self.previous_token = "..."
             self.pos = self.pos + 3
         elseif self.source:sub(self.pos, self.pos + 1) == ".." then
+            self:finishPendingLocalDeclaration()
+            self:markExpressionOperator()
             self.previous_token = ".."
             self.pos = self.pos + 2
         elseif char == ":" and self.previous_token == ":" then
             -- Closing colon of a goto label; labels end a statement, so a
             -- following require is a real module load, not a method call.
+            self:finishTrackersAtStatementBoundary()
             self.previous_token = "::"
             self:advanceCharacter()
         elseif char == "(" then
+            self:finishPendingLocalDeclaration()
+            self:openExpressionDelimiter()
             if self.pending_function_params then
                 self.pending_function_params = false
                 self.in_params = true
@@ -889,6 +1309,8 @@ function LuaLexer:extractRequires()
             self.previous_token = char
             self:advanceCharacter()
         elseif char == ")" then
+            self:finishPendingLocalDeclaration()
+            self:closeExpressionDelimiter()
             if self.in_params then
                 self.param_paren = self.param_paren - 1
                 if self.param_paren == 0 then
@@ -898,31 +1320,75 @@ function LuaLexer:extractRequires()
             self.previous_token = char
             self:advanceCharacter()
         elseif char == "=" then
-            if self.local_pending then
+            local for_tracker = self:currentForTracker()
+            if for_tracker and for_tracker.names then
+                for_tracker.names = false
+            end
+            if self.pending_require_assignment then
+                self.pending_require_assignment = false
+                self:startRequireAssignment()
+            elseif self.local_pending then
                 self.local_pending = false
+                self.local_expect_name = false
+                self.local_attribute = false
                 if self.local_has_require then
-                    self.require_shadowed = true
-                    if self.local_names == 1 then
-                        self.awaiting_passthrough = true
-                    end
+                    self:startLocalInitializer()
                 end
+            else
+                self:markExpressionOperator()
+            end
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == "<" and self.local_pending and self.local_names > 0
+            and not self.local_expect_name then
+            self.local_attribute = true
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == ">" and self.local_attribute then
+            self.local_attribute = false
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == "[" or char == "{" then
+            self:finishPendingLocalDeclaration()
+            self:openExpressionDelimiter()
+            if char == "{" then
+                self.table_constructor_scopes[
+                    #self.table_constructor_scopes + 1
+                ] = #self.shadow_stack
+            end
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == "]" or char == "}" then
+            self:finishPendingLocalDeclaration()
+            self:closeExpressionDelimiter()
+            if char == "}" then
+                table.remove(self.table_constructor_scopes)
+            end
+            self.previous_token = char
+            self:advanceCharacter()
+        elseif char == "," then
+            if self.local_pending and not self.local_attribute then
+                self.local_expect_name = true
+            else
+                self:markExpressionOperator()
             end
             self.previous_token = char
             self:advanceCharacter()
         elseif char == ";" then
-            if self.local_pending then
-                self.local_pending = false
-                if self.local_has_require then
-                    self.require_shadowed = true
-                end
-            end
+            self:finishPendingLocalDeclaration()
+            self:finishTrackersAtStatementBoundary()
             self.previous_token = char
             self:advanceCharacter()
         else
+            self:finishPendingLocalDeclaration()
+            self:markExpressionOperator()
             self.previous_token = char
             self:advanceCharacter()
         end
     end
+
+    self:finishPendingLocalDeclaration()
+    self:finishTrackersAtStatementBoundary()
 
     return result
 end

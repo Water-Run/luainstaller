@@ -27,7 +27,7 @@ mismatch → `UnsupportedPlatformError`.
 [#platforms-lua]
 == Lua
 
-* official Lua `>= 5.1` and `< 6.0`
+* official Lua `>= 5.1` and `< 5.6`
 * LuaJIT is rejected
 * analysis interpreter, tracer, headers, linked library, and bundled C modules:
   one major/minor
@@ -101,25 +101,26 @@ profile. This proves Lua-symbol visibility for normal modules. It does not
 prove closure of every application module's additional system dependencies.
 
 [#platforms-matrix]
-== Tested system types
+== Verified system classes
+
+The required CI gate is the Windows/MSVC and Linux x86_64 coverage. Linux
+ARM64 and macOS runs broaden compatibility evidence without creating a
+release-time dependency on a particular device or operating-system release.
 
 [cols="2,1",options="header"]
 |===
 |System |Architecture
 
-|Windows 11
+|Windows with MSVC and the Windows SDK
 |x86_64
 
-|Debian 13
+|Linux
 |x86_64
 
-|Rocky Linux 10
-|x86_64
-
-|Ubuntu 24.04 LTS
+|Linux
 |ARM64
 
-|macOS 26.x
+|macOS
 |ARM64
 |===
 

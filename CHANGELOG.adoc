@@ -1,0 +1,130 @@
+= Changelog
+:sectanchors:
+:sectlinks:
+
+This file records user-visible changes. The release tag remains the source of
+truth for the exact contents of a published version.
+
+== Unreleased
+
+== 1.1.1 - 2026-08-22
+
+=== Changed
+
+* Make the GitHub Actions Linux and Windows/MSVC five-version matrices the
+  required release gate. Supplemental lab runs remain useful evidence without
+  making a physical Windows 11 device or any other specific host a release
+  prerequisite.
+
+=== Fixed
+
+* Preserve build-wide `SIGINT`/`SIGTERM` delivery when compiler commands are
+  supervised by GNU `timeout`; timed commands run in a managed process group
+  so runaway descendants cannot survive or hold the captured-output pipe open.
+* Track `require` bindings correctly across sibling `else`/`elseif` branches,
+  numeric and generic `for` variables, qualified and local function names,
+  multiline and multi-name declaration initializers, `repeat` conditions,
+  table-constructor field names, and global rebindings that cross lexical
+  blocks. Direct assignments now inspect their right-hand side before the new
+  `require` binding takes effect.
+* Make streamed file hashing report read and close failures instead of
+  accepting a partial digest, and encode SHA-256 lengths correctly beyond
+  4 GiB.
+* Use streamed SHA-256 for manifest snapshots, copied-file verification, and
+  final source revalidation; repeated native aliases no longer rehash the same
+  source.
+* Keep Windows build transactions below the legacy `MAX_PATH` boundary by
+  using compact, collision-resistant sibling names while retaining the full
+  ownership token in the lock record. Preserve the established POSIX sibling
+  names.
+* Keep compiler object and import-library intermediates out of published
+  onedir/onefile payloads. MSVC executables remain reproducible across checkout
+  roots even though its `.obj` files encode build-local details.
+* Read Windows environment paths through the Unicode-safe PowerShell bridge,
+  so logging continues to work when the user or temporary directory contains
+  non-ASCII characters.
+* Complete PATH-based MSVC discovery with companion `lib.exe` and
+  `dumpbin.exe`, and tolerate the Windows SDK 10.0.19041 `C5105` header warning
+  while retaining `/W4 /WX` for all other diagnostics.
+* Align the LuaRocks dependency with the implementation contract: official Lua
+  `>= 5.1` and `< 5.6`.
+* Repair the GitHub Actions gates: use a pinned shared Lua 5.4.8 and pinned
+  native sample inputs, export paths through the environment files so `$HOME`
+  and `$PATH` are expanded by the shell, update the checkout action, and make
+  downloads retry without publishing or retaining partial files. Run the five
+  official Lua ABIs as independent jobs so their comprehensive suites do not
+  share one 120-minute timeout.
+* Refresh both release matrices and the bundled Lua notice to the current
+  official Lua 5.5.1 patch release and its published SHA-256 digest.
+* Fetch release-matrix inputs from SHA-256-verified mirrors, pinning rock and
+  lsqlite3 inputs to immutable commits. Pin the compiled lsqlite3 0.9.6 C
+  source itself instead of a Fossil-generated ZIP whose container bytes can
+  change independently of the source.
+* Repair the manual real-world benchmark: replace the removed TinyKeep source
+  with Luacheck's parser graph, use valid LuaSocket APIs, pass native module
+  paths to the offline fallback, isolate clone and dependency-install logs,
+  and return failure when a required analyze, bundle, or runtime probe fails.
+* Make the Windows release runner work under PowerShell 5.1 by capturing the
+  version banner from stderr, and make lifecycle coverage distinguish the one
+  required inner process from the optional console host process.
+* Make direct MSVC builds use the compatibility defines from each official Lua
+  source Makefile. In particular, Lua 5.3 now registers the expected `bit32`
+  library, and cache identities invalidate binaries built without those flags.
+* Correct reproducibility and distribution-license fixtures so every declared
+  nested checkout and output component is actually part of the tested path.
+* Stop Windows path adapters from leaking `string.gsub`'s replacement count.
+  Extracted onefile payload regeneration now works with Lua 5.2+, and
+  successful private-directory creation again returns only the path.
+
+== 1.1.0 - 2026-08-14
+
+=== Added
+
+* Incremental SHA-256 (`newSha256`, `updateSha256`, `finalizeSha256`) and
+  64 KiB streamed file hashing, with a native-operator backend on Lua 5.3+.
+* A real-world benchmark matrix covering pure Lua projects, runtime discovery,
+  native modules, Neovim-scale trees, and synthetic 100/1,000/10,000-module
+  projects.
+* A GitHub Actions smoke workflow alongside native release-matrix tooling.
+* Equivalence contracts for the source and generated runtime implementations,
+  plus compiled equivalence checks for the two launcher templates.
+
+=== Changed
+
+* The supported interpreter contract is explicit: official Lua 5.1 through
+  5.5; LuaJIT and other non-official runtimes are rejected.
+* `clang-cl` uses the MSVC argument family. Compiler commands default to a
+  900-second bound and toolchain probes to 120 seconds on Windows and on POSIX
+  hosts with GNU `timeout`; `LUAI_CMD_TIMEOUT` overrides both values.
+* Static discovery understands common local, parameter, and function-body
+  `require` shadowing forms and continues discovery after goto labels.
+* Native alias destinations such as `socket/core.so` are recorded in the
+  distribution manifest.
+* Helper return contracts were tightened, invalid logger fields now fail
+  loudly, and undocumented `-limit`/`-level` CLI aliases were removed.
+
+=== Fixed
+
+* POSIX file copies no longer overwrite an existing destination, matching the
+  Windows behavior.
+* Manifest hashing applies the regular-file/no-symbolic-link policy when the
+  process-backed filesystem inspection path is available, while retaining the
+  minimal no-`io.popen` compatibility path.
+* CLI options no longer silently consume another known option token as their
+  value.
+* PID-less legacy logger locks use a longer stale-age floor before recovery.
+* Onefile extraction validates Windows reserved names and invalid path
+  characters, persists the payload directory, and cleans files created by a
+  failed extraction.
+* Remote archive checks, real-world benchmark discovery options, and all
+  release-tool references were updated for the 1.1.0 rockspec.
+
+=== Upgrade notes
+
+* Re-run static analysis for projects that intentionally shadow `require`; use
+  runtime discovery or explicit includes for computed module names and
+  indirect `require` aliases. The exact `local require = require` passthrough
+  remains recognized.
+* Lua 5.5 requires LuaRocks 3.13.0 or newer.
+* Rebuild artifacts on each target OS/architecture/Lua ABI; outputs are not
+  cross-platform binaries.

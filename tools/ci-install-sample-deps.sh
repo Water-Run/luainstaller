@@ -17,30 +17,40 @@ CJSON_ROCK=lua-cjson-2.1.0.10-1.src.rock
 CJSON_SHA256=02dea368d07753647c75bd9e6660dd4d06ff7d09956d90d5afc4c3f5b78ed187
 LFS_ROCK=luafilesystem-1.9.0-1.src.rock
 LFS_SHA256=3de68d619f6ad95a27f4728814375447d921305194b7050dee6199057c31282f
-LSQLITE3_ZIP=lsqlite3_v096.zip
-LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
+LSQLITE3_SOURCE=lsqlite3-0.9.6.c
+LSQLITE3_SHA256=a3de0d56dcdd7df85e334174cd46e70451f996bc843e735ab1d8a8e8804f9486
+LSQLITE3_URL=https://raw.githubusercontent.com/abramov7613/lsqlite3-mirror/72cf3d38f6df7ac995f6db05d8ffeb78c25c9179/lsqlite3.c
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
 
 verify_sha256() {
-    file=$1
-    expected=$2
+    verify_file=$1
+    verify_expected=$2
     if command -v sha256sum >/dev/null 2>&1; then
-        printf '%s  %s\n' "$expected" "$file" | sha256sum -c - >/dev/null
+        printf '%s  %s\n' "$verify_expected" "$verify_file" \
+            | sha256sum -c - >/dev/null
     else
-        actual=$(shasum -a 256 "$file" | awk '{ print $1 }')
-        [ "$actual" = "$expected" ]
+        verify_actual=$(shasum -a 256 "$verify_file" | awk '{ print $1 }')
+        [ "$verify_actual" = "$verify_expected" ]
     fi
 }
 
 stage() {
-    url=$1
-    file=$2
-    expected=$3
-    if [ ! -f "$file" ]; then
-        curl -fsSL "$url" -o "$file"
+    stage_url=$1
+    stage_file=$2
+    stage_expected=$3
+    if [ -f "$stage_file" ] \
+        && verify_sha256 "$stage_file" "$stage_expected"; then
+        return
     fi
-    verify_sha256 "$file" "$expected"
+    stage_temporary=$stage_file.part.$$
+    rm -f "$stage_temporary"
+    trap 'rm -f "$stage_temporary"' EXIT HUP INT TERM
+    curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+        --connect-timeout 30 "$stage_url" -o "$stage_temporary"
+    verify_sha256 "$stage_temporary" "$stage_expected"
+    mv -f "$stage_temporary" "$stage_file"
+    trap - EXIT HUP INT TERM
 }
 
 load_check() {
@@ -54,7 +64,8 @@ mkdir -p "$WORK" "$TREE/lib/lua/$ABI"
 BUILD=$WORK/build
 mkdir -p "$BUILD"
 
-stage "https://luarocks.org/$CJSON_ROCK" "$WORK/$CJSON_ROCK" "$CJSON_SHA256"
+stage "https://raw.githubusercontent.com/rocks-moonscript-org/moonrocks-mirror/978861950d939eca8e38a4c3a477379b0e5f817e/$CJSON_ROCK" \
+    "$WORK/$CJSON_ROCK" "$CJSON_SHA256"
 rm -rf "$BUILD/cjson"
 unzip -q "$WORK/$CJSON_ROCK" -d "$BUILD/cjson"
 cc -O2 -shared -fPIC -I"$PREFIX/include" \
@@ -65,7 +76,8 @@ cc -O2 -shared -fPIC -I"$PREFIX/include" \
 load_check cjson
 printf '%s\n' 'cjson ok'
 
-stage "https://luarocks.org/$LFS_ROCK" "$WORK/$LFS_ROCK" "$LFS_SHA256"
+stage "https://raw.githubusercontent.com/rocks-moonscript-org/moonrocks-mirror/978861950d939eca8e38a4c3a477379b0e5f817e/$LFS_ROCK" \
+    "$WORK/$LFS_ROCK" "$LFS_SHA256"
 rm -rf "$BUILD/lfs"
 unzip -q "$WORK/$LFS_ROCK" -d "$BUILD/lfs"
 cc -O2 -shared -fPIC -I"$PREFIX/include" \
@@ -74,16 +86,15 @@ cc -O2 -shared -fPIC -I"$PREFIX/include" \
 load_check lfs
 printf '%s\n' 'lfs ok'
 
-stage 'https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6' \
-    "$WORK/$LSQLITE3_ZIP" "$LSQLITE3_SHA256"
-stage "https://www.sqlite.org/2026/$SQLITE_ZIP" "$WORK/$SQLITE_ZIP" "$SQLITE_SHA256"
-rm -rf "$BUILD/lsqlite3-src" "$BUILD/sqlite-src"
-unzip -q "$WORK/$LSQLITE3_ZIP" -d "$BUILD/lsqlite3-src"
+stage "$LSQLITE3_URL" "$WORK/$LSQLITE3_SOURCE" "$LSQLITE3_SHA256"
+stage "https://dev-www.libreoffice.org/src/$SQLITE_ZIP" \
+    "$WORK/$SQLITE_ZIP" "$SQLITE_SHA256"
+rm -rf "$BUILD/sqlite-src"
 unzip -q "$WORK/$SQLITE_ZIP" -d "$BUILD/sqlite-src"
 cc -std=c11 -O2 -shared -fPIC \
     -I"$PREFIX/include" -I"$BUILD/sqlite-src/sqlite-amalgamation-3530200" \
     -DLSQLITE_VERSION=\"0.9.6\" \
-    "$BUILD/lsqlite3-src/lsqlite3_v096/lsqlite3.c" \
+    "$WORK/$LSQLITE3_SOURCE" \
     "$BUILD/sqlite-src/sqlite-amalgamation-3530200/sqlite3.c" \
     -o "$TREE/lib/lua/$ABI/lsqlite3.so" -ldl -lm -pthread
 load_check lsqlite3

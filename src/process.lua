@@ -10,7 +10,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-29
+    2026-08-16
 ]]
 
 local M = {}
@@ -38,6 +38,38 @@ local function base64Encode(value)
         output[#output + 1] = third
             and BASE64_ALPHABET:sub(packed % 64 + 1, packed % 64 + 1)
             or "="
+    end
+    return table.concat(output)
+end
+
+local function base64Decode(value)
+    local inverse = {}
+    for index = 1, #BASE64_ALPHABET do
+        inverse[BASE64_ALPHABET:sub(index, index)] = index - 1
+    end
+    local output = {}
+    value = tostring(value or ""):gsub("%s", "")
+    if #value % 4 ~= 0 then return nil end
+    for index = 1, #value, 4 do
+        local first = inverse[value:sub(index, index)]
+        local second = inverse[value:sub(index + 1, index + 1)]
+        local third_character = value:sub(index + 2, index + 2)
+        local fourth_character = value:sub(index + 3, index + 3)
+        local third = inverse[third_character] or 0
+        local fourth = inverse[fourth_character] or 0
+        if first == nil or second == nil
+            or (third_character ~= "=" and inverse[third_character] == nil)
+            or (fourth_character ~= "=" and inverse[fourth_character] == nil) then
+            return nil
+        end
+        local packed = first * 0x40000 + second * 0x1000 + third * 0x40 + fourth
+        output[#output + 1] = string.char(math.floor(packed / 0x10000) % 0x100)
+        if third_character ~= "=" then
+            output[#output + 1] = string.char(math.floor(packed / 0x100) % 0x100)
+        end
+        if fourth_character ~= "=" then
+            output[#output + 1] = string.char(packed % 0x100)
+        end
     end
     return table.concat(output)
 end
@@ -184,6 +216,7 @@ end
 
 local hasTimeoutUtility
 local timeout_utility_available
+local posixTimeoutRelay
 
 function M.output(command, opts)
     if type(io.popen) ~= "function" then
@@ -203,8 +236,12 @@ function M.output(command, opts)
     end
     if not IS_WINDOWS and type(opts.timeout_seconds) == "number"
         and opts.timeout_seconds > 0 and hasTimeoutUtility() then
-        invocation = "timeout " .. tostring(math.floor(opts.timeout_seconds))
-            .. " sh -c " .. M.quote(invocation)
+        -- Raw shell snippets need timeout's managed process group so a timed
+        -- out pipeline cannot leave descendants holding the output pipe.
+        local seconds = math.max(1, math.floor(opts.timeout_seconds))
+        invocation = "timeout --kill-after=5s "
+            .. tostring(seconds) .. "s sh -c " .. M.quote(invocation)
+        invocation = posixTimeoutRelay(invocation)
     end
     local ok, pipe = pcall(io.popen, invocation, "r")
     if not ok or not pipe then
@@ -260,6 +297,37 @@ function M.command(executable, arguments, environment)
         parts[#parts + 1] = M.quote(value)
     end
     return table.concat(parts, " ")
+end
+
+-- GNU timeout puts the monitored command in a separate process group.  That
+-- is necessary for killing all descendants on expiry, but it also means an
+-- interrupt sent to the caller's process group would otherwise leave the
+-- monitor (and a compiler below it) running.  Keep this small supervisor in
+-- the caller's group and relay catchable termination signals to timeout.
+posixTimeoutRelay = function(command)
+    local script = table.concat({
+        "__luai_timeout_pid=",
+        "__luai_timeout_relay() {",
+        '  __luai_timeout_signal="$1"',
+        '  __luai_timeout_status="$2"',
+        '  if test -n "$__luai_timeout_pid"; then',
+        '    kill -"$__luai_timeout_signal" "$__luai_timeout_pid" 2>/dev/null || true',
+        '    wait "$__luai_timeout_pid" 2>/dev/null || true',
+        "  fi",
+        '  exit "$__luai_timeout_status"',
+        "}",
+        "trap '__luai_timeout_relay HUP 129' HUP",
+        "trap '__luai_timeout_relay INT 130' INT",
+        "trap '__luai_timeout_relay QUIT 131' QUIT",
+        "trap '__luai_timeout_relay TERM 143' TERM",
+        command .. " &",
+        "__luai_timeout_pid=$!",
+        'wait "$__luai_timeout_pid"',
+        "__luai_timeout_status=$?",
+        "__luai_timeout_pid=",
+        'exit "$__luai_timeout_status"',
+    }, "\n")
+    return "sh -c " .. M.quote(script)
 end
 
 local function powershellInvocation(script, input_format)
@@ -328,6 +396,33 @@ function M.outputPowerShell(script)
     end
     local ok, output = M.output(invocation)
     return ok, cleanWindowsOutput(output)
+end
+
+function M.environmentVariable(name)
+    if type(name) ~= "string" or not name:match("^[%a_][%w_]*$") then
+        return nil, "environment variable name must be portable"
+    end
+    if not IS_WINDOWS then return os.getenv(name) end
+
+    -- The narrow CRT getenv() used by Lua 5.1-5.3 returns bytes in the active
+    -- Windows code page. Paths then become invalid when the UTF-8 filesystem
+    -- bridge consumes those bytes. Read the Unicode process environment and
+    -- transport it as ASCII Base64 instead.
+    local ok, encoded = M.outputPowerShell(table.concat({
+        "$Value=[Environment]::GetEnvironmentVariable('", name, "','Process');",
+        "if($null -eq $Value){[Console]::Write('0')}",
+        "else{[Console]::Write('1'+[Convert]::ToBase64String(",
+        "[Text.Encoding]::UTF8.GetBytes($Value)))}",
+    }))
+    if not ok then return nil, encoded end
+    encoded = tostring(encoded or ""):gsub("%s", "")
+    if encoded == "0" then return nil end
+    if encoded:sub(1, 1) ~= "1" then
+        return nil, "invalid encoded environment response"
+    end
+    local value = base64Decode(encoded:sub(2))
+    if value == nil then return nil, "invalid encoded environment value" end
+    return value
 end
 
 function M.inputPowerShell(script, input)
@@ -411,6 +506,34 @@ function M.outputCommand(executable, arguments, environment, opts)
     local validated, validation_err = validateCommand(executable, arguments, environment)
     if not validated then return false, validation_err end
     if IS_WINDOWS then return windowsOutputCommand(validated, opts) end
+    opts = opts or {}
+    if type(opts.timeout_seconds) == "number" and opts.timeout_seconds > 0
+        and hasTimeoutUtility() then
+        -- Invoke the validated argv directly, using env(1) only when
+        -- overrides are present.  Keep GNU timeout's managed process group:
+        -- --foreground explicitly leaves descendants outside timeout's
+        -- control, and those descendants can keep io.popen's output pipe open
+        -- after the direct child exits.
+        local timeout_arguments = {
+            "--kill-after=5s",
+            tostring(math.max(1, math.floor(opts.timeout_seconds))) .. "s",
+        }
+        local environment_names = sortedKeys(validated.environment)
+        if #environment_names > 0 then
+            timeout_arguments[#timeout_arguments + 1] = "env"
+            for _, name in ipairs(environment_names) do
+                timeout_arguments[#timeout_arguments + 1] = name .. "="
+                    .. validated.environment[name]
+            end
+        end
+        timeout_arguments[#timeout_arguments + 1] = validated.executable
+        for _, value in ipairs(validated.arguments) do
+            timeout_arguments[#timeout_arguments + 1] = value
+        end
+        local timeout_command, timeout_err = M.command("timeout", timeout_arguments)
+        if not timeout_command then return false, timeout_err end
+        return M.output(posixTimeoutRelay(timeout_command))
+    end
     local command = assert(M.command(
         validated.executable,
         validated.arguments,

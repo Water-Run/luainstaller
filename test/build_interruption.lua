@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-07-18
+    2026-08-16
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -45,7 +45,7 @@ set -eu
 for value in "$@"; do
     case "$value" in
         */launcher.c)
-            : > "$LUAI_INTERRUPT_READY"
+            printf '%s\n' "$$" > "$LUAI_INTERRUPT_READY"
             trap 'exit 130' INT TERM HUP
             while :; do sleep 1; done
             ;;
@@ -71,7 +71,7 @@ exec "$LUAI_REAL_CC" "$@"
         end
         return count
     end
-    local function interruptBuild(target, signal_name, label)
+    local function interruptBuild(target, signal_name, label, timeout_seconds)
         local marker = path.join(root, "compiler-ready-" .. label)
         local diagnostic_path = path.join(root, "interrupted-" .. label .. ".log")
         local script = table.concat({
@@ -80,8 +80,9 @@ exec "$LUAI_REAL_CC" "$@"
             "LUAI_CC=" .. harness.shell_quote(wrapper),
             "LUAI_REAL_CC=" .. harness.shell_quote(real_cc),
             "LUAI_INTERRUPT_READY=" .. harness.shell_quote(marker),
+            "LUAI_CMD_TIMEOUT=" .. tostring(timeout_seconds),
             "LUAINSTALLER_CLI_NAME=luainstaller",
-            "export CC LUAI_CC LUAI_REAL_CC LUAI_INTERRUPT_READY LUAINSTALLER_CLI_NAME",
+            "export CC LUAI_CC LUAI_REAL_CC LUAI_INTERRUPT_READY LUAI_CMD_TIMEOUT LUAINSTALLER_CLI_NAME",
             harness.shell_quote(launcher) .. " " .. harness.shell_quote(lua)
                 .. " src/cli.lua build " .. harness.shell_quote(entry)
                 .. " --dir -o " .. harness.shell_quote(target)
@@ -109,7 +110,28 @@ exec "$LUAI_REAL_CC" "$@"
         local interrupted_ok, interrupted_output = process.output(script)
         local diagnostic = fs.readRegularFile(diagnostic_path) or ""
         assert(interrupted_ok, tostring(interrupted_output) .. "\nbuild log:\n" .. diagnostic)
-        return tonumber(interrupted_output:match("status=(%d+)")), diagnostic
+        local compiler_pid = tonumber((fs.readRegularFile(marker) or ""):match("^(%d+)"))
+        assert(compiler_pid, "compiler marker did not contain a PID")
+        return tonumber(interrupted_output:match("status=(%d+)")), diagnostic, compiler_pid
+    end
+    local function waitForProcessExit(pid, maximum_seconds)
+        local wait_script = table.concat({
+            'pid="$1"',
+            'limit="$2"',
+            "elapsed=0",
+            'while kill -0 "$pid" 2>/dev/null && test "$elapsed" -lt "$limit"; do',
+            "  sleep 1",
+            "  elapsed=$((elapsed + 1))",
+            "done",
+            'if kill -0 "$pid" 2>/dev/null; then',
+            '  kill -KILL "$pid" 2>/dev/null || true',
+            "  exit 1",
+            "fi",
+        }, "\n")
+        local exited, output = process.outputCommand("sh", {
+            "-c", wait_script, "sh", tostring(pid), tostring(maximum_seconds),
+        })
+        return exited, output
     end
     local function retryBuild(target)
         local retry_ok, retry_output = process.outputCommand(lua, {
@@ -125,9 +147,13 @@ exec "$LUAI_REAL_CC" "$@"
         assert(stagingCount() == 0, "retry left staging state")
     end
 
-    local interrupt_status, interrupt_diagnostic = interruptBuild(out, "INT", "sigint")
+    local interrupt_status, interrupt_diagnostic, interrupt_compiler =
+        interruptBuild(out, "INT", "sigint", 30)
     assert(interrupt_status == 130, "SIGINT status: " .. tostring(interrupt_status)
         .. "\nbuild log:\n" .. interrupt_diagnostic)
+    local interrupt_stopped, interrupt_stop_output = waitForProcessExit(interrupt_compiler, 5)
+    assert(interrupt_stopped,
+        "SIGINT left the compiler running: " .. tostring(interrupt_stop_output))
     assert(not interrupt_diagnostic:find("stack traceback", 1, true), interrupt_diagnostic)
     assert(fs.pathType(path.join(root, ".luai-lock-" .. hash.sha256(out))) == "missing",
         "SIGINT left an output lock")
@@ -135,12 +161,16 @@ exec "$LUAI_REAL_CC" "$@"
     retryBuild(out)
 
     local killed_out = path.join(root, "out-killed")
-    local killed_status = interruptBuild(killed_out, "KILL", "sigkill")
+    local killed_status, _, killed_compiler =
+        interruptBuild(killed_out, "KILL", "sigkill", 3)
     assert(killed_status == 137, "SIGKILL status: " .. tostring(killed_status))
     local killed_lock = path.join(root, ".luai-lock-" .. hash.sha256(killed_out))
     assert(fs.pathType(killed_lock) == "directory",
         "SIGKILL did not leave a dead-owner recovery fixture")
     assert(stagingCount() == 1, "SIGKILL staging fixture count: " .. stagingCount())
+    local killed_stopped, killed_stop_output = waitForProcessExit(killed_compiler, 10)
+    assert(killed_stopped,
+        "SIGKILL compiler exceeded its configured timeout: " .. tostring(killed_stop_output))
     retryBuild(killed_out)
 
     local empty_path = path.join(root, "empty-path")
@@ -158,4 +188,4 @@ end)
 
 cleanup()
 assert(called, failure)
-print("build interruption recovery ok: SIGINT 130, dead-owner retry, clean state")
+print("build interruption recovery ok: relayed SIGINT, bounded SIGKILL, clean retry")

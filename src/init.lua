@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-29
+    2026-08-22
 ]]
 
 
@@ -43,7 +43,7 @@ local M = {}
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.1.0"
+M.VERSION = "1.1.1"
 
 --@description: Package author name
 --@const: AUTHOR

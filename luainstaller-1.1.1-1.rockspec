@@ -1,10 +1,10 @@
 rockspec_format = "3.0"
 package = "luainstaller"
-version = "1.1.0-1"
+version = "1.1.1-1"
 
 source = {
     url = "git+https://github.com/Water-Run/luainstaller.git",
-    tag = "v1.1.0",
+    tag = "v1.1.1",
 }
 
 description = {
@@ -31,7 +31,7 @@ description = {
 }
 
 dependencies = {
-    "lua >= 5.1, < 6.0",
+    "lua >= 5.1, < 5.6",
 }
 
 build = {

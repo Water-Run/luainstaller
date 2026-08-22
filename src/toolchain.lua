@@ -29,6 +29,9 @@ local normalizePath = path.normalize
 -- the compile default; probe runs keep a tighter bound.
 local COMPILE_TIMEOUT_SECONDS = 900
 local PROBE_TIMEOUT_SECONDS = 120
+-- VS 2019 16.11 can report C5105 from the Windows 10 SDK's own winbase.h.
+-- Keep project warnings strict while excluding that toolchain-header defect.
+local MSVC_COMPILE_FLAGS = { "/nologo", "/std:c11", "/W4", "/WX", "/wd5105", "/MT" }
 local configured_timeout = tonumber(os.getenv("LUAI_CMD_TIMEOUT"))
 local function compileTimeout()
     if type(configured_timeout) == "number" and configured_timeout > 0 then
@@ -154,6 +157,22 @@ local function whereProgram(name, environment)
     return nil
 end
 
+local function compilerFromCommand(command, family, environment)
+    local compiler = {
+        cc = command,
+        compiler_family = family,
+        environment = environment or {},
+    }
+    -- A Developer Command Prompt exposes cl.exe before discovery reaches
+    -- vswhere. Preserve its explicitly prepared environment, but retain the
+    -- companion tools needed for import-library generation and PE auditing.
+    if IS_WINDOWS and family == "msvc" then
+        compiler.librarian = whereProgram("lib.exe", compiler.environment)
+        compiler.dumpbin = whereProgram("dumpbin.exe", compiler.environment)
+    end
+    return compiler
+end
+
 local function discoverMsvc()
     local program_files = os.getenv("ProgramFiles(x86)") or os.getenv("ProgramFiles")
     local vswhere = program_files and normalizePath(
@@ -228,7 +247,7 @@ local function discoverCompiler(opts, host)
     if configured and configured ~= "" then
         local family = compilerFamily(configured)
         if commandAvailable(configured, family) then
-            return { cc = configured, compiler_family = family, environment = {} }
+            return compilerFromCommand(configured, family, {})
         end
         return nil, makeError("ToolchainError", "The configured native C compiler is unavailable", {
             compiler = configured,
@@ -238,7 +257,7 @@ local function discoverCompiler(opts, host)
         for _, name in ipairs({ "cl.exe", "clang.exe", "gcc.exe" }) do
             local family = compilerFamily(name)
             if commandAvailable(name, family) then
-                return { cc = name, compiler_family = family, environment = {} }
+                return compilerFromCommand(name, family, {})
             end
         end
         local msvc, discovery_err = discoverMsvc()
@@ -251,7 +270,7 @@ local function discoverCompiler(opts, host)
     if not commandAvailable(cc, compilerFamily(cc)) then
         return nil, makeError("ToolchainError", "A native C compiler is required", { compiler = cc })
     end
-    return { cc = cc, compiler_family = compilerFamily(cc), environment = {} }
+    return compilerFromCommand(cc, compilerFamily(cc), {})
 end
 
 local function prefixFromInterpreter(interpreter)
@@ -697,7 +716,7 @@ function M.compile(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs({ "/nologo", "/std:c11", "/W4", "/WX", "/MT" }) do
+        for _, value in ipairs(MSVC_COMPILE_FLAGS) do
             arguments[#arguments + 1] = value
         end
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
@@ -753,11 +772,10 @@ function M.compileNativeModule(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs({
-            "/nologo", "/std:c11", "/W4", "/WX", "/MT", "/LD",
-        }) do
+        for _, value in ipairs(MSVC_COMPILE_FLAGS) do
             arguments[#arguments + 1] = value
         end
+        arguments[#arguments + 1] = "/LD"
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
         local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
         arguments[#arguments + 1] = "/I" .. config.include_dir:gsub("/", "\\")
@@ -828,7 +846,7 @@ function M.compileStandalone(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs({ "/nologo", "/std:c11", "/W4", "/WX", "/MT" }) do
+        for _, value in ipairs(MSVC_COMPILE_FLAGS) do
             arguments[#arguments + 1] = value
         end
         if config.host and config.host.os == "windows" then

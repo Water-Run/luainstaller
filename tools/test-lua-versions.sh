@@ -11,9 +11,9 @@ PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 LUAROCKS_VERSION=3.13.0
 LUAROCKS_TARBALL=luarocks-$LUAROCKS_VERSION.tar.gz
 LUAROCKS_SHA256=245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37
-LSQLITE3_ZIP=lsqlite3_v096.zip
-LSQLITE3_SHA256=ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82
-LSQLITE3_SOURCE_MEMBER=lsqlite3_v096/lsqlite3.c
+LSQLITE3_SOURCE=lsqlite3-0.9.6.c
+LSQLITE3_SHA256=a3de0d56dcdd7df85e334174cd46e70451f996bc843e735ab1d8a8e8804f9486
+LSQLITE3_URL=https://raw.githubusercontent.com/abramov7613/lsqlite3-mirror/72cf3d38f6df7ac995f6db05d8ffeb78c25c9179/lsqlite3.c
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
 SQLITE_SOURCE_MEMBER=sqlite-amalgamation-3530200/sqlite3.c
@@ -34,7 +34,7 @@ VERSIONS='5.1.5:2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
 5.2.4:b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b
 5.3.6:fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60
 5.4.8:4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
-5.5.0:57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d'
+5.5.1:1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce'
 
 require_no_symlink_ancestors() {
     candidate=$1
@@ -180,7 +180,8 @@ stage_source() {
         part=$destination.part.$$
         rm -f "$part"
         trap 'rm -f "$part"' EXIT HUP INT TERM
-        curl -fL --connect-timeout 20 --max-time 240 -o "$part" "$url"
+        curl -fL --retry 5 --retry-delay 2 --retry-all-errors \
+            --connect-timeout 20 --max-time 240 -o "$part" "$url"
         verify_sha256 "$expected" "$part"
         mv "$part" "$destination"
         trap - EXIT HUP INT TERM
@@ -200,7 +201,7 @@ case "$LUAI_MATRIX_EDGE_COVERAGE_MODE" in
         exit 2
         ;;
 esac
-for command in ar awk cat cc chmod curl find git grep id ls make readlink tar unzip; do
+for command in ar awk cat cc chmod cp curl find git grep id ls make readlink tar unzip; do
     command -v "$command" >/dev/null 2>&1 || { echo "missing command: $command" >&2; exit 1; }
 done
 sha256_file "$0" >/dev/null
@@ -224,15 +225,16 @@ for path in "$SOURCE_CACHE" "$WORK_ROOT" "$EVIDENCE_DIR"; do
     require_owned_private_root "$path"
 done
 stage_source "$LUAROCKS_TARBALL" \
-    "https://luarocks.org/releases/$LUAROCKS_TARBALL" "$LUAROCKS_SHA256"
+    "https://luarocks.github.io/luarocks/releases/$LUAROCKS_TARBALL" \
+    "$LUAROCKS_SHA256"
 printf '%s\n' "$ROCK_SOURCES" | while IFS=: read -r rock expected; do
-    stage_source "$rock" "https://luarocks.org/$rock" "$expected"
+    stage_source "$rock" \
+        "https://raw.githubusercontent.com/rocks-moonscript-org/moonrocks-mirror/978861950d939eca8e38a4c3a477379b0e5f817e/$rock" \
+        "$expected"
 done
-stage_source "$LSQLITE3_ZIP" \
-    'https://lua.sqlite.org/home/zip/lsqlite3_v096.zip?uuid=v0.9.6' \
-    "$LSQLITE3_SHA256"
+stage_source "$LSQLITE3_SOURCE" "$LSQLITE3_URL" "$LSQLITE3_SHA256"
 stage_source "$SQLITE_ZIP" \
-    "https://www.sqlite.org/2026/$SQLITE_ZIP" "$SQLITE_SHA256"
+    "https://dev-www.libreoffice.org/src/$SQLITE_ZIP" "$SQLITE_SHA256"
 printf '%s\n' "$VERSIONS" | while IFS=: read -r version expected; do
     stage_source "lua-$version.tar.gz" "https://www.lua.org/ftp/lua-$version.tar.gz" "$expected"
 done
@@ -421,7 +423,7 @@ build_native_dependencies() {
     deps_compiler_hash=$(sha256_file "$(command -v cc)")
     deps_rock_sources_hash=$(printf '%s\n' "$ROCK_SOURCES" | sha256_stream)
     deps_install_order_hash=$(printf '%s\n' "$ROCK_INSTALL_ORDER" | sha256_stream)
-    deps_build_id=$CACHE_SCHEMA'|component=native-deps|lua='$deps_version'|lua-source='$deps_source_sha256'|rocks='$deps_rock_sources_hash'|order='$deps_install_order_hash'|lsqlite='$LSQLITE3_SHA256'|sqlite='$SQLITE_SHA256'|host='$deps_host_id'|cc='$deps_compiler_hash'|recipe=pinned-src-rocks-lsqlite-v3-exact-sqlite-paths'
+    deps_build_id=$CACHE_SCHEMA'|component=native-deps|lua='$deps_version'|lua-source='$deps_source_sha256'|rocks='$deps_rock_sources_hash'|order='$deps_install_order_hash'|lsqlite='$LSQLITE3_SHA256'|sqlite='$SQLITE_SHA256'|host='$deps_host_id'|cc='$deps_compiler_hash'|recipe=pinned-src-rocks-lsqlite-v4-exact-source-paths'
     deps_lua_path="$deps_tree/share/lua/$deps_abi/?.lua;$deps_tree/share/lua/$deps_abi/?/init.lua"
     deps_lua_cpath="$deps_tree/lib/lua/$deps_abi/?.so;$deps_tree/lib/lua/$deps_abi/?/init.so"
 
@@ -429,7 +431,7 @@ build_native_dependencies() {
     require_no_symlink_ancestors "$deps_build_dir"
     printf '%s\n' \
         "native dependency cache identity: $deps_build_id" \
-        "lsqlite3 binding source: archive=$LSQLITE3_ZIP sha256=$LSQLITE3_SHA256 member=$LSQLITE3_SOURCE_MEMBER" \
+        "lsqlite3 binding source: file=$LSQLITE3_SOURCE sha256=$LSQLITE3_SHA256" \
         "SQLite amalgamation source: archive=$SQLITE_ZIP sha256=$SQLITE_SHA256 member=$SQLITE_SOURCE_MEMBER" >&2
     if cache_marker_matches "$deps_marker" "$deps_build_id" \
         && rock_dependencies_match "$deps_luarocks" "$deps_tree" \
@@ -450,9 +452,11 @@ build_native_dependencies() {
                 >/dev/null 2>&1
         done
 
-    unzip -q "$SOURCE_CACHE/$LSQLITE3_ZIP" -d "$deps_build_dir/lsqlite3-src"
+    mkdir -p "$deps_build_dir/lsqlite3-src"
+    cp "$SOURCE_CACHE/$LSQLITE3_SOURCE" \
+        "$deps_build_dir/lsqlite3-src/$LSQLITE3_SOURCE"
     unzip -q "$SOURCE_CACHE/$SQLITE_ZIP" -d "$deps_build_dir/sqlite-src"
-    deps_lsqlite_file=$deps_build_dir/lsqlite3-src/$LSQLITE3_SOURCE_MEMBER
+    deps_lsqlite_file=$deps_build_dir/lsqlite3-src/$LSQLITE3_SOURCE
     deps_sqlite_file=$deps_build_dir/sqlite-src/$SQLITE_SOURCE_MEMBER
     deps_lsqlite_dir=$(dirname "$deps_lsqlite_file")
     deps_sqlite_dir=$(dirname "$deps_sqlite_file")
@@ -463,8 +467,9 @@ build_native_dependencies() {
         echo "pinned SQLite sources are missing or unsafe" >&2
         return 1
     fi
+    verify_sha256 "$LSQLITE3_SHA256" "$deps_lsqlite_file"
     printf '%s\n' \
-        "lsqlite3 binding extraction path: $deps_lsqlite_file" \
+        "lsqlite3 binding staged path: $deps_lsqlite_file" \
         "SQLite amalgamation extraction path: $deps_sqlite_file" >&2
     deps_module_dir=$deps_tree/lib/lua/$deps_abi
     mkdir -p "$deps_module_dir"
@@ -574,7 +579,7 @@ run_version() {
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.1.0-1.rockspec
+    "$luarocks" lint luainstaller-1.1.1-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/toolchain_native.lua
     "$lua" test/native_bundle.lua

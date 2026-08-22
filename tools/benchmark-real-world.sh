@@ -185,72 +185,79 @@ run_case() {
     run_cmd "$name bundle(file)" "$out/bundle-onefile.log" "$expect_fail" \
         env "${env_prefix[@]}" "$LUAI_BIN" -b --file "$entry" -d "$discovery" -o "$out/onefile" --max-deps "$max_deps" || true
 
-    local exe_dir_name launcher_dir
-    exe_dir_name=$(basename "$out/dir")
-    if [ -x "$out/dir/$exe_dir_name" ]; then
-        launcher_dir="$out/dir/$exe_dir_name"
-    elif [ -x "$out/dir/$(basename "$entry")" ]; then
-        launcher_dir="$out/dir/$(basename "$entry")"
-    elif [ -x "$out/dir/$(basename "$entry" .lua)" ]; then
-        launcher_dir="$out/dir/$(basename "$entry" .lua)"
-    else
-        launcher_dir=
-    fi
+    if [ "$runtime_exec" -eq 1 ]; then
+        local exe_dir_name launcher_dir empty_path
+        exe_dir_name=$(basename "$out/dir")
+        if [ -x "$out/dir/$exe_dir_name" ]; then
+            launcher_dir="$out/dir/$exe_dir_name"
+        elif [ -x "$out/dir/$(basename "$entry")" ]; then
+            launcher_dir="$out/dir/$(basename "$entry")"
+        elif [ -x "$out/dir/$(basename "$entry" .lua)" ]; then
+            launcher_dir="$out/dir/$(basename "$entry" .lua)"
+        else
+            launcher_dir=
+        fi
 
-    local empty_path
-    empty_path=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
-    if [ -n "$launcher_dir" ]; then
-        if command -v timeout >/dev/null 2>&1; then
-            if timeout 6 env -i PATH="$empty_path" "$launcher_dir" >/dev/null 2>&1; then
+        empty_path=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+        if [ -n "$launcher_dir" ]; then
+            if command -v timeout >/dev/null 2>&1; then
+                if timeout 6 env -i PATH="$empty_path" "$launcher_dir" >/dev/null 2>&1; then
+                    log "$name dir-exec ok"
+                else
+                    log "[FAIL] $name dir-exec (timeout/exit mismatch)"
+                    failures+=("$name dir-exec")
+                fi
+            elif env -i PATH="$empty_path" "$launcher_dir" >/dev/null 2>&1; then
                 log "$name dir-exec ok"
             else
-                log "$name dir-exec fail (timeout/exit mismatch)"
+                log "[FAIL] $name dir-exec"
+                failures+=("$name dir-exec")
             fi
         else
-            if env -i PATH="$empty_path" "$launcher_dir" >/dev/null 2>&1; then
-                log "$name dir-exec ok"
-            else
-                log "$name dir-exec fail (expected for runtime-coupled apps)"
-            fi
+            log "[FAIL] $name dir executable not found"
+            failures+=("$name dir executable")
         fi
-    else
-        log "$name dir executable not found"
-    fi
 
-    if [ -n "$runtime_exec" ] && [ "$runtime_exec" -eq 1 ] && [ -x "$out/onefile" ]; then
-        if command -v timeout >/dev/null 2>&1; then
-            if timeout 6 env -i PATH="$empty_path" "$out/onefile" >/dev/null 2>&1; then
+        if [ -x "$out/onefile" ]; then
+            if command -v timeout >/dev/null 2>&1; then
+                if timeout 6 env -i PATH="$empty_path" "$out/onefile" >/dev/null 2>&1; then
+                    log "$name onefile exec ok"
+                else
+                    log "[FAIL] $name onefile exec (timeout/exit mismatch)"
+                    failures+=("$name onefile exec")
+                fi
+            elif env -i PATH="$empty_path" "$out/onefile" >/dev/null 2>&1; then
                 log "$name onefile exec ok"
             else
-                log "$name onefile exec fail (timeout/exit mismatch)"
+                log "[FAIL] $name onefile exec"
+                failures+=("$name onefile exec")
             fi
         else
-            if env -i PATH="$empty_path" "$out/onefile" >/dev/null 2>&1; then
-                log "$name onefile exec ok"
-            else
-                log "$name onefile exec fail (expected for runtime-coupled apps)"
-            fi
+            log "[FAIL] $name onefile binary missing"
+            failures+=("$name onefile binary")
         fi
-    elif [ -n "$runtime_exec" ] && [ "$runtime_exec" -eq 1 ]; then
-        log "$name onefile binary missing"
+        rm -rf "$empty_path"
+    else
+        log "$name runtime probes skipped"
     fi
-    rm -rf "$empty_path"
 }
 
 git_clone_or_fail() {
     local url=$1
     local dir=$2
+    local clone_log
+    clone_log="$LOG_DIR/git-clone-${dir##*/}.log"
     rm -rf "$dir"
     if command -v timeout >/dev/null 2>&1; then
-        if ! timeout 120 git clone --depth 1 --filter=blob:none "$url" "$dir" >/tmp/luainstaller-git.log 2>&1; then
-            if ! timeout 120 git clone --depth 1 "$url" "$dir" >/tmp/luainstaller-git.log 2>&1; then
+        if ! timeout 120 git clone --depth 1 --filter=blob:none "$url" "$dir" >"$clone_log" 2>&1; then
+            if ! timeout 120 git clone --depth 1 "$url" "$dir" >"$clone_log" 2>&1; then
                 log "skip: git clone failed $url"
                 return 1
             fi
         fi
     else
-        if ! git clone --depth 1 --filter=blob:none "$url" "$dir" >/tmp/luainstaller-git.log 2>&1; then
-            if ! git clone --depth 1 "$url" "$dir" >/tmp/luainstaller-git.log 2>&1; then
+        if ! git clone --depth 1 --filter=blob:none "$url" "$dir" >"$clone_log" 2>&1; then
+            if ! git clone --depth 1 "$url" "$dir" >"$clone_log" 2>&1; then
                 log "skip: git clone failed $url"
                 return 1
             fi
@@ -336,12 +343,12 @@ log "workspace: $WORK_ROOT"
 
 # A. baseline hello world
 run_case "hello_world" "$PROJECT_ROOT/test/single_file/01_hello_luainstaller.lua" \
-    "$WORK_ROOT/case-hello" "$DEFAULT_MAX_DEPS" "static" "" "" 1
+    "$WORK_ROOT/case-hello" "$DEFAULT_MAX_DEPS" "static" "" "" 0 1
 
 # Pure Lua multi-module stress
 make_fake_project "$WORK_ROOT/pure-modules" 120
 run_case "pure_lua_multi_modules" "$WORK_ROOT/pure-modules/main.lua" \
-    "$WORK_ROOT/case-pure-multi" "$DEFAULT_MAX_DEPS" "static" "" "" 0
+    "$WORK_ROOT/case-pure-multi" "$DEFAULT_MAX_DEPS" "static" "" "" 0 1
 
 # Dynamic require project (runtime discovery)
 mkdir -p "$WORK_ROOT/dynamic-require"
@@ -374,48 +381,58 @@ EOF
 run_case "dynamic_require_static" "$WORK_ROOT/dynamic-require/main.lua" \
     "$WORK_ROOT/case-dynamic-static" "$DEFAULT_MAX_DEPS" "static" "" "" 1 0
 run_case "dynamic_require_runtime" "$WORK_ROOT/dynamic-require/main.lua" \
-    "$WORK_ROOT/case-dynamic-runtime" "$DEFAULT_MAX_DEPS" "runtime" "" "" 0 0
+    "$WORK_ROOT/case-dynamic-runtime" "$DEFAULT_MAX_DEPS" "runtime" "" "" 0 1
 
+cpath=
+lua_path=
+cjson_ready=0
 if [ "$SKIP_NATIVE" -eq 0 ]; then
     mkdir -p "$ROCK_ROOT"
     cpath="${ROCK_ROOT}/lib/lua/$SCRIPT_LUA_ABI/?.so"
     lua_path="${ROCK_ROOT}/share/lua/$SCRIPT_LUA_ABI/?.lua;${ROCK_ROOT}/share/lua/$SCRIPT_LUA_ABI/?/init.lua"
 
-    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" install lua-cjson 2.1.0.10-1 >/tmp/luainstaller-lua-cjson-install.log 2>&1; then
+    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
+        install lua-cjson 2.1.0.10-1 \
+        >"$LOG_DIR/luarocks-install-lua-cjson.log" 2>&1; then
+        cjson_ready=1
         cat > "$WORK_ROOT/cjson-main.lua" <<'EOF'
 local cjson = require("cjson")
 print(cjson.encode({ok = true}))
 EOF
         run_case "lua-cjson" "$WORK_ROOT/cjson-main.lua" \
-            "$WORK_ROOT/case-lua-cjson" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0
+            "$WORK_ROOT/case-lua-cjson" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 1
     else
         log "skip: lua-cjson install failed"
     fi
 
-    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" install luasocket 3.1.0-1 >/tmp/luainstaller-luasocket-install.log 2>&1; then
+    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
+        install luasocket 3.1.0-1 \
+        >"$LOG_DIR/luarocks-install-luasocket.log" 2>&1; then
         cat > "$WORK_ROOT/luasocket-main.lua" <<'EOF'
 local socket = require("socket")
 local tp = require("socket.tp")
 local ftp = require("socket.ftp")
 local ltn12 = require("ltn12")
 print(type(socket.gettime()))
-print(type(tp.gettime()))
+print(type(tp.connect))
 print(type(ftp))
 print(type(ltn12.source))
 EOF
         run_case "luasocket" "$WORK_ROOT/luasocket-main.lua" \
-            "$WORK_ROOT/case-luasocket" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 0
+            "$WORK_ROOT/case-luasocket" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 1
     else
         log "skip: luasocket install failed"
     fi
 
-    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" install luafilesystem 1.9.0-1 >/tmp/luainstaller-luafilesystem-install.log 2>&1; then
+    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
+        install luafilesystem 1.9.0-1 \
+        >"$LOG_DIR/luarocks-install-luafilesystem.log" 2>&1; then
         cat > "$WORK_ROOT/luafilesystem-main.lua" <<'EOF'
 local lfs = require("lfs")
 print(type(lfs.currentdir()))
 EOF
         run_case "luafilesystem" "$WORK_ROOT/luafilesystem-main.lua" \
-            "$WORK_ROOT/case-luafilesystem" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 0
+            "$WORK_ROOT/case-luafilesystem" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 1
     else
         log "skip: luafilesystem install failed"
     fi
@@ -424,20 +441,30 @@ else
 fi
 
 if [ "$SKIP_EXTERNAL" -eq 0 ]; then
-    # B. tinykeep (LÖVE2D sample)
+    # B. Luacheck parser dependency graph (real pure-Lua project)
     if git_clone_or_fail \
-        "https://github.com/adnzzzzZ/tinykeep" \
-        "$WORK_ROOT/tinykeep"; then
-        if [ -f "$WORK_ROOT/tinykeep/main.lua" ]; then
-            run_case "tinykeep" "$WORK_ROOT/tinykeep/main.lua" \
-                "$WORK_ROOT/case-tinykeep" "$DEFAULT_MAX_DEPS" "static" "" "" 0 0
+        "https://github.com/lunarmodules/luacheck" \
+        "$WORK_ROOT/luacheck"; then
+        LUACHECK_ENTRY="$WORK_ROOT/luacheck/src/luacheck/parser.lua"
+        if [ -f "$LUACHECK_ENTRY" ]; then
+            luacheck_path="$WORK_ROOT/luacheck/src/?.lua;$WORK_ROOT/luacheck/src/?/init.lua"
+            run_case "luacheck_parser" "$LUACHECK_ENTRY" \
+                "$WORK_ROOT/case-luacheck-parser" "$DEFAULT_MAX_DEPS" \
+                "static" "$luacheck_path" "" 0 1
         else
-            log "skip: tinykeep/main.lua missing"
+            log "[FAIL] luacheck parser entry missing"
+            failures+=("luacheck parser entry")
         fi
     else
-        log "fallback: tinykeep unavailable, testing local student_management_system"
-        run_case "tinykeep" "$PROJECT_ROOT/test/student_management_system/main.lua" \
-            "$WORK_ROOT/case-tinykeep-fallback" "$DEFAULT_MAX_DEPS" "static" "" "" 0 0
+        if [ "$cjson_ready" -eq 1 ]; then
+            log "fallback: luacheck unavailable, testing local student_management_system"
+            run_case "student_management_system" \
+                "$PROJECT_ROOT/test/student_management_system/main.lua" \
+                "$WORK_ROOT/case-student-management-fallback" \
+                "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 0
+        else
+            log "skip: luacheck unavailable and local fallback requires lua-cjson"
+        fi
     fi
 
     # E. neovim runtime Lua stress
@@ -461,13 +488,16 @@ fi
 for n in $FAKE_SCALES; do
     make_fake_project "$WORK_ROOT/fake-$n" "$n"
     run_case "fake_${n}" "$WORK_ROOT/fake-$n/main.lua" \
-        "$WORK_ROOT/case-fake-${n}" "$((n + 100))" "static" "" "" 0 0
+        "$WORK_ROOT/case-fake-${n}" "$((n + 100))" "static" "" "" 0 1
 done
 
 log "== SUMMARY =="
+benchmark_status=0
 if [ ${#failures[@]} -eq 0 ]; then
     log "all cases completed"
 else
     log "failed: ${failures[*]}"
+    benchmark_status=1
 fi
 log "summary file: $SUMMARY"
+exit "$benchmark_status"

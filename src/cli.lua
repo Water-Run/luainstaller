@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-29
+    2026-08-22
 ]]
 
 local function localFileExists(path)
@@ -146,7 +146,7 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.1.0"
+local VERSION = "1.1.1"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
@@ -282,7 +282,7 @@ local function basename(path)
 end
 
 local function stripExtension(name)
-    return tostring(name or ""):gsub("%.lua$", ""):gsub("%.cmd$", ""):gsub("%.exe$", "")
+    return (tostring(name or ""):gsub("%.lua$", ""):gsub("%.cmd$", ""):gsub("%.exe$", ""))
 end
 
 local function detectProgram(context)

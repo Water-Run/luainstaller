@@ -2,8 +2,8 @@
 set -eu
 
 # Compatibility launcher for environments that enter the Windows matrix from
-# a POSIX orchestration shell. The release gate itself is native PowerShell and
-# runs directly on the physical Windows host with its native compiler.
+# a POSIX orchestration shell. The required runner is native PowerShell with
+# MSVC, either in GitHub Actions or a local Windows environment.
 PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 RUNNER=$PROJECT_ROOT/tools/test-lua-versions.ps1
 
@@ -15,5 +15,5 @@ if command -v powershell.exe >/dev/null 2>&1; then
         -ExecutionPolicy Bypass -File "$RUNNER" "$@"
 fi
 
-echo 'native Windows PowerShell is required; run tools/test-lua-versions.ps1 on the physical Windows host' >&2
+echo 'native Windows PowerShell is required; run tools/test-lua-versions.ps1 on Windows or in the Windows CI job' >&2
 exit 2

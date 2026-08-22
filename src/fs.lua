@@ -376,7 +376,7 @@ function M.makePrivateDirectory(label, parent)
             "};throw 'cannot create a unique private directory'",
         }))
         output = tostring(output or ""):gsub("%s+$", "")
-        if ok and output ~= "" then return output:gsub("\\", "/") end
+        if ok and output ~= "" then return (output:gsub("\\", "/")) end
         return nil, output ~= "" and output or "cannot create a unique private directory"
     end
     for attempt = 1, 40 do

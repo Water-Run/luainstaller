@@ -6,10 +6,9 @@ Author:
 File:
     production_edges.lua
 Date:
+    2026-07-11
 Updated:
-    2026-07-29
-    2026-07-29
-    2026-07-29
+    2026-08-22
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -31,6 +30,25 @@ local function commandSucceeds(command)
     local ok = commandResult(command)
     return ok
 end
+
+local function commandResultWithWatchdog(command, seconds)
+    assert(package.config:sub(1, 1) == "/",
+        "the watchdog command helper requires a POSIX shell")
+    local script = table.concat({
+        "command_text=", shellQuote(command), "; ",
+        'sh -c "$command_text" & child=$!; ',
+        "(sleep ", tostring(seconds), "; ",
+        'kill -TERM "$child" 2>/dev/null || exit 0; ',
+        'sleep 1; kill -KILL "$child" 2>/dev/null || true',
+        ') </dev/null >/dev/null 2>&1 & watchdog=$!; ',
+        'wait "$child"; status=$?; ',
+        'kill "$watchdog" 2>/dev/null || true; ',
+        'wait "$watchdog" 2>/dev/null || true; ',
+        'exit "$status"',
+    })
+    return commandResult(harness.command("sh", { "-c", script }))
+end
+
 local luaCommand = shellQuote(harness.lua_command())
 local compat = require("luainstaller.compat")
 local loadText = compat.loadText
@@ -212,6 +230,37 @@ test("external command timeouts kill runaway children", function()
     local elapsed = os.time() - started
     assert(ok == false, "a timed-out command must not succeed: " .. tostring(output))
     assert(elapsed < 20, string.format("timeout took %d seconds", elapsed))
+
+    local direct_started = os.time()
+    local direct_ok, direct_output = process.outputCommand(
+        "sh",
+        {
+            "-c",
+            "sleep 30 & child=$!; printf 'child=%s\\n' \"$child\"; wait \"$child\"",
+        },
+        nil,
+        { timeout_seconds = 1 }
+    )
+    local direct_elapsed = os.time() - direct_started
+    assert(direct_ok == false,
+        "a timed-out argv command must not succeed: " .. tostring(direct_output))
+    assert(direct_elapsed < 20,
+        string.format("argv timeout took %d seconds", direct_elapsed))
+    local child_pid = direct_output:match("child=(%d+)")
+    assert(child_pid, "timed argv command did not report its child PID: "
+        .. tostring(direct_output))
+    local child_alive = process.outputCommand("kill", { "-0", child_pid })
+    assert(child_alive == false,
+        "timed argv command left a descendant alive: " .. child_pid)
+
+    local env_ok, env_output = process.outputCommand(
+        "sh",
+        { "-c", 'printf %s "$LUAI_TIMEOUT_PROBE"' },
+        { LUAI_TIMEOUT_PROBE = "argv-safe" },
+        { timeout_seconds = 5 }
+    )
+    assert(env_ok == true, tostring(env_output))
+    assertEqual(env_output, "argv-safe", "timed argv environment")
 end)
 
 test("full edge-coverage prerequisites are available", function()
@@ -362,6 +411,64 @@ test("sha256 matches the host across block boundaries and binary data", function
             "SHA-256 streaming size " .. size)
     end
     removeTree(root)
+end)
+
+test("sha256 encodes byte lengths above four GiB without 32-bit truncation", function()
+    local hash = require("luainstaller.hash")
+    local state = hash.newSha256()
+    -- The public incremental state has not processed four GiB of blocks; this
+    -- intentionally isolates the final 64-bit length field.  The expected
+    -- compression result uses a bit length of 0x0000000800000000.  The old
+    -- 32-bit shift path encoded zero and produced the ordinary empty digest.
+    state.length = 4294967296
+    assertEqual(
+        hash.finalizeSha256(state),
+        "7ccf0d399639597c6ac9bd868695ea3bdcba23e33da8cb4e089e20cdff2e3300",
+        "SHA-256 4 GiB length field"
+    )
+end)
+
+test("sha256 file hashing rejects read errors", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local digest, hash_err = require("luainstaller.hash").sha256File(".")
+    assert(digest == nil, "a directory was hashed as if it were an empty file")
+    assert(type(hash_err) == "string" and hash_err:find("cannot read", 1, true),
+        tostring(hash_err))
+end)
+
+test("sha256 file hashing reports injected read and close failures", function()
+    local hash = require("luainstaller.hash")
+    local original_open = io.open
+    local checked, check_err = pcall(function()
+        rawset(io, "open", function()
+            return {
+                read = function() return nil, "forced read failure" end,
+                close = function() return true end,
+            }
+        end)
+        local read_digest, read_err = hash.sha256File("injected-read")
+        assert(read_digest == nil)
+        assert(type(read_err) == "string"
+            and read_err:find("forced read failure", 1, true), tostring(read_err))
+
+        local reads = 0
+        rawset(io, "open", function()
+            return {
+                read = function()
+                    reads = reads + 1
+                    if reads == 1 then return "content" end
+                    return nil
+                end,
+                close = function() return nil, "forced close failure" end,
+            }
+        end)
+        local close_digest, close_err = hash.sha256File("injected-close")
+        assert(close_digest == nil)
+        assert(type(close_err) == "string"
+            and close_err:find("forced close failure", 1, true), tostring(close_err))
+    end)
+    rawset(io, "open", original_open)
+    assert(checked, check_err)
 end)
 
 test("checked write reports flush or close failure", function()
@@ -736,7 +843,7 @@ test("native runtime profiles reject incompatible Lua library kinds", function()
     ))
 end)
 
-test("Windows 1.0 platform profile is x86_64 only", function()
+test("Windows release platform profile is x86_64 only", function()
     local platform = require("luainstaller.platform")
     local supported = assert(platform.profile({
         host = { os = "windows", arch = "x86_64" },
@@ -760,6 +867,10 @@ test("Windows release toolchains close the CRT on x86_64", function()
 
     assert(toolchain_source:find('"/MT"', 1, true),
         "product MSVC commands do not select the static CRT")
+    assert(toolchain_source:find('"/wd5105"', 1, true),
+        "product MSVC commands do not tolerate the VS 2019/Windows SDK header warning")
+    assert(toolchain_source:find('whereProgram("dumpbin.exe"', 1, true),
+        "PATH-discovered MSVC toolchains omit PE audit support")
     assert(not toolchain_source:find('"/MD"', 1, true),
         "product MSVC commands retain the dynamic CRT")
     assert(toolchain_source:find('"/MACHINE:X64"', 1, true),
@@ -772,6 +883,20 @@ test("Windows release toolchains close the CRT on x86_64", function()
         "Windows matrix does not audit PE dependencies")
     assert(matrix_source:find("VCRUNTIME", 1, true),
         "Windows matrix does not reject the VC runtime DLL")
+    for version, compiler_flag in pairs({
+        ["5.2.4"] = "/DLUA_COMPAT_ALL",
+        ["5.3.6"] = "/DLUA_COMPAT_5_2",
+        ["5.4.8"] = "/DLUA_COMPAT_5_3",
+    }) do
+        assert(matrix_source:find("'" .. version .. "' { return @('" ..
+                compiler_flag .. "') }", 1, true),
+            "Windows matrix does not mirror Lua " .. version ..
+                " official Makefile compatibility flags")
+    end
+    assert(matrix_source:find("compat=$compatibilityId", 1, true),
+        "Windows matrix cache identity omits official compatibility flags")
+    assert(matrix_source:find("official-msvc-v4-makefile-compat-luac", 1, true),
+        "Windows matrix does not invalidate pre-compatibility Lua builds")
     assert(not matrix_source:find("Hostx64\\ARM64", 1, true),
         "Windows matrix contains an ARM64 compiler path")
 end)
@@ -1004,24 +1129,69 @@ test("require lexer tracks shadowed bindings and scope exits", function()
         { name = "pcall parameter shadowing", source = "function f(require) return pcall(require, 'z') end", expected = 0 },
         { name = "local rebinding", source = "local require = function(n) return n end require('a')", expected = 0 },
         { name = "global rebinding", source = "require = function(n) return n end require('b')", expected = 0 },
-        { name = "local function named require", source = "local function require(name) return name end", expected = 0 },
-        { name = "function named require", source = "function require(name) return name end", expected = 0 },
+        { name = "global initializer call uses outer", source = "require = require('global-loader'); require('global-call-after')", expected = 1, expected_names = { "global-loader" } },
+        { name = "nested global initializer uses outer", source = "require = wrap(require('global-nested')); require('global-nested-after')", expected = 1, expected_names = { "global-nested" } },
+        { name = "global passthrough stays followed", source = "require = require; require('global-passthrough-after')", expected = 1, expected_names = { "global-passthrough-after" } },
+        { name = "global pcall initializer uses outer", source = "require = pcall(require, 'global-pcall'); require('global-pcall-after')", expected = 1, expected_names = { "global-pcall" }, optional = true },
+        { name = "table field does not rebind require", source = "local t = { require = function() end }; require('table-after')", expected = 1, expected_names = { "table-after" } },
+        { name = "table field initializer uses outer", source = "local t = { require = require('table-loader') }; require('table-after')", expected = 2, expected_names = { "table-loader", "table-after" } },
+        { name = "function-valued table field tracks body rebind", source = "local t = { handler = function() require = custom; require('table-inner') end }; require('table-outer')", expected = 1, expected_names = { "table-outer" } },
+        { name = "global rebinding crosses do scope", source = "do require = function() end end require('block-after')", expected = 0 },
+        { name = "global rebinding crosses branch scope", source = "if enabled then require = function() end end require('branch-after')", expected = 0 },
+        { name = "commented global rebinding crosses scope", source = "do require -- assignment comment\n = function() end end require('comment-after')", expected = 0 },
+        { name = "local function named require persists", source = "local function require(name) return name end require('local-after')", expected = 0 },
+        { name = "function named require persists", source = "function require(name) return name end require('global-after')", expected = 0 },
+        { name = "global function binding crosses do scope", source = "do function require() end end require('function-block-after')", expected = 0 },
+        { name = "nested global function body is not executed", source = "function outer() function require() end end require('nested-function-after')", expected = 1, expected_names = { "nested-function-after" } },
         { name = "multi-name local rebinding", source = "local a, require = 1, function() end require('c')", expected = 0 },
+        { name = "multi-name first initializer uses outer", source = "local a, require = require('multi-first'), function() end; require('multi-after')", expected = 1, expected_names = { "multi-first" } },
+        { name = "multi-name matching initializer uses outer", source = "local a, require = 1, require('multi-second'); require('multi-after')", expected = 1, expected_names = { "multi-second" } },
         { name = "bare local require declaration", source = "local require\nrequire('d')", expected = 0 },
+        { name = "multiline initializer uses outer", source = "local require\n= require('multiline-loader')\nrequire('multiline-after')", expected = 1, expected_names = { "multiline-loader" } },
+        { name = "non-require bare local leaves global", source = "local value\nrequire('bare-after')", expected = 1, expected_names = { "bare-after" } },
         { name = "passthrough stays followed", source = "local require = require\nrequire('e')", expected = 1 },
-        { name = "passthrough of a call stays shadowed", source = "local require = require() require('f')", expected = 0 },
+        { name = "initializer call uses outer then shadows", source = "local require = require('loader') require('f')", expected = 1 },
+        { name = "nested initializer call uses outer", source = "local require = wrap(require('nested-loader')); require('nested-after')", expected = 1, expected_names = { "nested-loader" } },
+        { name = "pcall initializer uses outer", source = "local require = pcall(require, 'pcall-loader'); require('pcall-after')", expected = 1, expected_names = { "pcall-loader" }, optional = true },
         { name = "do block shadow exits", source = "do local require = g end require('g')", expected = 1 },
         { name = "if block shadow exits", source = "if x then local require = g end require('h')", expected = 1 },
         { name = "for block shadow exits", source = "for i=1,2 do local require = g end require('i')", expected = 1 },
         { name = "while block shadow exits", source = "while x do local require = g end require('j')", expected = 1 },
         { name = "repeat block shadow exits", source = "repeat local require = g until x require('k')", expected = 1 },
-        { name = "elseif keeps block shadow", source = "if a then local require = g elseif b then require('l') end require('m')", expected = 1 },
+        { name = "repeat local function shadow exits", source = "repeat local function require() end until true require('repeat-function-after')", expected = 1, expected_names = { "repeat-function-after" } },
+        { name = "repeat binding covers condition", source = "repeat local require = g until require('repeat-condition'); require('repeat-after')", expected = 1, expected_names = { "repeat-after" } },
+        { name = "elseif starts a sibling scope", source = "if a then local require = g elseif b then require('l') end require('m')", expected = 2 },
+        { name = "else starts a sibling scope", source = "if a then local require = g else require('l2') end require('m2')", expected = 2 },
         { name = "nested function param shadow stays inside", source = "function outer() return function(require) return require('n') end end require('o')", expected = 1 },
+        { name = "qualified function field keeps global require", source = "function object.require() return require('p') end", expected = 1 },
+        { name = "qualified function root keeps global require", source = "function require.member() return require('q') end", expected = 1 },
+        { name = "qualified function root permits trivia", source = "function require -- field comment\n.member() return require('q2') end", expected = 1 },
+        { name = "qualified method keeps global require", source = "function object:require() return require('r') end", expected = 1 },
+        { name = "generic for variable shadows body", source = "for require in pairs({}) do require('s') end", expected = 0 },
+        { name = "numeric for RHS precedes variable scope", source = "for require = require('t'), 2 do require('u') end", expected = 1 },
+        { name = "generic for RHS precedes variable scope", source = "for require in require('v') do require('w') end", expected = 1 },
     }
     for _, case in ipairs(cases) do
         assert(loadText(case.source, "=" .. case.name, {}), case.name)
         local actual = LuaLexer.new(case.source, case.name .. ".lua"):extractRequires()
         assertEqual(#actual, case.expected, case.name)
+        for index, expected_name in ipairs(case.expected_names or {}) do
+            assertEqual(actual[index].name, expected_name, case.name .. " name")
+        end
+        if case.optional then
+            assert(actual[1].optional == true, case.name .. " optional flag")
+        end
+    end
+
+    local lua51_goto_name =
+        "local goto, require = 1, require('lua51-loader'); require('lua51-after')"
+    if loadText(lua51_goto_name, "=lua51-goto-name", {}) then
+        local actual = LuaLexer.new(
+            lua51_goto_name,
+            "lua51-goto-name.lua"
+        ):extractRequires()
+        assertEqual(#actual, 1, "Lua 5.1 goto local name")
+        assertEqual(actual[1].name, "lua51-loader", "Lua 5.1 goto initializer")
     end
 end)
 
@@ -2265,8 +2435,7 @@ test("backup cleanup never recursively removes late user content", function()
     local first = luainstaller.bundle(opts)
     assert(first.ok, first.error and first.error.message)
 
-    local original_popen = io.popen
-    local original_remove = os.remove
+    local original_rename = os.rename
     local backup_path
     local injected = false
     local user_content = "late user content must survive\n"
@@ -2276,21 +2445,18 @@ test("backup cleanup never recursively removes late user content", function()
         backup_path = candidate:match("^(.*%.luai%-backup%-[^/]+)") or candidate
         writeFile(backup_path .. "/USER-DATA.txt", user_content)
     end
-    rawset(io, "popen", function(command, mode)
-        local candidate = command:match("^rm %-rf '([^']+%.luai%-backup%-[^']+)' 2>&1$")
-        if candidate then inject(candidate) end
-        return original_popen(command, mode)
-    end)
-    rawset(os, "remove", function(candidate)
-        if type(candidate) == "string" and candidate:find("%.luai%-backup%-") then
-            inject(candidate)
+    rawset(os, "rename", function(from, to)
+        local values = packValues(original_rename(from, to))
+        if values[1] and not injected
+            and type(from) == "string" and from:find(".luai-backup-", 1, true)
+            and type(to) == "string" and to:find(".luai-remove-", 1, true) then
+            inject(from)
         end
-        return original_remove(candidate)
+        return unpackValues(values, 1, values.n)
     end)
 
     local call_ok, rebuilt = pcall(luainstaller.bundle, opts)
-    rawset(io, "popen", original_popen)
-    rawset(os, "remove", original_remove)
+    rawset(os, "rename", original_rename)
 
     assert(call_ok, rebuilt)
     assert(injected, "backup cleanup hook did not run")
@@ -3757,9 +3923,9 @@ test("onefile cache repairs an equal-size FNV collision and mode", function()
 
     assert(os.remove(manifest_path))
     runCommand("mkfifo " .. shellQuote(manifest_path))
-    local fifo_ok, _, fifo_code = harness.command_result(
-        "timeout 5 env TMPDIR=" .. shellQuote(cache)
-        .. " " .. shellQuote(out) .. " fifo >/dev/null 2>&1")
+    local fifo_ok, _, fifo_code = commandResultWithWatchdog(
+        "env TMPDIR=" .. shellQuote(cache)
+        .. " " .. shellQuote(out) .. " fifo >/dev/null 2>&1", 5)
     assert(not fifo_ok, "extractor accepted a cache FIFO")
     assertEqual(fifo_code, 1, "cache FIFO rejection status")
     runCommand("test -p " .. shellQuote(manifest_path))
@@ -3774,10 +3940,9 @@ test("onefile cache repairs an equal-size FNV collision and mode", function()
     runCommand("chmod 700 " .. shellQuote(victim .. "/manifest.lua"))
     runCommand("rm -rf " .. shellQuote(luai_dir))
     runCommand("ln -s " .. shellQuote(victim) .. " " .. shellQuote(luai_dir))
-    local linked_ok, _, linked_code = harness.command_result(
-        "timeout 5 env TMPDIR=" .. shellQuote(cache) .. " " .. shellQuote(out)
-            .. " linked-parent >/dev/null 2>&1"
-    )
+    local linked_ok, _, linked_code = commandResultWithWatchdog(
+        "env TMPDIR=" .. shellQuote(cache) .. " " .. shellQuote(out)
+            .. " linked-parent >/dev/null 2>&1", 5)
     assert(not linked_ok, "extractor accepted a linked cache parent")
     assertEqual(linked_code, 1, "linked cache parent rejection status")
     assert(readFile(victim .. "/manifest.lua") == original, "linked parent changed victim bytes")
@@ -3861,17 +4026,19 @@ exec "$LUAI_REAL_CC" "$@"
     local child = harness.loader_prelude() .. string.format([[
 local bundler = require("luainstaller.bundler")
 local onefile = require("luainstaller.onefile")
+local fixture_directory = require("luainstaller.platform").detectHost().os == "linux"
+    and "utf8-雪" or "portable-empty"
 local original = bundler.bundleOnedir
 bundler.bundleOnedir = function(opts)
     assert(require("luainstaller.process").output(
-        "mkdir -p " .. require("luainstaller.process").shellQuote(opts.out .. "/utf8-雪")
+        "mkdir -p " .. require("luainstaller.process").shellQuote(opts.out .. "/" .. fixture_directory)
             .. " " .. require("luainstaller.process").shellQuote(opts.out .. "/.luai")))
     local inner = assert(io.open(opts.out .. "/inner", "wb"))
     assert(inner:write("#!/bin/sh\nexit 0\n"))
     assert(inner:close())
     assert(require("luainstaller.process").output(
         "chmod 700 " .. require("luainstaller.process").shellQuote(opts.out .. "/inner")))
-    local empty = assert(io.open(opts.out .. "/utf8-雪/empty.bin", "wb"))
+    local empty = assert(io.open(opts.out .. "/" .. fixture_directory .. "/empty.bin", "wb"))
     assert(empty:close())
     local long_name = string.rep("n", 240)
     local long_file = assert(io.open(opts.out .. "/" .. long_name, "wb"))
@@ -3885,7 +4052,6 @@ end
 local result = onefile.bundleOnefile({
     entry = "test/single_file/01_hello_luainstaller.lua",
     out = %q,
-    target_os = "linux",
 })
 bundler.bundleOnedir = original
 assert(result.ok, result.error and result.error.message)
@@ -4078,7 +4244,10 @@ static void luai_test_swap_parent(const char *parent) {
         }, " "))
         local clang_cache = root .. "/clang-cache"
         makeDirectory(clang_cache)
-        runCommand("ASAN_OPTIONS=detect_leaks=1 TMPDIR=" .. shellQuote(clang_cache)
+        local leak_detection = commandOutputTrimmed("uname -s") == "Darwin"
+            and "0" or "1"
+        runCommand("ASAN_OPTIONS=detect_leaks=" .. leak_detection
+            .. " TMPDIR=" .. shellQuote(clang_cache)
             .. " " .. shellQuote(clang_exe))
     end
     removeTree(root)
@@ -4577,6 +4746,12 @@ test("logger stale recovery preserves an empty lock replaced after observation",
 local logger = require("luainstaller.logger")
 local process = require("luainstaller.process")
 local lock = os.getenv("HOME") .. "/.luainstaller/logs.lua.lock"
+local function identity(candidate)
+    return process.firstLine("stat -c '%d:%i' "
+            .. process.shellQuote(candidate) .. " 2>/dev/null")
+        or process.firstLine("stat -f '%d:%i' "
+            .. process.shellQuote(candidate) .. " 2>/dev/null")
+end
 assert(logger.clearLogs() == true)
 assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
 assert(process.output("touch -t 200001010000 " .. process.shellQuote(lock)))
@@ -4589,8 +4764,7 @@ rawset(os, "rename", function(from, to)
         injected = true
         assert(original_rename(lock, lock .. ".observed-stale"))
         assert(process.output("mkdir -m 700 " .. process.shellQuote(lock)))
-        replacement_identity = assert(process.firstLine("stat -c '%d:%i' "
-            .. process.shellQuote(lock)))
+        replacement_identity = assert(identity(lock))
     end
     return original_rename(from, to)
 end)
@@ -4599,8 +4773,8 @@ local cleared = logger.clearLogs()
 rawset(os, "rename", original_rename)
 assert(injected, "empty stale-lock replacement hook did not run")
 assert(cleared == false, "logger treated a newly created empty lock as stale")
-assert(process.firstLine("stat -c '%d:%i' " .. process.shellQuote(lock))
-    == replacement_identity, "new empty lock identity was not preserved")
+assert(identity(lock) == replacement_identity,
+    "new empty lock identity was not preserved")
 print("logger empty stale replacement ok")
 ]]
     local output = runCommand("HOME=" .. shellQuote(home) .. " "
@@ -4615,6 +4789,8 @@ test("remote scripts are pinned and non-destructive", function()
     local linux_runner = readFile("tools/remote-test-linux.sh")
     local macos_runner = readFile("tools/remote-test-macos.sh")
     local windows_runner = readFile("tools/remote-test-windows.sh")
+    local ci_workflow = readFile(".github/workflows/ci.yml")
+    local benchmark_runner = readFile("tools/benchmark-real-world.sh")
     local interruption_test = readFile("test/build_interruption.lua")
     assert(not interruption_test:find(
         'signal_name .. " -- \\"-$build\\""',
@@ -4645,9 +4821,25 @@ test("remote scripts are pinned and non-destructive", function()
         1,
         true
     ), "smoke suite writes through predictable shared temporary files")
-    for _, version in ipairs({ "5.1.5", "5.2.4", "5.3.6", "5.4.8", "5.5.0" }) do
+    assert(not benchmark_runner:find(
+        ">/tmp/luainstaller-",
+        1,
+        true
+    ), "benchmark writes through predictable shared temporary logs")
+    assert(benchmark_runner:find(
+        '>"$LOG_DIR/luarocks-install-lua-cjson.log"',
+        1,
+        true
+    ), "benchmark does not isolate native dependency logs in its workspace")
+    assert(ci_workflow:find("fail%-fast: false"),
+        "CI Lua ABI jobs stop after the first failure")
+    assert(ci_workflow:find("VERSION_FILTER='${{ matrix.lua }}'", 1, true),
+        "CI still runs all Lua ABIs serially inside one timeout")
+    for _, version in ipairs({ "5.1.5", "5.2.4", "5.3.6", "5.4.8", "5.5.1" }) do
         assert(posix_matrix:find(version, 1, true), "POSIX matrix omits Lua " .. version)
         assert(windows_matrix:find(version, 1, true), "Windows matrix omits Lua " .. version)
+        assert(ci_workflow:find('- "' .. version .. '"', 1, true),
+            "CI matrix omits Lua " .. version)
     end
     assert(posix_matrix:find("LUAROCKS_VERSION=3.13.0", 1, true))
     assert(posix_matrix:find("MYLIBS='-Wl,-E -ldl'", 1, true),
@@ -4750,7 +4942,7 @@ test("remote scripts are pinned and non-destructive", function()
         "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
         "fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60",
         "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
-        "57ccc32bbbd005cab75bcc52444052535af691789dba2b9016d5c50640d68b3d",
+        "1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce",
     }) do
         assert(posix_matrix:find(pin, 1, true), "POSIX matrix lacks official Lua SHA-256")
         assert(windows_matrix:lower():find(pin, 1, true),
@@ -4783,7 +4975,7 @@ test("remote scripts are pinned and non-destructive", function()
         "mimetypes-1.1.0-2.src.rock",
         "lzlib-0.4.1.53-4.src.rock",
         "pegasus-1.1.0-0.src.rock",
-        "lsqlite3_v096.zip",
+        "lsqlite3-0.9.6.c",
         "sqlite-amalgamation-3530200.zip",
     }) do
         assert(posix_matrix:find(dependency, 1, true),
@@ -4796,7 +4988,7 @@ test("remote scripts are pinned and non-destructive", function()
         "2cf77e0b6575caa6aecb43c9a06f705b1e7d92c19c5da6bb2f07a10feeee9e2f",
         "860c893fc53d0a7830a54fa64f22a2b89260ca39c9a7dcb0890f6d3029f00ca5",
         "0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746",
-        "ecc6e7636a54f021bca5b4a01b35af06fd7a6fc8b21c4b3eccd4fdb5dd32ad82",
+        "a3de0d56dcdd7df85e334174cd46e70451f996bc843e735ab1d8a8e8804f9486",
         "8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32",
     }) do
         assert(posix_matrix:find(digest, 1, true),
@@ -4814,14 +5006,23 @@ test("remote scripts are pinned and non-destructive", function()
         true
     ), "POSIX matrix does not isolate the pinned SQLite amalgamation")
     assert(posix_matrix:find(
-        'LSQLITE3_SOURCE_MEMBER=lsqlite3_v096/lsqlite3.c',
+        'LSQLITE3_SOURCE=lsqlite3-0.9.6.c',
         1,
         true
     ) and posix_matrix:find(
-        'deps_lsqlite_file=$deps_build_dir/lsqlite3-src/$LSQLITE3_SOURCE_MEMBER',
+        'deps_lsqlite_file=$deps_build_dir/lsqlite3-src/$LSQLITE3_SOURCE',
         1,
         true
-    ), "POSIX matrix does not require the pinned lsqlite3 source member")
+    ) and posix_matrix:find(
+        'verify_sha256 "$LSQLITE3_SHA256" "$deps_lsqlite_file"',
+        1,
+        true
+    ), "POSIX matrix does not require the pinned lsqlite3 source file")
+    assert(posix_matrix:find(
+        "72cf3d38f6df7ac995f6db05d8ffeb78c25c9179/lsqlite3.c",
+        1,
+        true
+    ), "POSIX matrix does not pin its lsqlite3 mirror commit")
     assert(posix_matrix:find(
         'SQLITE_SOURCE_MEMBER=sqlite-amalgamation-3530200/sqlite3.c',
         1,
@@ -4835,7 +5036,13 @@ test("remote scripts are pinned and non-destructive", function()
         "POSIX matrix accepts a symlink in place of pinned SQLite source")
     assert(posix_matrix:find("SQLite amalgamation source:", 1, true),
         "POSIX matrix does not report the exact SQLite source it compiles")
-    local provenance_position = assert(posix_matrix:find(
+    local lsqlite_provenance_position = assert(posix_matrix:find(
+        '"lsqlite3 binding source: file=$LSQLITE3_SOURCE ' ..
+            'sha256=$LSQLITE3_SHA256"',
+        1,
+        true
+    ), "POSIX matrix does not record pinned lsqlite3 provenance")
+    local sqlite_provenance_position = assert(posix_matrix:find(
         '"SQLite amalgamation source: archive=$SQLITE_ZIP ' ..
             'sha256=$SQLITE_SHA256 member=$SQLITE_SOURCE_MEMBER"',
         1,
@@ -4846,14 +5053,15 @@ test("remote scripts are pinned and non-destructive", function()
         1,
         true
     ), "POSIX matrix has no native-dependency cache check")
-    assert(provenance_position < cache_check_position,
+    assert(lsqlite_provenance_position < cache_check_position
+            and sqlite_provenance_position < cache_check_position,
         "POSIX matrix omits SQLite provenance when its dependency cache hits")
     assert(posix_matrix:find("native dependency cache result: hit", 1, true),
         "POSIX matrix does not make native-dependency cache reuse auditable")
     assert(posix_matrix:find("native dependency cache result: rebuild", 1, true),
         "POSIX matrix does not make native-dependency rebuilds auditable")
     assert(posix_matrix:find(
-        "recipe=pinned-src-rocks-lsqlite-v3-exact-sqlite-paths",
+        "recipe=pinned-src-rocks-lsqlite-v4-exact-source-paths",
         1,
         true
     ), "POSIX matrix does not invalidate the ambiguous SQLite cache recipe")
@@ -4876,7 +5084,7 @@ test("remote scripts are pinned and non-destructive", function()
         ""
     )
     assertEqual(remote_available_gates, 3,
-        "Linux physical runner does not select capability-aware coverage per host")
+        "Linux supplemental runner does not select capability-aware coverage per host")
     assert(windows_matrix:find("Assert-SafeRoot", 1, true))
     assert(windows_matrix:find("Stage-Source", 1, true))
     assert(windows_matrix:find("Get-FileHash", 1, true))
@@ -4932,7 +5140,7 @@ test("remote scripts are pinned and non-destructive", function()
         assert(runner:find("TEST_ROOT=", 1, true),
             runner_name .. " does not isolate supplemental artifacts per run")
         assert(runner:find("renice 15 -p $$", 1, true),
-            runner_name .. " does not lower physical-host CPU priority")
+            runner_name .. " does not lower supplemental-host CPU priority")
         assert(not runner:find("command -v lua", 1, true),
             runner_name .. " can silently test a host Lua ABI")
         assert(not runner:find("command -v luac", 1, true),
@@ -4948,7 +5156,7 @@ test("remote scripts are pinned and non-destructive", function()
             runner_name .. " clean target can still discover a host Lua")
     end
     assert(linux_runner:find("ionice -c 3 -p $$", 1, true),
-        "Linux runner does not lower physical-host I/O priority")
+        "Linux runner does not lower supplemental-host I/O priority")
     for name, content in pairs({
         posix = posix_matrix,
         powershell = windows_matrix,

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-07-18
+    2026-08-17
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -29,7 +29,7 @@ end
 local called, failure = xpcall(function()
     local projects = {}
     for _, parent in ipairs({ "checkout-a", "checkout-b" }) do
-        local project = path.join(root, parent, "same-project")
+        local project = path.join(path.join(root, parent), "same-project")
         assert(fs.makeDirectory(project))
         assert(fs.writeFile(path.join(project, "main.lua"), [[
 local greeter = require("greeter")
@@ -45,8 +45,8 @@ return { message = function(value) return "repro " .. value end }
     local onefiles = {}
     local onedirs = {}
     for index, project in ipairs(projects) do
-        local onefile = path.join(project, "dist", "app" .. suffix)
-        local onedir = path.join(project, "onedir", "app")
+        local onefile = path.join(path.join(project, "dist"), "app" .. suffix)
+        local onedir = path.join(path.join(project, "onedir"), "app")
         local onefile_result = require("luainstaller").bundle({
             entry = path.join(project, "main.lua"),
             out = onefile,
@@ -61,15 +61,24 @@ return { message = function(value) return "repro " .. value end }
             out = onedir,
             mode = "onedir",
         })
-        assert(onedir_result.ok, onedir_result.error and onedir_result.error.message)
+        assert(onedir_result.ok, onedir_result.error and table.concat({
+            tostring(onedir_result.error.message),
+            tostring(onedir_result.error.path or ""),
+            tostring(onedir_result.error.cause or onedir_result.error.output or ""),
+        }, "\n"))
         onefiles[index] = onefile_result.executable
         onedirs[index] = onedir_result.executable
     end
 
     local first_bytes = assert(fs.readRegularFile(onefiles[1]))
     local second_bytes = assert(fs.readRegularFile(onefiles[2]))
-    assert(hash.sha256(first_bytes) == hash.sha256(second_bytes),
-        "cross-root onefile hashes differ")
+    local first_hash = hash.sha256(first_bytes)
+    local second_hash = hash.sha256(second_bytes)
+    assert(first_hash == second_hash, string.format(
+        "cross-root onefile hashes differ: %s != %s",
+        first_hash,
+        second_hash
+    ))
     assert(first_bytes == second_bytes, "cross-root onefile bytes differ")
 
     local username = os.getenv("USER") or os.getenv("USERNAME")

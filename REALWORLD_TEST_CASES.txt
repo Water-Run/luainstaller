@@ -5,20 +5,20 @@ Real-world project compile commands
 
 Run all cases in one command (script-managed temp workspace):
 
-KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 sh tools/benchmark-real-world.sh
+KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 bash tools/benchmark-real-world.sh
 
 1) Checkout real projects
 -------------------------
 
-git clone --depth 1 https://github.com/adnzzzzZ/tinykeep.git
+git clone --depth 1 https://github.com/lunarmodules/luacheck.git
 git clone --depth 1 https://github.com/neovim/neovim.git
-git clone --depth 1 https://github.com/mpx/lua-cjson.git
-git clone --depth 1 https://github.com/lunarmodules/luasocket.git
-git clone --depth 1 https://github.com/lunarmodules/luafilesystem.git
+
+The native cases below use the named, versioned LuaRocks releases rather than
+unreferenced source checkouts.
 
 If network is not available:
 
-SKIP_EXTERNAL=1 sh tools/benchmark-real-world.sh
+SKIP_EXTERNAL=1 bash tools/benchmark-real-world.sh
 
 2) Manual per-project luai compile commands
 -----------------------------------------
@@ -52,7 +52,7 @@ local tp = require("socket.tp")
 local ftp = require("socket.ftp")
 local ltn12 = require("ltn12")
 print(type(socket.gettime()))
-print(type(tp.gettime()))
+print(type(tp.connect))
 print(type(ftp))
 print(type(ltn12.source))
 EOC
@@ -70,16 +70,19 @@ $LUAI_BIN -a "$WORK/luafilesystem-main.lua" -d static --max-deps "$MAX_DEPS"
 $LUAI_BIN -b --dir "$WORK/luafilesystem-main.lua" -d static -o "$WORK/luafilesystem-dir" --max-deps "$MAX_DEPS"
 $LUAI_BIN -b --file "$WORK/luafilesystem-main.lua" -d static -o "$WORK/luafilesystem-onefile" --max-deps "$MAX_DEPS"
 
-# tinykeep (or fallback)
-ENTRY_TINYKEEP=$PWD/tinykeep/main.lua
-[ -f "$ENTRY_TINYKEEP" ] || ENTRY_TINYKEEP=$PWD/test/student_management_system/main.lua
-$LUAI_BIN -a "$ENTRY_TINYKEEP" -d static --max-deps "$MAX_DEPS"
-$LUAI_BIN -b --dir "$ENTRY_TINYKEEP" -d static -o "$WORK/tinykeep-dir" --max-deps "$MAX_DEPS"
-$LUAI_BIN -b --file "$ENTRY_TINYKEEP" -d static -o "$WORK/tinykeep-onefile" --max-deps "$MAX_DEPS"
+# Luacheck parser dependency graph
+ENTRY_LUACHECK=$PWD/luacheck/src/luacheck/parser.lua
+LUACHECK_PATH="$PWD/luacheck/src/?.lua;$PWD/luacheck/src/?/init.lua"
+LUA_PATH="$LUACHECK_PATH;$LUA_PATH" \
+  $LUAI_BIN -a "$ENTRY_LUACHECK" -d static --max-deps "$MAX_DEPS"
+LUA_PATH="$LUACHECK_PATH;$LUA_PATH" \
+  $LUAI_BIN -b --dir "$ENTRY_LUACHECK" -d static -o "$WORK/luacheck-dir" --max-deps "$MAX_DEPS"
+LUA_PATH="$LUACHECK_PATH;$LUA_PATH" \
+  $LUAI_BIN -b --file "$ENTRY_LUACHECK" -d static -o "$WORK/luacheck-onefile" --max-deps "$MAX_DEPS"
 
 # Neovim runtime/lua subtree
 # Use the suite to generate wrapper and run (same suite path pattern):
-KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 sh tools/benchmark-real-world.sh
+KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 bash tools/benchmark-real-world.sh
 
 3) Script-generated stress cases
 -------------------------------

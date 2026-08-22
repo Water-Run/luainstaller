@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-07-18
+    2026-08-17
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -54,13 +54,24 @@ local function assertDistribution(bundle_root, expect_extractor)
     assertContains(read(bundle_root, ".luai/licenses/GPL-3.0-or-later.txt"),
         "GNU GENERAL PUBLIC LICENSE", "GPL license")
     local notices = read(bundle_root, "THIRD_PARTY_NOTICES.md")
-    assertContains(notices, "Lua 5.4.8", "third-party notices")
-    assertContains(notices, "https://www.lua.org/ftp/lua-5.4.8.tar.gz",
+    assertContains(notices, "Lua 5.5.1", "third-party notices")
+    assertContains(notices, "https://www.lua.org/ftp/lua-5.5.1.tar.gz",
         "third-party source location")
     assertContains(read(bundle_root, ".luai/build/RELINKING.adoc"),
         "Relinking", "relinking instructions")
     assert(fs.pathType(path.join(bundle_root, ".luai/build/launcher.c")) == "file",
         "generated launcher source is missing")
+    local build_root = path.join(bundle_root, ".luai/build")
+    for _, item in ipairs(assert(fs.listTree(build_root))) do
+        local relative = item.path:lower()
+        assert(not relative:match("%.obj$")
+            and not relative:match("%.pdb$")
+            and not relative:match("%.ilk$")
+            and not relative:match("%.exp$")
+            and relative ~= "lua-import.lib"
+            and relative ~= "lua-import.def",
+            "published compiler intermediate: " .. item.path)
+    end
     for destination, source in pairs(canonical) do
         assert(read(bundle_root, destination) == assert(fs.readRegularFile(source)),
             destination .. " differs from its canonical source")
@@ -96,16 +107,16 @@ end
 
 local called, failure = xpcall(function()
     assert(hash.sha256(assert(fs.readRegularFile("LICENSES/Lua-MIT.txt")))
-        == "8eabfd4cf1755e7597d98eea884447f94e160d5950af35c291f2e649ed797c19",
-        "Lua license differs from the verified Lua 5.4.8 text")
+        == "a23ad1f0b07e4e59009d8efaaf1f5ed1dcd06e5256c1743a58ca4f1cacad32e0",
+        "Lua license differs from the verified Lua 5.5.1 text")
     assert(hash.sha256(assert(fs.readRegularFile("LICENSES/GPL-3.0-or-later.txt")))
         == "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
         "GPLv3 text differs from the verified GNU copy")
     local entry = path.join(root, "main.lua")
     assert(fs.writeFile(entry, [[print("distribution license fixture")]]))
 
-    local onedir = path.join(root, "onedir", "app")
-    local onefile = path.join(root, "onefile", "app" .. suffix)
+    local onedir = path.join(path.join(root, "onedir"), "app")
+    local onefile = path.join(path.join(root, "onefile"), "app" .. suffix)
     local onedir_result = require("luainstaller").bundle({
         entry = entry,
         out = onedir,

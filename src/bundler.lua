@@ -8,8 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-29
-    2026-07-29
+    2026-08-17
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -86,6 +85,18 @@ local function contentHash(content, algorithm)
     })
 end
 
+local function fileContentHash(file_path, algorithm)
+    if fs.pathType(file_path) ~= "file" then
+        return nil, "path is not a regular file"
+    end
+    if algorithm == "sha256" then
+        return hash_mod.sha256File(file_path)
+    end
+    local content, read_err = fs.readRegularFile(file_path)
+    if content == nil then return nil, read_err end
+    return contentHash(content, algorithm)
+end
+
 local function sourceChangedError(source_path, expected_hash, actual_hash, algorithm, details)
     details = details or {}
     details.source_path = normalizePath(source_path)
@@ -153,16 +164,24 @@ local function verifyManifestSources(manifest)
     local algorithm = manifest and manifest.hash_algorithm
     local entries, entries_err = manifestSourceEntries(manifest)
     if not entries then return entries_err end
+    local verified = {}
     for _, entry in ipairs(entries) do
         local source_path = entry.source_path
-        local content, read_err = fs.readRegularFile(source_path)
-        if content == nil then
-            return sourceChangedError(source_path, entry.content_hash, nil, algorithm, {
-                cause = read_err,
-            })
+        local source_key = normalizePath(source_path)
+        local actual_hash = verified[source_key]
+        if actual_hash == nil then
+            local hash_err
+            actual_hash, hash_err = fileContentHash(source_path, algorithm)
+            if actual_hash == nil then
+                if type(hash_err) == "table" and hash_err.ok == false then
+                    return hash_err
+                end
+                return sourceChangedError(source_path, entry.content_hash, nil, algorithm, {
+                    cause = hash_err,
+                })
+            end
+            verified[source_key] = actual_hash
         end
-        local actual_hash, hash_err = contentHash(content, algorithm)
-        if hash_err then return hash_err end
         if actual_hash ~= entry.content_hash then
             return sourceChangedError(source_path, entry.content_hash, actual_hash, algorithm)
         end
@@ -431,15 +450,16 @@ local function copyFile(source, destination, expected_hash, hash_algorithm)
         })
     end
     if expected_hash ~= nil then
-        local copied, read_err = fs.readRegularFile(destination)
-        if copied == nil then
+        local actual_hash, hash_err = fileContentHash(destination, hash_algorithm)
+        if actual_hash == nil then
+            if type(hash_err) == "table" and hash_err.ok == false then
+                return hash_err
+            end
             return sourceChangedError(source, expected_hash, nil, hash_algorithm, {
                 destination_path = destination,
-                cause = read_err,
+                cause = hash_err,
             })
         end
-        local actual_hash, hash_err = contentHash(copied, hash_algorithm)
-        if hash_err then return hash_err end
         if actual_hash ~= expected_hash then
             return sourceChangedError(source, expected_hash, actual_hash, hash_algorithm, {
                 destination_path = destination,
@@ -675,25 +695,74 @@ local function defaultOut(entry)
     return normalizePath("build/" .. stem(entry))
 end
 
+local function secureToken(context)
+    return lock_owner.secureToken(context)
+end
+
+local function compactWindowsToken(value)
+    value = tostring(value or "")
+    if #value <= 24 then return value end
+    return value:sub(1, 12) .. value:sub(-12)
+end
+
+local WINDOWS_TRANSACTION_LABELS = {
+    backup = "b",
+    lock = "l",
+    ["lock-owner-stale"] = "xo",
+    release = "r",
+    remove = "d",
+    staging = "s",
+    ["staging-stale"] = "xs",
+    stale = "x",
+}
+
+local POSIX_TRANSACTION_LABELS = {
+    backup = "backup",
+    lock = "lock",
+    ["lock-owner-stale"] = "lock-owner-stale",
+    release = "lock-release",
+    remove = "remove",
+    staging = "staging",
+    ["staging-stale"] = "staging-stale",
+    stale = "lock-stale",
+}
+
+local function transactionSiblingName(label, token)
+    if IS_WINDOWS then
+        return ".luai-" .. assert(WINDOWS_TRANSACTION_LABELS[label]) .. "-"
+            .. compactWindowsToken(token)
+    end
+    return ".luai-" .. assert(POSIX_TRANSACTION_LABELS[label]) .. "-" .. token
+end
+
+local function outputStageName(output_hash, token)
+    if IS_WINDOWS then return transactionSiblingName("staging", token) end
+    return ".luai-staging-" .. output_hash:sub(1, 24) .. "-" .. token
+end
+
 local function uniqueSiblingPath(final_path, label)
     local parent = dirname(final_path)
     local output_id = hash_mod.sha256(normalizePath(final_path)):sub(1, 24)
     for _ = 1, 20 do
-        local suffix = tostring(os.time())
-            .. tostring(os.clock()):gsub("%.", "")
-            .. "-"
-            .. tostring({}):gsub("[^%w]", "")
-        local candidate = normalizePath(parent .. "/.luai-" .. label .. "-"
-            .. output_id .. "-" .. suffix)
+        local candidate
+        if IS_WINDOWS then
+            local token = secureToken(final_path .. "\0" .. label)
+            if not token then return nil end
+            candidate = normalizePath(parent .. "/"
+                .. transactionSiblingName(label, token))
+        else
+            local suffix = tostring(os.time())
+                .. tostring(os.clock()):gsub("%.", "")
+                .. "-"
+                .. tostring({}):gsub("[^%w]", "")
+            candidate = normalizePath(parent .. "/.luai-" .. label .. "-"
+                .. output_id .. "-" .. suffix)
+        end
         if not pathExists(candidate) then
             return candidate
         end
     end
     return nil
-end
-
-local function secureToken(context)
-    return lock_owner.secureToken(context)
 end
 
 local function renamePath(source, destination)
@@ -752,7 +821,7 @@ local restoreMovedOutputLock
 
 local function discardUnpublishedOutputLock(lock_path, token, release_token, expected_content)
     local release_path = normalizePath(dirname(lock_path)
-        .. "/.luai-lock-release-" .. release_token)
+        .. "/" .. transactionSiblingName("release", release_token))
     if pathExists(release_path) or isSymlink(release_path)
         or not renamePath(lock_path, release_path) then
         return false
@@ -785,7 +854,8 @@ local function acquireOutputLock(final_path)
         return nil, parent_err
     end
     local lock_id = hash_mod.sha256(normalizePath(final_path))
-    local lock_path = normalizePath(dirname(final_path) .. "/.luai-lock-" .. lock_id)
+    local lock_path = normalizePath(dirname(final_path) .. "/"
+        .. transactionSiblingName("lock", lock_id))
     local token, token_err = secureToken(final_path)
     local release_token, release_token_err = secureToken(final_path .. "\0release")
     if not token or not release_token then
@@ -803,7 +873,7 @@ local function acquireOutputLock(final_path)
             output = pid_err,
         })
     end
-    local stage_name = ".luai-staging-" .. lock_id:sub(1, 24) .. "-" .. token
+    local stage_name = outputStageName(lock_id, token)
     local stage_path = normalizePath(dirname(final_path) .. "/" .. stage_name)
     local owner = {
         token = token,
@@ -898,8 +968,7 @@ local function readOutputLockOwner(lock_path, expected_output_hash)
     if not owner or owner.token ~= token or owner.output_hash ~= expected_output_hash then
         return nil
     end
-    local expected_stage = ".luai-staging-" .. expected_output_hash:sub(1, 24)
-        .. "-" .. owner.token
+    local expected_stage = outputStageName(expected_output_hash, owner.token)
     if owner.staging ~= expected_stage then return nil end
     return {
         content = content,
@@ -934,7 +1003,7 @@ local function recoverEmptyOutputLock(final_path, lock_path)
     local recovery_token = secureToken(final_path .. "\0empty-stale")
     if not recovery_token then return false end
     local tombstone = normalizePath(dirname(lock_path)
-        .. "/.luai-lock-stale-" .. recovery_token)
+        .. "/" .. transactionSiblingName("stale", recovery_token))
     if pathExists(tombstone) or isSymlink(tombstone)
         or not renamePath(lock_path, tombstone) then
         return false
@@ -967,7 +1036,7 @@ recoverStaleOutputLock = function(final_path, lock_path, expected_output_hash)
     local recovery_token = secureToken(final_path .. "\0stale")
     if not recovery_token then return false end
     local tombstone = normalizePath(dirname(lock_path)
-        .. "/.luai-lock-stale-" .. recovery_token)
+        .. "/" .. transactionSiblingName("stale", recovery_token))
     if pathExists(tombstone) or isSymlink(tombstone)
         or not renamePath(lock_path, tombstone) then
         return false
@@ -987,7 +1056,7 @@ recoverStaleOutputLock = function(final_path, lock_path, expected_output_hash)
             return false
         end
         local stage_tombstone = normalizePath(dirname(final_path)
-            .. "/.luai-staging-stale-" .. recovery_token)
+            .. "/" .. transactionSiblingName("staging-stale", recovery_token))
         if pathExists(stage_tombstone) or isSymlink(stage_tombstone)
             or not renamePath(stage_path, stage_tombstone) then
             restoreMovedOutputLock(tombstone, lock_path)
@@ -1006,7 +1075,7 @@ recoverStaleOutputLock = function(final_path, lock_path, expected_output_hash)
 
     local stale_owner_path = normalizePath(tombstone .. "/owner." .. moved.owner.token)
     local owner_quarantine = normalizePath(dirname(lock_path)
-        .. "/.luai-lock-owner-stale-" .. recovery_token)
+        .. "/" .. transactionSiblingName("lock-owner-stale", recovery_token))
     if pathExists(owner_quarantine) or isSymlink(owner_quarantine)
         or fs.readRegularFile(stale_owner_path) ~= moved.content
         or not renamePath(stale_owner_path, owner_quarantine) then
@@ -1032,7 +1101,7 @@ local function releaseOutputLock(lock, failure)
     local cleanup_err
     if lock then
         local release_path = normalizePath(dirname(lock.path)
-            .. "/.luai-lock-release-" .. lock.release_token)
+            .. "/" .. transactionSiblingName("release", lock.release_token))
         if pathExists(release_path) or isSymlink(release_path) then
             cleanup_err = makeError("FilesystemError", "Output lock release path already exists", {
                 lock_path = lock.path,
@@ -1175,8 +1244,9 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
         local quarantine_path
         for _ = 1, 20 do
             cleanup_index = cleanup_index + 1
-            quarantine_path = normalizePath(dirname(candidate) .. "/.luai-remove-"
-                .. cleanup_nonce .. "-" .. tostring(cleanup_index))
+            quarantine_path = normalizePath(dirname(candidate) .. "/"
+                .. transactionSiblingName("remove", cleanup_nonce)
+                .. "-" .. tostring(cleanup_index))
             if not pathExists(quarantine_path) and not isSymlink(quarantine_path) then
                 break
             end
@@ -1712,9 +1782,12 @@ local function bundleOnedir(opts, lifecycle)
     local luai_dir = normalizePath(out_dir .. "/.luai")
     local native_dir = normalizePath(luai_dir .. "/native")
     local build_dir = normalizePath(luai_dir .. "/build")
+    local compiler_work_dir = normalizePath(build_dir .. "/tmp")
     local c_path = normalizePath(build_dir .. "/launcher.c")
 
-    local err = ensureDirectory(native_dir) or ensureDirectory(build_dir)
+    local err = ensureDirectory(native_dir)
+        or ensureDirectory(build_dir)
+        or ensureDirectory(compiler_work_dir)
     if err then
         return abandon(err)
     end
@@ -1827,7 +1900,7 @@ local function bundleOnedir(opts, lifecycle)
         native_toolchain,
         c_path,
         exe_path,
-        { work_dir = build_dir, rpath = profile.loader_rpath }
+        { work_dir = compiler_work_dir, rpath = profile.loader_rpath }
     )
     if not compile_ok then
         return abandon(makeError("CompilationFailedError", "C launcher compilation failed", {
@@ -1890,12 +1963,20 @@ local function bundleOnedir(opts, lifecycle)
         native_toolchain,
         abi_probe_c,
         abi_probe_exe,
-        { work_dir = build_dir, rpath = profile.loader_rpath }
+        { work_dir = compiler_work_dir, rpath = profile.loader_rpath }
     )
     if not abi_compile_ok then
         return abandon(makeError("ToolchainError", "Cannot compile the linked Lua runtime ABI probe", {
             command = abi_compile_cmd,
             output = abi_compile_output,
+        }))
+    end
+    local compiler_cleanup_err = removeTree(compiler_work_dir)
+    if compiler_cleanup_err then
+        return abandon(makeError("FilesystemError", "Cannot remove compiler intermediates", {
+            path = compiler_work_dir,
+            cause = compiler_cleanup_err.error and compiler_cleanup_err.error.message
+                or tostring(compiler_cleanup_err),
         }))
     end
     if profile.target_os ~= "windows" then

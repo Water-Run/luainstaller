@@ -57,7 +57,10 @@ local long_unicode_ok, long_unicode_output = process.outputPowerShell(
 )
 assert(long_unicode_ok and long_unicode_output == "长脚本雪", tostring(long_unicode_output))
 local powershell = assert(process.windowsPowerShellPath())
-local root = assert(fs.makePrivateDirectory("windows-native"))
+local root, unexpected_root_result = fs.makePrivateDirectory("windows-native")
+assert(root, unexpected_root_result)
+assert(unexpected_root_result == nil,
+    "successful private-directory creation leaked an auxiliary return value")
 
 local concurrent_root = path.join(root, "private-directory-concurrency")
 assert(fs.makeDirectory(concurrent_root))

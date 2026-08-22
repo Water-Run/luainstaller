@@ -178,25 +178,24 @@ xref:docs/USAGE.adoc[Usage].
 [#test-environments]
 == Tested environments
 
-`luainstaller` is exercised on systems of these types:
+The required CI gate exercises these native runner classes. Additional Linux
+distributions and macOS systems are used as supplemental compatibility checks,
+not as release prerequisites:
 
 [cols="2,1",options="header"]
 |===
 |System |Architecture
 
-|Windows 11
+|Windows with MSVC and the Windows SDK
 |x86_64
 
-|Debian 13
+|Linux
 |x86_64
 
-|Rocky Linux 10
-|x86_64
-
-|Ubuntu 24.04 LTS
+|Linux
 |ARM64
 
-|macOS 26.x
+|macOS
 |ARM64
 |===
 
@@ -205,6 +204,7 @@ Full gates: xref:docs/TESTING.adoc[Testing].
 [#documentation-index]
 == Documentation
 
+* xref:CHANGELOG.adoc[Changelog] — release changes and upgrade notes
 * xref:docs/USAGE.adoc[Usage] — options, discovery, API
 * xref:docs/BUNDLING.adoc[Bundle format] — layout and runtime
 * xref:docs/RELINKING.adoc[Licenses and relinking]

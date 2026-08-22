@@ -50,7 +50,11 @@ local function execute(command)
 end
 
 local function getLogDirectory()
-    local home = os.getenv("HOME") or os.getenv("USERPROFILE") or "."
+    local home = process.environmentVariable("HOME")
+    if type(home) ~= "string" or home == "" then
+        home = process.environmentVariable("USERPROFILE")
+    end
+    if type(home) ~= "string" or home == "" then home = "." end
     return home .. PATH_SEP .. ".luainstaller"
 end
 
@@ -312,6 +316,21 @@ local function lockCreatedAt(lock_path)
     return modified, nil
 end
 
+local function transitionPath(lock_path, label, token)
+    if not IS_WINDOWS then
+        return lock_path .. "." .. label .. "." .. token
+    end
+    -- Keep the renamed directory no longer than the public lock basename.
+    -- Appending a full token can push the owner sentinel beyond MAX_PATH on
+    -- Windows PowerShell 5.1/.NET Framework, making post-rename verification
+    -- impossible. The full token remains inside the checked owner record; a
+    -- compact sibling collision merely makes the operation fail closed.
+    local parent = lock_path:match("^(.*)[/\\][^/\\]+$")
+    if not parent then return lock_path .. "." .. label .. "." .. token end
+    local compact = tostring(token):sub(1, 6) .. tostring(token):sub(-6)
+    return parent .. PATH_SEP .. label:sub(1, 1) .. compact
+end
+
 local function restoreMovedLock(release_path, lock_path)
     if pathExists(lock_path) or isSymbolicLink(lock_path) then
         return false
@@ -331,7 +350,7 @@ local function restoreMovedLock(release_path, lock_path)
 end
 
 local function removeOwnedLock(lock_path, token, release_token, expected_content)
-    local release_path = lock_path .. ".release." .. release_token
+    local release_path = transitionPath(lock_path, "release", release_token)
     if pathExists(release_path) or isSymbolicLink(release_path)
         or not renamePath(lock_path, release_path) then
         return false
@@ -350,7 +369,7 @@ local function removeOwnedLock(lock_path, token, release_token, expected_content
 end
 
 local function abandonPartiallyCreatedLock(lock_path, token, release_token, expected_content)
-    local release_path = lock_path .. ".release." .. release_token
+    local release_path = transitionPath(lock_path, "release", release_token)
     if pathExists(release_path) or isSymbolicLink(release_path)
         or not renamePath(lock_path, release_path) then
         return false
@@ -430,7 +449,7 @@ local function recoverStaleLock(lock_path)
         return false
     end
 
-    local tombstone = lock_path .. ".stale." .. uniqueToken()
+    local tombstone = transitionPath(lock_path, "stale", uniqueToken())
     if not renamePath(lock_path, tombstone) then
         return false
     end

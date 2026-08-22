@@ -135,7 +135,8 @@ Required checks
     lua test/contract_docs.lua
     lua test/smoke_all.lua
 
-Generated-C, native-module, or platform changes also require the physical-host
-Lua-version matrix described in docs/TESTING.adoc: Windows x86_64, Linux
-x86_64/ARM64, Mac mini, and Mac Studio. No VM, Wine, or cross-build result may
-substitute for a native-host pass.
+Generated-C, native-module, or platform changes also require the GitHub Actions
+Lua-version matrix described in docs/TESTING.adoc: Linux x86_64 and Windows
+x86_64 with MSVC. Supplemental Linux ARM64 and macOS runs are recommended when
+the affected code is platform-sensitive. Wine, MinGW, and cross-build results
+do not substitute for the Windows MSVC job.

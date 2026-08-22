@@ -26,7 +26,7 @@ under LGPL-3.0-or-later. It is not a substitute for the license texts in
 . Use an official Lua interpreter, headers, and library with the same
   major/minor ABI shown in `../manifest.lua`.
 . Use a native compiler for the target OS and architecture. Cross-compilation
-  is not part of the supported 1.0 relinking profile.
+  is outside the supported native relinking profile.
 . Compile `launcher.c` as strict C11, link the selected Lua library and its
   platform dependencies, and preserve the loader search path used by the
   target profile.
