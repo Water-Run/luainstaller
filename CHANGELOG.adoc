@@ -44,6 +44,9 @@ truth for the exact contents of a published version.
 
 === Fixed
 
+* Restore byte-identical MSVC onefile builds by applying `/Brepro` to both the
+  compiler and linker after a real option probe; some supported linker builds
+  omit this option from `link.exe /?` help text.
 * Keep onefile descendant containment on Windows XP without assuming the
   newer `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` flag. When that flag is rejected,
   an inherited-handle watchdog terminates the same Job Object after an abrupt

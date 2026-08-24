@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-14
+    2026-08-24
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -50,8 +50,41 @@ local first_bytes = assert(fs.readRegularFile(out))
 assert(fs.removeFile(out))
 local rebuilt = build()
 assert(rebuilt.ok, rebuilt.error and rebuilt.error.message or "second onefile build failed")
-assert(fs.readRegularFile(out) == first_bytes,
-    "native onefile extractor is not byte reproducible")
+local second_bytes = assert(fs.readRegularFile(out))
+if second_bytes ~= first_bytes then
+    local function littleU32(bytes, index)
+        if index < 1 or index + 3 > #bytes then return nil end
+        local first, second, third, fourth = bytes:byte(index, index + 3)
+        return first + second * 0x100 + third * 0x10000 + fourth * 0x1000000
+    end
+    local function peTimestamp(bytes)
+        if bytes:sub(1, 2) ~= "MZ" then return nil end
+        local pe_offset = littleU32(bytes, 0x3c + 1)
+        if not pe_offset or bytes:sub(pe_offset + 1, pe_offset + 4) ~= "PE\0\0" then
+            return nil
+        end
+        return littleU32(bytes, pe_offset + 8 + 1)
+    end
+    local first_difference
+    for index = 1, math.min(#first_bytes, #second_bytes) do
+        if first_bytes:byte(index) ~= second_bytes:byte(index) then
+            first_difference = index
+            break
+        end
+    end
+    first_difference = first_difference or math.min(#first_bytes, #second_bytes) + 1
+    local first_timestamp = peTimestamp(first_bytes)
+    local second_timestamp = peTimestamp(second_bytes)
+    error(string.format(
+        "native onefile extractor is not byte reproducible: first-difference=%d "
+            .. "sizes=%d/%d PE-timestamps=%s/%s",
+        first_difference,
+        #first_bytes,
+        #second_bytes,
+        first_timestamp and string.format("0x%08x", first_timestamp) or "n/a",
+        second_timestamp and string.format("0x%08x", second_timestamp) or "n/a"
+    ), 0)
+end
 assert(fs.removeTree(root))
 
 print("native onefile extractor compile ok")

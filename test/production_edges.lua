@@ -909,6 +909,9 @@ test("Windows release toolchains close the CRT and select the native machine", f
         "product MinGW commands do not set the Windows subsystem floor")
     assert(toolchain_source:find("linkerSupportsBrepro", 1, true),
         "legacy MSVC linker flags are not capability-probed")
+    assert(toolchain_source:find('"LNK4044"', 1, true)
+            and toolchain_source:find('{ "/nologo", "/Brepro" }', 1, true),
+        "MSVC reproducibility support relies only on incomplete help text")
     assert(toolchain_source:find("verifyMacosSharedRuntime", 1, true)
             and toolchain_source:find('local expected = "@rpath/" .. runtime_name', 1, true),
         "macOS dylib fallback can publish a non-relocatable launcher")
@@ -924,6 +927,63 @@ test("Windows release toolchains close the CRT and select the native machine", f
         "Windows matrix does not audit PE dependencies")
     assert(matrix_source:find("VCRUNTIME", 1, true),
         "Windows matrix does not reject the VC runtime DLL")
+
+    local toolchain = require("luainstaller.toolchain")
+    local process = require("luainstaller.process")
+    local original_output_command = process.outputCommand
+    local captured_arguments
+    process.outputCommand = function(_, arguments)
+        captured_arguments = arguments
+        return true, ""
+    end
+    local config = {
+        cc = "cl.exe",
+        compiler_family = "msvc",
+        environment = {},
+        host = { os = "windows", arch = "x86_64" },
+        profile = { target_arch = "x86_64" },
+        include_dir = "C:/lua/include",
+        link_args = { "C:/lua/lua54.lib" },
+        supports_brepro = true,
+    }
+    for name, invoke in pairs({
+        launcher = function()
+            return toolchain.compile(config, "C:/src/launcher.c", "C:/out/app.exe", {
+                work_dir = "C:/tmp",
+            })
+        end,
+        module = function()
+            return toolchain.compileNativeModule(
+                config, "C:/src/module.c", "C:/out/module.dll", {
+                    work_dir = "C:/tmp",
+                }
+            )
+        end,
+        standalone = function()
+            return toolchain.compileStandalone(
+                config, "C:/src/extractor.c", "C:/out/onefile.exe", {
+                    work_dir = "C:/tmp",
+                }
+            )
+        end,
+    }) do
+        captured_arguments = nil
+        local compiled, compile_output = invoke()
+        assert(compiled, name .. " MSVC argument probe failed: " .. tostring(compile_output))
+        local link_index
+        local brepro_positions = {}
+        for index, argument in ipairs(captured_arguments or {}) do
+            if argument == "/link" then link_index = index end
+            if argument:lower() == "/brepro" then
+                brepro_positions[#brepro_positions + 1] = index
+            end
+        end
+        assert(link_index and #brepro_positions == 2
+                and brepro_positions[1] < link_index
+                and brepro_positions[2] > link_index,
+            name .. " does not apply /Brepro to both cl.exe and link.exe")
+    end
+    process.outputCommand = original_output_command
     for version, compiler_flag in pairs({
         ["5.2.4"] = "/DLUA_COMPAT_ALL",
         ["5.3.6"] = "/DLUA_COMPAT_5_2",

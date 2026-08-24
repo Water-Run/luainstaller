@@ -7,7 +7,7 @@ File:
     toolchain.lua
 Date:
 Updated:
-    2026-07-29
+    2026-08-24
 ]]
 
 local compat = require("luainstaller.compat")
@@ -206,7 +206,28 @@ end
 local function linkerSupportsBrepro(linker, environment)
     if not linker then return false end
     local _, output = process.outputCommand(linker, { "/?" }, environment)
-    return tostring(output):lower():find("/brepro", 1, true) ~= nil
+    if tostring(output):lower():find("/brepro", 1, true) then return true end
+
+    -- /Brepro is intentionally absent from some modern link.exe help text.
+    -- Probe the option itself: without input files a recognizing linker emits
+    -- another stable LNK error, whereas legacy linkers report LNK4044/LNK1117.
+    local _, probe_output = process.outputCommand(
+        linker,
+        { "/nologo", "/Brepro" },
+        environment
+    )
+    local probe = tostring(probe_output or "")
+    local lowered = probe:lower()
+    if not probe:match("LNK%d%d%d%d")
+        or probe:find("LNK4044", 1, true)
+        or probe:find("LNK1117", 1, true)
+        or (lowered:find("/brepro", 1, true)
+            and (lowered:find("unrecognized", 1, true)
+                or lowered:find("unknown", 1, true)
+                or lowered:find("not supported", 1, true))) then
+        return false
+    end
+    return true
 end
 
 local function compilerFromCommand(command, family, environment)
@@ -878,6 +899,10 @@ local function appendMsvcReproducibleLink(arguments, config)
     if config.supports_brepro then arguments[#arguments + 1] = "/Brepro" end
 end
 
+local function appendMsvcReproducibleCompile(arguments, config)
+    if config.supports_brepro then arguments[#arguments + 1] = "/Brepro" end
+end
+
 local function verifyMacosSharedRuntime(config, output_path)
     if not config.host or config.host.os ~= "macos"
         or config.link_mode ~= "shared" then
@@ -908,6 +933,7 @@ function M.compile(config, source_path, output_path, opts)
     if config.compiler_family == "msvc" then
         appendValues(arguments, MSVC_COMPILE_FLAGS)
         appendWindowsCompatibilityDefines(arguments, config)
+        appendMsvcReproducibleCompile(arguments, config)
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
         local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
         arguments[#arguments + 1] = "/I" .. config.include_dir:gsub("/", "\\")
@@ -974,6 +1000,7 @@ function M.compileNativeModule(config, source_path, output_path, opts)
     if config.compiler_family == "msvc" then
         appendValues(arguments, MSVC_COMPILE_FLAGS)
         appendWindowsCompatibilityDefines(arguments, config)
+        appendMsvcReproducibleCompile(arguments, config)
         arguments[#arguments + 1] = "/LD"
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
         local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
@@ -1053,6 +1080,7 @@ function M.compileStandalone(config, source_path, output_path, opts)
     if config.compiler_family == "msvc" then
         appendValues(arguments, MSVC_COMPILE_FLAGS)
         appendWindowsCompatibilityDefines(arguments, config)
+        appendMsvcReproducibleCompile(arguments, config)
         if config.host and config.host.os == "windows" then
             arguments[#arguments + 1] = "/D_CRT_SECURE_NO_WARNINGS"
         end
