@@ -18,6 +18,16 @@ local compat = require("luainstaller.compat")
 local process = require("luainstaller.process")
 local info = compat.luaVersion()
 
+local expected_host_arch = os.getenv("LUAI_EXPECT_HOST_ARCH")
+if expected_host_arch and expected_host_arch ~= "" then
+    local detected_arch = require("luainstaller.platform").detectHost().arch
+    assert(detected_arch == expected_host_arch, string.format(
+        "host architecture mismatch: expected %s, got %s",
+        expected_host_arch,
+        tostring(detected_arch)
+    ))
+end
+
 assert(info.major == 5, "Lua 5.x is required")
 assert(info.minor >= 1, "Lua 5.1 or newer is required")
 assert(info.official == true, "the matrix must run an official Lua interpreter")
@@ -28,14 +38,25 @@ local matrix_prefix = os.getenv("LUAI_LUA_PREFIX")
 if type(matrix_prefix) == "string" and matrix_prefix ~= ""
     and package.config:sub(1, 1) == "/"
     and require("luainstaller.platform").detectHost().os == "linux" then
+    local fs = require("luainstaller.fs")
     local runtime = string.format(
         "%s/lib/liblua.so.%d.%d",
         matrix_prefix,
         info.major,
         info.minor
     )
-    assert(require("luainstaller.fs").isRegularFile(runtime),
-        "Linux matrix prefix is missing its ABI-versioned shared liblua: " .. runtime)
+    local static_runtime
+    for _, candidate in ipairs({
+        matrix_prefix .. "/lib/liblua.a",
+        matrix_prefix .. "/lib64/liblua.a",
+        matrix_prefix .. "/lib32/liblua.a",
+        matrix_prefix .. "/liblua.a",
+    }) do
+        if fs.isRegularFile(candidate) then static_runtime = candidate break end
+    end
+    assert(fs.isRegularFile(runtime) or static_runtime,
+        "Linux matrix prefix has neither ABI-versioned shared liblua nor liblua.a: "
+            .. matrix_prefix)
 end
 
 local interpreter = harness.lua_command()

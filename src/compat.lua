@@ -288,11 +288,15 @@ function M.diagnose(opts)
     end
 
     if profile.target_os == "windows" then
-        notes[#notes + 1] = "Windows bundles require a compatible Lua DLL and compiler-runtime family"
+        notes[#notes + 1] = "Windows bundles require a same-architecture Lua DLL and compiler-runtime family"
     elseif profile.target_os == "macos" then
-        notes[#notes + 1] = "macOS bundles require a matching static Lua prefix at build time"
-    elseif profile.target_os == "linux" then
-        notes[#notes + 1] = "Linux bundles use the copied shared Lua runtime and same-ABI native modules"
+        notes[#notes + 1] = "macOS prefers static Lua and can use a matching dylib when verified"
+    elseif profile.target_os == "android" then
+        notes[#notes + 1] = "Android/Termux uses its app-private prefix and native Bionic ABI"
+    elseif profile.target_os == "freebsd" then
+        notes[#notes + 1] = "FreeBSD uses sysctl/PATH executable discovery and libc dlopen"
+    else
+        notes[#notes + 1] = "POSIX bundles select shared or static Lua through compile-and-run capability probes"
     end
 
     return {
@@ -303,6 +307,7 @@ function M.diagnose(opts)
             arch = profile.target_arch,
             executable_suffix = profile.executable_suffix,
             launcher_profile = profile.launcher_profile,
+            supported_link_modes = profile.supported_link_modes,
         },
         lua = lua,
         mode = modeName(opts),

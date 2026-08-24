@@ -146,7 +146,7 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.1.1"
+local VERSION = "1.3.0"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 

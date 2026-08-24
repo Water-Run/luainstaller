@@ -357,12 +357,10 @@ assert(type(manifest.platform.host.os) == "string")
 assert(type(manifest.platform.host.arch) == "string")
 assert(type(manifest.platform.target.os) == "string")
 assert(type(manifest.platform.target.arch) == "string")
-local expected_profiles = {
-    linux = "shared-lua",
-    macos = "static-lua",
-    windows = "windows-shared-lua",
-}
-assert(manifest.launcher.profile == expected_profiles[manifest.platform.target.os])
+local expected_profile = manifest.platform.target.os == "windows"
+    and "windows-shared-lua"
+    or (manifest.platform.target.os == "macos" and "static-lua" or "shared-lua")
+assert(manifest.launcher.profile == expected_profile)
 assert(#manifest.modules.lua == 5)
 assert(#manifest.modules.native == 1)
 assert(#manifest.trace > 0)
@@ -786,7 +784,7 @@ local function check_platform_profiles()
     local script = SOURCE_LOADER .. [[
 local platform = require("luainstaller.platform")
 local host = platform.detectHost()
-assert(host.os == "linux" or host.os == "macos" or host.os == "windows" or host.os == "unknown")
+assert(type(host.os) == "string" and host.os ~= "")
 assert(type(host.arch) == "string")
 
 local original_detect = platform.detectHost
@@ -797,6 +795,20 @@ assert(linux.native_extensions[1] == ".so")
 assert(linux.loader_rpath == "$ORIGIN/.luai/native")
 assert(type(linux.target_arch) == "string")
 assert(linux.launcher_profile == "shared-lua")
+assert(linux.runtime_library_path_var == "LD_LIBRARY_PATH")
+assert(linux.supported_link_modes[1] == "shared")
+assert(linux.supported_link_modes[2] == "static")
+
+platform.detectHost = function() return { os = "freebsd", arch = "x86" } end
+local freebsd = assert(platform.profile({ target_os = "freebsd" }))
+assert(freebsd.target_arch == "x86")
+assert(freebsd.runtime_library_path_var == "LD_LIBRARY_PATH")
+assert(#freebsd.system_libraries == 1 and freebsd.system_libraries[1] == "-lm")
+
+platform.detectHost = function() return { os = "android", arch = "arm64" } end
+local android = assert(platform.profile({ target_os = "android" }))
+assert(android.target_arch == "arm64")
+assert(android.system_libraries[2] == "-ldl")
 
 platform.detectHost = function() return { os = "macos", arch = "arm64" } end
 local macos = assert(platform.profile({ target_os = "macos", lua_prefix = "/tmp/lua" }))
@@ -814,6 +826,8 @@ assert(windows.native_extensions[1] == ".dll")
 assert(windows.loader_rpath == nil)
 assert(windows.target_arch == "x86_64")
 assert(windows.launcher_profile == "windows-shared-lua")
+platform.detectHost = function() return { os = "windows", arch = "x86" } end
+assert(platform.profile({ target_os = "windows" }).target_arch == "x86")
 local cross, cross_err = platform.profile({ target_os = "linux" })
 assert(cross == nil and cross_err.error.type == "UnsupportedPlatformError")
 platform.detectHost = original_detect
@@ -1173,11 +1187,12 @@ print(result.executable)
 end
 
 local function check_release_metadata_contract()
-    local rockspec = read_file("luainstaller-1.1.1-1.rockspec")
+    local rockspec = read_file("luainstaller-1.3.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
     assert_contains(changelog, "== 1.1.1")
+    assert_contains(changelog, "== 1.3.0")
     assert_contains(changelog, "== 1.1.0")
     local bundling = read_file("docs/BUNDLING.adoc")
     assert_contains(bundling, "luainstaller-generated-output-v2")
@@ -1216,7 +1231,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luai", { "-v" })),
-        "luai 1.1.1\n"
+        "luai 1.3.0\n"
     )
 
     local full_help = run(cli_command("luainstaller", { "help" }))
@@ -1230,7 +1245,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luainstaller", { "version" })),
-        "luainstaller 1.1.1  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.3.0  LGPL 3.0 by WaterRun\n"
     )
 
     local bad_luai = run(cli_command("luai", { "build", "test/single_file/01_hello_luainstaller.lua" }), {
@@ -1485,7 +1500,7 @@ print("c source generated")
         assert_file_exists(prefix .. "/lib/liblua.a")
         link_flags = "-I" .. shell_quote(prefix .. "/include")
             .. " " .. shell_quote(prefix .. "/lib/liblua.a") .. " -lm"
-        if host_system() ~= "Darwin" then
+        if host_system() == "Linux" then
             link_flags = link_flags .. " -ldl"
         end
     else
@@ -1795,10 +1810,10 @@ local function check_installed_cli_bundle()
     local root = make_temp_dir("installed-cli")
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
-    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.1.1-1.rockspec")
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.3.0-1.rockspec")
     assert_equals(
         run(shell_quote(tree .. "/bin/luainstaller") .. " version"),
-        "luainstaller 1.1.1  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.3.0  LGPL 3.0 by WaterRun\n"
     )
     run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")

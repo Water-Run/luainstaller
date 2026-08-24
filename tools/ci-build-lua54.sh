@@ -10,6 +10,9 @@ VERSION=5.4.8
 SHA256=4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
 PREFIX=${LUAI_CI_LUA_PREFIX:-$HOME/luai-lua}
 WORK=${LUAI_CI_WORK:-/tmp/luai-ci-lua}
+BUILD_CC=${LUAI_CI_CC:-cc}
+BUILD_CFLAGS=${LUAI_CI_CFLAGS:-}
+BUILD_LDFLAGS=${LUAI_CI_LDFLAGS:-}
 ARCHIVE=$WORK/lua-$VERSION.tar.gz
 SOURCE=$WORK/lua-$VERSION
 
@@ -31,8 +34,9 @@ trap - EXIT HUP INT TERM
 rm -rf "$SOURCE" "$PREFIX"
 tar -xzf "$ARCHIVE" -C "$WORK"
 
-make -C "$SOURCE/src" all \
-    MYCFLAGS='-fPIC -DLUA_USE_POSIX -DLUA_USE_DLOPEN' \
+make -C "$SOURCE/src" all CC="$BUILD_CC" \
+    MYCFLAGS="$BUILD_CFLAGS -fPIC -DLUA_USE_POSIX -DLUA_USE_DLOPEN" \
+    MYLDFLAGS="$BUILD_LDFLAGS" \
     MYLIBS='-Wl,-E -ldl'
 make -C "$SOURCE" INSTALL_TOP="$PREFIX" install
 
@@ -45,7 +49,7 @@ if [ -z "$members" ]; then
 fi
 # Archive members are validated above; intentional word splitting.
 # shellcheck disable=SC2086
-(cd "$SOURCE/src" && cc -shared -Wl,-soname,liblua.so.5.4 \
+(cd "$SOURCE/src" && "$BUILD_CC" $BUILD_LDFLAGS -shared -Wl,-soname,liblua.so.5.4 \
     -o "$PREFIX/lib/liblua.so.5.4" $members -lm -ldl)
 ln -sf liblua.so.5.4 "$PREFIX/lib/liblua.so"
 

@@ -960,7 +960,7 @@ under LGPL-3.0-or-later. It is not a substitute for the license texts in
   major/minor ABI shown in `../manifest.lua`.
 . Use a native compiler for the target OS and architecture. Cross-compilation
   is outside the supported native relinking profile.
-. Compile `launcher.c` as strict C11, link the selected Lua library and its
+. Compile `launcher.c` as portable C99, link the selected Lua library and its
   platform dependencies, and preserve the loader search path used by the
   target profile.
 . Replace the inner executable in an onedir tree, or rebuild the onefile
@@ -972,9 +972,15 @@ Typical POSIX shape (substitute paths and Lua libraries for the manifest):
 
 [source,bash]
 ----
-cc -std=c11 -Wall -Wextra -Werror -pedantic \
+cc -std=c99 -Wall -Wextra \
   launcher.c -o application $(pkg-config --cflags --libs lua)
 ----
+
+If `pkg-config` is absent, replace that substitution with explicit matching
+include/library paths. For a static POSIX Lua archive, also link the platform
+libraries used by that Lua build and export the main executable's Lua symbols;
+for example, Linux commonly needs `liblua.a -lm -ldl -Wl,-E`, while FreeBSD
+must not receive Linux's `-ldl`.
 
 To rebuild an extracted onefile wrapper, first regenerate its payload include,
 then compile the exact extractor translation unit:
@@ -982,14 +988,16 @@ then compile the exact extractor translation unit:
 [source,bash]
 ----
 lua .luai/build/generate-onefile-payload.lua . .luai/build/payload.inc
-cc -std=c11 -Wall -Wextra -Werror -pedantic \
+cc -std=c99 -Wall -Wextra \
   .luai/build/extractor.c -o application-onefile
 ----
 
 On Windows, use the same MSVC or MinGW-w64 CRT profile as the original bundle
-and place the matching Lua DLL beside the executable. On macOS, the release
-profile links the verified static Lua archive and the platform libraries
-reported by that Lua build.
+and place the matching Lua DLL beside the executable. XP-targeted executable
+links must retain subsystem 5.01 on x86 or 5.02 on x86_64 in addition to using
+XP-compatible APIs, CRT and Lua DLL. On macOS, the release profile links the
+verified static Lua archive and the platform libraries reported by that Lua
+build.
 
 == Complete project source
 
@@ -1107,6 +1115,7 @@ local function commandDigest(file_path)
         commands = {
             "sha256sum " .. quotePosix(file_path) .. " 2>/dev/null",
             "shasum -a 256 " .. quotePosix(file_path) .. " 2>/dev/null",
+            "sha256 -q " .. quotePosix(file_path) .. " 2>/dev/null",
         }
     end
     for _, command in ipairs(commands) do

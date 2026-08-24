@@ -41,17 +41,19 @@ mismatch → `UnsupportedPlatformError`.
 |===
 |Host |Runtime strategy |Typical requirements
 
-|Linux
-|Shared library copied into `.luai/native`
-|C compiler, matching-ABI `pkg-config` and shared liblua
+|Linux / Android / BSD / other ELF POSIX
+|Verified shared liblua copied into `.luai/native`, or verified static
+`liblua.a`
+|C99 compiler, matching headers and library; `pkg-config` is optional when an
+explicit prefix or LuaRocks metadata is complete
 
 |macOS
-|Static `liblua.a` linked into the launcher
-|Apple compiler, prefix with `lua.h` and `lib/liblua.a`
+|Static `liblua.a` preferred; matching dylib accepted after a native probe
+|Apple compiler and matching headers/library
 
 |Windows
 |ABI-specific DLL beside the executable and under `.luai/native`
-|x86_64 host, MSVC, Windows SDK, headers, import library, matching DLL
+|Native x86/x86_64/ARM/ARM64 compiler, headers, import library and matching DLL
 |===
 
 When automatic discovery is insufficient, use `--lua-prefix` or
@@ -59,27 +61,63 @@ When automatic discovery is insufficient, use `--lua-prefix` or
 silently substitute another install. The prefix is for the current host and
 ABI, not a cross SDK.
 
-Explicit prefixes are searched in `lib`, `lib64`, and the prefix root.
+Explicit prefixes are searched in `lib`, `lib64`, `lib32`, common Linux
+multiarch subdirectories, and the prefix root.
 ABI-versioned shared files and relative links contained by the prefix are
 supported; links that escape it are rejected. Compiler/run probes and loader
 inspection use the same `LD_LIBRARY_PATH` or `DYLD_LIBRARY_PATH`, so a probe
 cannot validate one runtime and record a different system runtime.
 
-A static-only Lua install without a shared library cannot satisfy the
-shared-runtime Linux profile. Custom installs may set `PKG_CONFIG_PATH`.
-Candidate filtering happens before the compiler probe: Linux/generic POSIX
-rejects static archives, macOS rejects shared liblua, and Windows rejects
-static archives. luainstaller 1.1 rejects Windows x86 and ARM64 with
-`UnsupportedPlatformError`; its Windows native profile is x86_64 only.
+A static POSIX launcher is linked with exported main-program symbols so a
+normal `luaopen_*` module can resolve the Lua C API. Custom installs may set
+`PKG_CONFIG_PATH`. Candidate filtering happens before the compiler probe:
+POSIX accepts shared objects and static archives, macOS accepts `liblua.a` and
+dylibs, and Windows accepts DLL import libraries (`.lib` or `.dll.a`) paired
+with a matching DLL. The compile-and-run probe selects the actual link mode;
+the launcher-profile name is not an allowlist. A macOS dylib fallback is
+published only when the linked Mach-O records it as `@rpath/<runtime-name>`,
+so copying it into `.luai/native` does not retain a path to the build host.
+
+Android/Termux is detected independently from desktop Linux. It uses the
+Termux `TERMUX__PREFIX` (with legacy `PREFIX`/`TERMUX_PREFIX` fallbacks), a
+shell found through `PATH` (there is normally no `/bin/sh`), Bionic-compatible
+native objects, and `TMPDIR` or the prefix's `tmp` directory for onefile
+extraction. The Android extractor recognizes system-UID-owned `/data`
+ancestors before requiring the app-private part of the path to be owned by the
+Termux UID. FreeBSD does not receive Linux's `-ldl`; its launcher
+uses `KERN_PROC_PATHNAME` and falls back to resolving `argv[0]` through
+`PATH`. `ldd` is useful evidence but is no longer mandatory when the exact
+accepted shared library has passed the ABI probe.
+
+On a 32-bit userland, `getconf LONG_BIT` corrects a 64-bit-kernel `uname`
+result. The running Lua, compiler default target, headers, libraries and
+native modules must all be 32-bit; `-m32` on only one build step is not a
+complete toolchain.
 
 MSVC builds use the static multithreaded CRT (`/MT`) for the Lua DLL, launcher,
 native capability module, and onefile extractor. Release tests inspect PE
 dependencies and reject `VCRUNTIME*.dll`, `MSVCP*.dll`, or `ucrtbase.dll`, then
 run the artifact in a clean Windows VM without a VC Redistributable.
 
+Windows x86/x86_64 generated C defaults to `_WIN32_WINNT=0x0501`; executable
+links also record subsystem 5.01 for x86 or 5.02 for x86_64. Windows XP can
+therefore run an artifact only when the selected compiler/CRT and the Lua DLL
+were also built for XP. Onefile tries Job Object kill-on-close containment;
+when XP rejects that newer limit flag, the outer executable starts a small
+copy of itself as an inherited-handle watchdog. The watchdog waits on the
+outer process and terminates the same job after an abrupt exit; normal exit
+terminates the job explicitly. For building on XP, use PowerShell 2 or newer,
+start from the compiler's prepared command prompt, set `LUAI_CC` when compiler
+discovery tools are absent, and normally pass an explicit `--lua-prefix`.
+Modern MSVC/UCRT output is not made XP-compatible merely by the preprocessor
+value; use an XP-capable MSVC toolset or MinGW runtime. ARM/ARM64 uses the
+Windows 6.2 API baseline because Windows on ARM did not exist on XP.
+
 macOS does not produce universal binaries, code-sign, or notarize. Windows
 builds and probes run natively; Wine/MinGW are not part of the release path.
-Generated runtime code currently uses narrow Win32 path/process APIs.
+Generated runtime code uses Win32 `A` path/process APIs for the XP floor.
+Non-ASCII paths therefore remain limited by the active Windows code page;
+ASCII distribution paths are the portable choice for XP.
 
 [#platforms-native]
 == Native Lua C modules
@@ -101,27 +139,47 @@ profile. This proves Lua-symbol visibility for normal modules. It does not
 prove closure of every application module's additional system dependencies.
 
 [#platforms-matrix]
-== Verified system classes
+== Coverage classes
 
-The required CI gate is the Windows/MSVC and Linux x86_64 coverage. Linux
-ARM64 and macOS runs broaden compatibility evidence without creating a
-release-time dependency on a particular device or operating-system release.
+The required gates combine native execution with compile-time portability
+checks. A platform contract is supported by the implementation even when a
+particular physical host is supplemental rather than release-blocking.
 
-[cols="2,1",options="header"]
+[cols="2,1,2",options="header"]
 |===
-|System |Architecture
+|System |Architecture |Evidence
 
-|Windows with MSVC and the Windows SDK
+|Windows with MSVC
 |x86_64
+|Five official Lua ABIs, native onedir/onefile and clean CRT audit
+
+|Windows XP API / MinGW
+|x86 and x86_64
+|Strict generated-C compile and PE subsystem audit; physical XP is supplemental
 
 |Linux
 |x86_64
+|Five official Lua ABIs and full native suites
+
+|Linux
+|x86
+|32-bit Lua/toolchain onedir and onefile gate
 
 |Linux
 |ARM64
+|Supplemental native host
+
+|Android / Termux
+|ARM64 and device-native
+|Portable-host suite on physical Termux
+
+|FreeBSD
+|x86_64
+|Portable-host suite on native FreeBSD
 
 |macOS
 |ARM64
+|Supplemental native host
 |===
 
 Systems not listed may still work when native capability and ABI align; verify

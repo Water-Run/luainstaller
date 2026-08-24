@@ -206,7 +206,10 @@ function M.writeFile(path, content)
             "{throw 'destination is a reparse point'};",
             "$Stream=New-Object IO.FileStream($Path,[IO.FileMode]::Create,",
             "[IO.FileAccess]::Write,[IO.FileShare]::None);",
-            "try{$LuaiInput.CopyTo($Stream);$Stream.Flush($true)}finally{$Stream.Dispose()}",
+            "$Buffer=New-Object byte[] 65536;try{",
+            "while(($Read=$LuaiInput.Read($Buffer,0,$Buffer.Length))-gt 0)",
+            "{$Stream.Write($Buffer,0,$Read)};$Stream.Flush()",
+            "}finally{$Stream.Dispose()}",
             "}catch{exit 1}",
         }), content)
         if not ok then return nil, operationError("write", path, output) end
@@ -343,22 +346,35 @@ function M.modifiedAt(path)
     local expression = windowsPathExpression(path)
     local ok, output = windowsRun(table.concat({
         "$Path=", expression, ";$Item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop;",
-        "$Time=[DateTimeOffset]$Item.LastWriteTimeUtc;",
-        "[Console]::Write($Time.ToUnixTimeSeconds())",
+        "$Epoch=New-Object DateTime 1970,1,1,0,0,0,([DateTimeKind]::Utc);",
+        "[Console]::Write([long][Math]::Floor((($Item.LastWriteTimeUtc-$Epoch).TotalSeconds)))",
     }))
     if not ok then return nil end
     return tonumber(tostring(output):match("%-?%d+"))
 end
 
+function M.temporaryRoot()
+    if IS_WINDOWS then
+        return os.getenv("TEMP") or os.getenv("TMP") or "."
+    end
+    local configured = os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP")
+    local prefix = os.getenv("TERMUX__PREFIX") or os.getenv("PREFIX")
+        or os.getenv("TERMUX_PREFIX")
+    local android = os.getenv("TERMUX_VERSION") ~= nil
+        or os.getenv("ANDROID_ROOT") ~= nil
+        or (type(prefix) == "string"
+            and prefix:find("com.termux/files/usr", 1, true) ~= nil)
+    if android and (not configured or configured == "" or configured == "/tmp")
+        and type(prefix) == "string" and prefix ~= "" then
+        return prefix:gsub("[/\\]+$", "") .. "/tmp"
+    end
+    if configured and configured ~= "" then return configured end
+    return "/tmp"
+end
+
 function M.makePrivateDirectory(label, parent)
     label = tostring(label or "private"):gsub("[^%w_-]", "-")
-    if not parent then
-        if IS_WINDOWS then
-            parent = os.getenv("TEMP") or os.getenv("TMP") or "."
-        else
-            parent = os.getenv("TMPDIR") or "/tmp"
-        end
-    end
+    if not parent then parent = M.temporaryRoot() end
     local made, make_err = M.makeDirectory(parent)
     if not made then return nil, make_err end
     if IS_WINDOWS then
@@ -471,18 +487,19 @@ function M.hardLink(source, destination)
         if not ok then return nil, output end
         return true
     end
-    local source_expression = windowsPathExpression(source)
-    local destination_expression = windowsPathExpression(destination)
-    local ok, output = windowsRun(table.concat({
-        "$Source=", source_expression, ";$Destination=", destination_expression, ";",
-        "$Item=Get-Item -LiteralPath $Source -Force -ErrorAction Stop;",
-        "if(-not ($Item -is [IO.FileInfo])){throw 'source is not a file'};",
-        "if(($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)",
-        "{throw 'source is a reparse point'};",
-        "if(Test-Path -LiteralPath $Destination){throw 'destination already exists'};",
-        "$null=New-Item -ItemType HardLink -Path $Destination -Target $Source -ErrorAction Stop",
-    }))
+    local root = os.getenv("SystemRoot") or os.getenv("WINDIR")
+    if type(root) ~= "string" or not root:match("^%a:[/\\]") then
+        return nil, "Windows system directory is unavailable"
+    end
+    local fsutil = root:gsub("/", "\\"):gsub("\\+$", "")
+        .. "\\System32\\fsutil.exe"
+    local ok, output = process.outputCommand(fsutil, {
+        "hardlink", "create", destination:gsub("/", "\\"), source:gsub("/", "\\"),
+    })
     if not ok then return nil, output end
+    if M.pathType(destination) ~= "file" then
+        return nil, "hard-link output is not a regular file"
+    end
     return true
 end
 
@@ -511,7 +528,7 @@ function M.listTree(root)
             "$Pending=New-Object 'System.Collections.Generic.Stack[string]';$Pending.Push($Root);",
             "$Utf8=New-Object Text.UTF8Encoding($false);",
             "while($Pending.Count -gt 0){$Directory=$Pending.Pop();",
-            "foreach($Child in [IO.Directory]::EnumerateFileSystemEntries($Directory)){",
+            "foreach($Child in [IO.Directory]::GetFileSystemEntries($Directory)){",
             "$Item=Get-Item -LiteralPath $Child -Force -ErrorAction Stop;",
             "$Relative=$Child.Substring($Root.Length).TrimStart([char[]]'\\/');",
             "$Type='other';",
@@ -530,7 +547,12 @@ function M.listTree(root)
             entries[#entries + 1] = { path = relative:gsub("\\", "/"), type = entry_type }
         end
     else
-        local ok, output = process.output("find " .. process.quote(root) .. " -mindepth 1 -print0")
+        -- BSD find has -print0 but not GNU find's -mindepth.  Exclude the
+        -- explicitly quoted root instead, preserving NUL-safe inventories.
+        local quoted_root = process.quote(root)
+        local ok, output = process.output(
+            "find " .. quoted_root .. " ! -path " .. quoted_root .. " -print0"
+        )
         if not ok then return nil, output end
         output = tostring(output)
         local position = 1

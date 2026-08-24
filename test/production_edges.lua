@@ -269,7 +269,9 @@ test("full edge-coverage prerequisites are available", function()
     assertEqual(commandOutputTrimmed("uname -s"), "Linux", "full edge coverage host")
     for _, command in ipairs({
         "cc", "clang", "luajit", "pkg-config", "sha256sum",
+        "i686-w64-mingw32-gcc", "i686-w64-mingw32-objdump",
         "x86_64-w64-mingw32-gcc",
+        "x86_64-w64-mingw32-objdump",
     }) do
         local available = commandSucceeds("command -v " .. command .. " >/dev/null 2>&1")
         assert(available,
@@ -577,6 +579,17 @@ test("Windows process primitives document cmd.exe quoting hazards", function()
         "process layer does not list the cmd.exe metacharacters")
     assert(process_source:find("base64", 1, true),
         "process layer does not document the encoded PowerShell data path")
+    for _, modern_api in ipairs({
+        "ReadToEndAsync", "StandardOutputEncoding", "StandardErrorEncoding", ".Kill($true)",
+    }) do
+        assert(not process_source:find(modern_api, 1, true),
+            "Windows process backend requires a post-XP .NET API: " .. modern_api)
+    end
+    assert(not process_source:find(
+        "Combine($env:SystemRoot,'System32','taskkill.exe')", 1, true),
+        "Windows timeout fallback requires a post-.NET-2 Path.Combine overload")
+    assert(process_source:find("taskkill.exe", 1, true),
+        "Windows timeout fallback does not terminate child trees on legacy hosts")
 end)
 
 test("result and helper contracts keep strict shapes", function()
@@ -597,9 +610,8 @@ test("result and helper contracts keep strict shapes", function()
         { target_os = "linux", launcher_profile = "shared-lua" },
         "liblua.a"
     )
-    assertEqual(rejected, false, "static archive rejected on shared profiles")
-    assert(type(reject_reason) == "string" and reject_reason ~= "",
-        "rejection reason")
+    assertEqual(rejected, true, "static archive accepted by portable POSIX profile")
+    assert(reject_reason == nil, "accepted static archive carried a rejection reason")
 
     local logger = require("luainstaller.logger")
     local logged, log_err = logger.log(42, "edge", "shape", "message")
@@ -769,6 +781,13 @@ test("native platform and toolchain reject cross targets", function()
         "native/module.so",
         "freebsd"
     ))
+    assertEqual(platform.normalizeOS("Linux", {
+        TERMUX_VERSION = "0.119",
+        TERMUX__PREFIX = "/data/data/com.termux/files/usr",
+    }), "android", "Termux host classification")
+    assertEqual(platform.normalizeOS("Linux", {}), "linux", "Linux host classification")
+    assertEqual(platform.normalizeArch("armv7l"), "arm", "32-bit ARM normalization")
+    assertEqual(platform.normalizeArch("i686"), "x86", "32-bit x86 normalization")
 
     local cross_os = host.os == "windows" and "linux" or "windows"
     local cross, cross_err = platform.profile({ target_os = cross_os })
@@ -817,7 +836,7 @@ test("native runtime profiles reject incompatible Lua library kinds", function()
         { target_os = "linux", launcher_profile = "shared-lua" },
         "/prefix/lib/liblua.so.5.4"
     ))
-    assert(not native_profile.acceptsLibrary(
+    assert(native_profile.acceptsLibrary(
         { target_os = "linux", launcher_profile = "shared-lua" },
         "/prefix/lib/liblua.a"
     ))
@@ -825,7 +844,7 @@ test("native runtime profiles reject incompatible Lua library kinds", function()
         { target_os = "macos", launcher_profile = "static-lua" },
         "/prefix/lib/liblua.a"
     ))
-    assert(not native_profile.acceptsLibrary(
+    assert(native_profile.acceptsLibrary(
         { target_os = "macos", launcher_profile = "static-lua" },
         "/prefix/lib/liblua.dylib"
     ))
@@ -837,31 +856,29 @@ test("native runtime profiles reject incompatible Lua library kinds", function()
         { target_os = "windows", launcher_profile = "windows-shared-lua" },
         "C:/prefix/lua54.lib"
     ))
+    assert(native_profile.acceptsLibrary(
+        { target_os = "windows", launcher_profile = "windows-shared-lua" },
+        "C:/prefix/liblua54.dll.a"
+    ))
     assert(not native_profile.acceptsLibrary(
         { target_os = "windows", launcher_profile = "windows-shared-lua" },
         "C:/prefix/liblua.a"
     ))
 end)
 
-test("Windows release platform profile is x86_64 only", function()
+test("Windows profiles accept every native architecture with a known linker machine", function()
     local platform = require("luainstaller.platform")
-    local supported = assert(platform.profile({
-        host = { os = "windows", arch = "x86_64" },
-        target_os = "windows",
-    }))
-    assertEqual(supported.target_arch, "x86_64", "Windows supported architecture")
-
-    for _, arch in ipairs({ "x86", "arm64" }) do
-        local profile, profile_err = platform.profile({
+    for _, arch in ipairs({ "x86", "x86_64", "arm", "arm64" }) do
+        local profile = assert(platform.profile({
             host = { os = "windows", arch = arch },
             target_os = "windows",
-        })
-        assert(profile == nil, "Windows profile accepted unsupported " .. arch)
-        assert(profile_err and profile_err.error.type == "UnsupportedPlatformError")
+        }))
+        assertEqual(profile.target_arch, arch, "Windows native architecture")
+        assertEqual(profile.supported_link_modes[1], "shared", "Windows link mode")
     end
 end)
 
-test("Windows release toolchains close the CRT on x86_64", function()
+test("Windows release toolchains close the CRT and select the native machine", function()
     local toolchain_source = readFile("src/toolchain.lua")
     local matrix_source = readFile("tools/test-lua-versions.ps1")
 
@@ -873,8 +890,24 @@ test("Windows release toolchains close the CRT on x86_64", function()
         "PATH-discovered MSVC toolchains omit PE audit support")
     assert(not toolchain_source:find('"/MD"', 1, true),
         "product MSVC commands retain the dynamic CRT")
-    assert(toolchain_source:find('"/MACHINE:X64"', 1, true),
-        "product MSVC linker commands do not pin x86_64")
+    assert(toolchain_source:find('x86 = "X86"', 1, true)
+            and toolchain_source:find('arm64 = "ARM64"', 1, true),
+        "product MSVC linker commands do not map native architectures")
+    assert(toolchain_source:find('"/MACHINE:" .. machine', 1, true),
+        "product MSVC linker commands do not select the detected machine")
+    assert(toolchain_source:find('"/SUBSYSTEM:CONSOLE," .. version.msvc', 1, true),
+        "product MSVC linker commands do not set an XP-loadable subsystem")
+    assert(toolchain_source:find("--major-subsystem-version", 1, true),
+        "product MinGW commands do not set the Windows subsystem floor")
+    assert(toolchain_source:find("linkerSupportsBrepro", 1, true),
+        "legacy MSVC linker flags are not capability-probed")
+    assert(toolchain_source:find("verifyMacosSharedRuntime", 1, true)
+            and toolchain_source:find('local expected = "@rpath/" .. runtime_name', 1, true),
+        "macOS dylib fallback can publish a non-relocatable launcher")
+    assert(toolchain_source:find('{ "--static", "--cflags", "--libs", module_name }', 1, true),
+        "static pkg-config metadata does not include private link dependencies")
+    assert(not toolchain_source:find('"/MACHINE:X64"', 1, true),
+        "product MSVC linker commands retain a hard-coded x64 machine")
     assert(matrix_source:find("'/MT'", 1, true),
         "Windows Lua matrix does not select the static CRT")
     assert(not matrix_source:find("'/MD'", 1, true),
@@ -901,23 +934,45 @@ test("Windows release toolchains close the CRT on x86_64", function()
         "Windows matrix contains an ARM64 compiler path")
 end)
 
-test("Linux explicit prefixes reject static-only liblua before compilation", function()
+test("Linux explicit prefixes accept a verified static-only liblua", function()
     if commandOutputTrimmed("uname -s") ~= "Linux" then return end
+
+    local system_library_dir = commandOutputTrimmed(
+        "pkg-config --variable=libdir lua 2>/dev/null"
+    )
+    local system_include_dir = commandOutputTrimmed(
+        "pkg-config --variable=includedir lua 2>/dev/null"
+    )
+    local static_library = system_library_dir .. "/liblua.a"
+    if system_library_dir == "" or system_include_dir == ""
+        or not fileExists(static_library) or not fileExists(system_include_dir .. "/lua.h") then
+        return
+    end
 
     local root = makeTempDir("linux-static-profile")
     makeDirectory(root .. "/include")
     makeDirectory(root .. "/lib")
-    writeFile(root .. "/include/lua.h", "/* profile filter fixture */\n")
-    writeFile(root .. "/lib/liblua.a", "not consulted by the compiler\n")
+    local fs = require("luainstaller.fs")
+    for _, header in ipairs({ "lua.h", "luaconf.h", "lauxlib.h", "lualib.h", "lua.hpp" }) do
+        local source = system_include_dir .. "/" .. header
+        if fileExists(source) then assert(fs.copyFile(source, root .. "/include/" .. header)) end
+    end
+    assert(fs.copyFile(static_library, root .. "/lib/liblua.a"))
 
     local config, config_err = require("luainstaller.toolchain").resolve({
         lua_prefix = root,
         lua_version = require("luainstaller.compat").luaVersion(),
     })
-    assert(config == nil, "Linux accepted a static-only explicit Lua prefix")
-    assert(config_err and config_err.error.type == "ToolchainError")
-    assert(tostring(config_err.error.cause):find("shared liblua", 1, true),
-        tostring(config_err.error.cause))
+    local diagnostic = config_err and config_err.error and config_err.error.message or ""
+    for _, failure in ipairs(config_err and config_err.error
+        and config_err.error.failures or {}) do
+        diagnostic = diagnostic .. "\n" .. tostring(failure.message)
+            .. ": " .. tostring(failure.output or "")
+    end
+    assert(config, diagnostic)
+    assertEqual(config.link_mode, "static", "static explicit-prefix link mode")
+    assertEqual(config.static_library_path, root .. "/lib/liblua.a",
+        "static explicit-prefix library")
     removeTree(root)
 end)
 
@@ -3478,6 +3533,42 @@ test("Linux explicit prefixes support lib64 and contained runtime links", functi
     assert(linked_ran and linked_output:find("hello linked-prefix", 1, true),
         linked_output)
 
+    if commandSucceeds("command -v readelf >/dev/null 2>&1") then
+        local fake_bin = root .. "/without-ldd"
+        local no_ldd_out = root .. "/without-ldd-output"
+        local no_ldd_empty_path = root .. "/without-ldd-empty-path"
+        makeDirectory(fake_bin)
+        makeDirectory(no_ldd_empty_path)
+        writeFile(fake_bin .. "/ldd", "#!/bin/sh\nexit 127\n")
+        runCommand("chmod +x " .. shellQuote(fake_bin .. "/ldd"))
+        local no_ldd_child = harness.loader_prelude() .. string.format([[
+local toolchain = require("luainstaller.toolchain")
+local process = require("luainstaller.process")
+local config, config_err = toolchain.resolve({ lua_prefix = %q })
+assert(config, config_err and config_err.error and config_err.error.message)
+assert(config.runtime_name == %q,
+    "DT_SONAME fallback chose " .. tostring(config.runtime_name))
+local built = require("luainstaller").bundle({
+    entry = "test/runtime_bundle/main.lua",
+    out = %q,
+    lua_prefix = %q,
+})
+assert(built.ok, built.error and built.error.message)
+local ran, output = process.outputCommand(built.executable, { "without-ldd" }, {
+    PATH = %q,
+    LD_LIBRARY_PATH = %q,
+    LUA_PATH = "",
+    LUA_CPATH = "",
+})
+assert(ran and output:find("hello without-ldd", 1, true), tostring(output))
+]], linked_prefix, linked_name, no_ldd_out, linked_prefix,
+            no_ldd_empty_path, no_ldd_out .. "/.luai/native")
+        runCommand("PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin")
+            .. " " .. luaCommand .. " -e " .. shellQuote(no_ldd_child))
+        assert(fileExists(no_ldd_out .. "/.luai/native/" .. linked_name),
+            "no-ldd bundle did not preserve the ELF DT_SONAME")
+    end
+
     local escaped_prefix, escaped_lib = makePrefix("escaped-prefix", "lib")
     runCommand("ln -s " .. shellQuote(runtime_source) .. " "
         .. shellQuote(escaped_lib .. "/liblua-" .. abi .. ".so"))
@@ -3775,6 +3866,8 @@ test("target launcher enforces the selected Lua ABI", function()
         embedded = generated,
         file = file_template_source,
     }) do
+        assert(source:find("#define _POSIX_C_SOURCE 200809L", 1, true),
+            source_name .. " launcher does not expose portable POSIX APIs under C99")
         assert(source:find(
             "const char *arg0 = argc > 0 && argv[0] != NULL ? argv[0] : \"\";",
             1,
@@ -3784,6 +3877,12 @@ test("target launcher enforces the selected Lua ABI", function()
             source_name .. " launcher does not separate arg[0] from its real path")
         assert(source:find('lua_setglobal(L, "__luai_executable_path");', 1, true),
             source_name .. " launcher cannot locate bundle metadata through symlinks")
+        assert(source:find("KERN_PROC_PATHNAME", 1, true),
+            source_name .. " launcher has no FreeBSD executable-path backend")
+        assert(source:find("luai_executable_from_argv0", 1, true),
+            source_name .. " launcher has no generic POSIX PATH fallback")
+        assert(source:find("#define _WIN32_WINNT 0x0501", 1, true),
+            source_name .. " launcher does not declare the Windows XP API baseline")
     end
 
     if package.config:sub(1, 1) == "/" then
@@ -3845,6 +3944,49 @@ test("target launcher enforces the selected Lua ABI", function()
     assert(manifest51.manifest.lua.major == 5 and manifest51.manifest.lua.minor == 1)
     assert(manifest55.manifest.lua.abi == "lua5.5")
     writeFile(c_path, generated)
+    runCommand(table.concat({
+        "cc -std=c99 -Wall -Wextra -Werror -pedantic -fsyntax-only",
+        "-I" .. shellQuote(selected_include),
+        shellQuote(c_path),
+    }, " "))
+    if commandSucceeds("command -v zig >/dev/null 2>&1") then
+        local portable_include = root .. "/freebsd-lua-headers"
+        local pending = { "lua.h", "lauxlib.h", "lualib.h", "luaconf.h" }
+        local copied = {}
+        makeDirectory(portable_include)
+        while #pending > 0 do
+            local header = table.remove(pending)
+            if not copied[header] then
+                local source_header = selected_include .. "/" .. header
+                assert(fileExists(source_header),
+                    "selected Lua include directory has no " .. header)
+                local header_content = readFile(source_header)
+                writeFile(portable_include .. "/" .. header, header_content)
+                copied[header] = true
+                for nested in header_content:gmatch(
+                    "#%s*include%s*[<\"]([^>\"]+)[>\"]"
+                ) do
+                    if nested:match("^lua[%w_.%-]*%.h$")
+                            and fileExists(selected_include .. "/" .. nested)
+                            and not copied[nested] then
+                        pending[#pending + 1] = nested
+                    end
+                end
+            end
+        end
+        local freebsd_object = root .. "/launcher-freebsd.o"
+        runCommand(table.concat({
+            "zig cc -target x86_64-freebsd",
+            "-std=c99 -Wall -Wextra -Werror -pedantic",
+            "-I" .. shellQuote(portable_include),
+            "-c",
+            shellQuote(c_path),
+            "-o",
+            shellQuote(freebsd_object),
+        }, " "))
+        assert(fileExists(freebsd_object),
+            "Zig did not compile the generated FreeBSD Lua launcher")
+    end
     local compiled = commandSucceeds(table.concat({
         "cc -std=c11 -Wall -Wextra -Werror -pedantic -fsyntax-only",
         "-I" .. shellQuote(include_dir),
@@ -4004,7 +4146,7 @@ assert(result.error.path == %q, "committed output path missing")
     removeTree(root)
 end)
 
-test("onefile extractor is strict C11 and sanitizer clean", function()
+test("onefile extractor is portable C99 and sanitizer clean", function()
     if package.config:sub(1, 1) ~= "/" then return end
     local root = makeTempDir("onefile-strict-extractor")
     local fake_bin = root .. "/bin"
@@ -4068,7 +4210,11 @@ assert(result.ok, result.error and result.error.message)
         "(static int luai_append_quoted.-)#else\nstatic int luai_run_inner"
     ), "Windows onefile execution branch is missing")
     assert(source:find("#define _DARWIN_C_SOURCE 1", 1, true),
-        "extractor does not expose Darwin no-follow flags under strict C11")
+        "extractor does not expose Darwin no-follow flags under strict C99")
+    assert(source:find("#define _WIN32_WINNT 0x0501", 1, true),
+        "extractor does not retain the Windows XP API baseline")
+    assert(source:find("defined(__ANDROID__)", 1, true),
+        "extractor has no Termux temporary-prefix fallback")
     assert(source:find('#define LUAI_INNER_EXE "\\', 1, true))
     assert(source:find("CreateProcessA(exe_path, cmd, NULL, NULL, FALSE", 1, true))
     assert(windows_run:find(
@@ -4080,6 +4226,26 @@ assert(result.ok, result.error and result.error.message)
         "Windows onefile does not create a child-containment job")
     assert(source:find("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE", 1, true),
         "Windows onefile job does not kill children when the outer handle closes")
+    assert(source:find("luai_start_legacy_watchdog", 1, true)
+            and source:find("LUAI_WATCHDOG_ARGUMENT", 1, true),
+        "Windows XP onefile has no kill-on-close watchdog fallback")
+    assert(source:find("job_error != ERROR_INVALID_PARAMETER", 1, true)
+            and source:find("job_error != ERROR_NOT_SUPPORTED", 1, true),
+        "Windows onefile does not limit the XP fallback to unsupported job flags")
+    assert(source:find("TerminateJobObject(job, 1)", 1, true),
+        "Windows onefile cannot explicitly terminate its contained descendants")
+    local watchdog_dispatch = assert(source:find(
+        "if (argc == 4 && strcmp(argv[1], LUAI_WATCHDOG_ARGUMENT) == 0)",
+        1,
+        true
+    ), "Windows onefile watchdog dispatch is missing")
+    local extraction_dispatch = assert(source:find(
+        "if (luai_extract_all(bundle_dir, sizeof(bundle_dir), &pins) != 0)",
+        1,
+        true
+    ), "Windows onefile extraction dispatch is missing")
+    assert(watchdog_dispatch < extraction_dispatch,
+        "Windows watchdog recursively extracts the payload before monitoring")
     assert(source:find("AssignProcessToJobObject", 1, true),
         "Windows onefile does not assign its child to the containment job")
     assert(source:find("CREATE_SUSPENDED", 1, true),
@@ -4111,6 +4277,8 @@ assert(result.ok, result.error and result.error.message)
     assert(source:find("S_IWGRP | S_IWOTH", 1, true)
             and source:find("S_ISVTX", 1, true),
         "POSIX extractor accepts a replaceable shared temporary-path ancestor")
+    assert(source:find("st.st_uid == (uid_t)1000", 1, true),
+        "Android extractor rejects system-owned /data ancestors before Termux")
     local ancestor_owner_check = source:find(
         "if (st.st_uid != 0 && st.st_uid != geteuid()) return 0;", 1, true)
     local ancestor_write_check = source:find(
@@ -4166,7 +4334,7 @@ static void luai_test_swap_parent(const char *parent) {
     local hooked_c = root .. "/extractor-parent-race.c"
     local hooked_exe = root .. "/extractor-parent-race"
     writeFile(hooked_c, hooked)
-    runCommand("cc -std=c11 -Wall -Wextra -Werror -pedantic "
+    runCommand("cc -std=c99 -Wall -Wextra -Werror -pedantic "
         .. shellQuote(hooked_c) .. " -o " .. shellQuote(hooked_exe))
     local race_cache = root .. "/race-cache"
     local victim = root .. "/victim"
@@ -4197,7 +4365,7 @@ static void luai_test_swap_parent(const char *parent) {
 
     local gcc_exe = root .. "/extractor-gcc"
     runCommand(table.concat({
-        "cc -std=c11 -Wall -Wextra -Werror -pedantic",
+        "cc -std=c99 -Wall -Wextra -Werror -pedantic",
         shellQuote(captured),
         "-o",
         shellQuote(gcc_exe),
@@ -4218,27 +4386,150 @@ static void luai_test_swap_parent(const char *parent) {
     runCommand("chmod 1777 " .. shellQuote(shared_parent))
     runCommand("TMPDIR=" .. shellQuote(shared_cache) .. " " .. shellQuote(gcc_exe))
 
-    local mingw = commandSucceeds("command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1")
-    if mingw then
-        local windows_one = root .. "/extractor-windows-1.exe"
-        local windows_two = root .. "/extractor-windows-2.exe"
+    if commandOutputTrimmed("uname -s") == "Linux" then
+        local android_exe = root .. "/extractor-android-macro"
+        local termux_prefix = root .. "/termux-prefix"
+        makeDirectory(termux_prefix .. "/tmp")
+        runCommand(table.concat({
+            "cc -D__ANDROID__ -std=c99 -Wall -Wextra -Werror -pedantic",
+            shellQuote(captured),
+            "-o",
+            shellQuote(android_exe),
+        }, " "))
+        runCommand(table.concat({
+            "env -u TMPDIR -u TEMP -u TMP",
+            "TERMUX_VERSION=0.119",
+            "TERMUX__PREFIX=" .. shellQuote(termux_prefix),
+            shellQuote(android_exe),
+        }, " "))
+        local termux_cache = commandOutputTrimmed(
+            "find " .. shellQuote(termux_prefix .. "/tmp")
+                .. " -mindepth 1 -maxdepth 1 -type d -print -quit"
+        )
+        assert(termux_cache ~= "",
+            "Android onefile did not use the Termux prefix when /tmp was unavailable")
+        local temporary_root_probe = harness.loader_prelude() .. string.format([[
+assert(require("luainstaller.fs").temporaryRoot() == %q,
+    "Lua build staging did not use the Termux prefix")
+]], termux_prefix .. "/tmp")
+        runCommand(table.concat({
+            "env -u TMPDIR -u TEMP -u TMP",
+            "TERMUX_VERSION=0.119",
+            "TERMUX__PREFIX=" .. shellQuote(termux_prefix),
+            luaCommand,
+            "-e",
+            shellQuote(temporary_root_probe),
+        }, " "))
+        runCommand(table.concat({
+            "env -u TEMP -u TMP TMPDIR=/tmp",
+            "TERMUX_VERSION=0.119",
+            "TERMUX__PREFIX=" .. shellQuote(termux_prefix),
+            luaCommand,
+            "-e",
+            shellQuote(temporary_root_probe),
+        }, " "))
+    end
+
+    if commandSucceeds("command -v zig >/dev/null 2>&1") then
+        local freebsd_exe = root .. "/extractor-freebsd"
+        runCommand(table.concat({
+            "zig cc -target x86_64-freebsd",
+            "-std=c99 -Wall -Wextra -Werror -pedantic",
+            shellQuote(captured),
+            "-o",
+            shellQuote(freebsd_exe),
+        }, " "))
+        assert(commandOutputTrimmed("file " .. shellQuote(freebsd_exe))
+                :find("FreeBSD", 1, true),
+            "Zig did not produce a FreeBSD onefile extractor")
+    end
+
+    for _, cross in ipairs({
+        {
+            command = "i686-w64-mingw32-gcc",
+            objdump = "i686-w64-mingw32-objdump",
+            label = "x86",
+            subsystem_major = "5",
+            subsystem_minor = "1",
+        },
+        {
+            command = "x86_64-w64-mingw32-gcc",
+            objdump = "x86_64-w64-mingw32-objdump",
+            label = "x86_64",
+            subsystem_major = "5",
+            subsystem_minor = "2",
+        },
+    }) do
+      if commandSucceeds("command -v " .. cross.command .. " >/dev/null 2>&1") then
+        local windows_one = root .. "/extractor-windows-" .. cross.label .. "-1.exe"
+        local windows_two = root .. "/extractor-windows-" .. cross.label .. "-2.exe"
         local windows_command = table.concat({
-            "x86_64-w64-mingw32-gcc -std=c11 -Wall -Wextra -Werror -pedantic",
+            cross.command .. " -std=c99 -Wall -Wextra -Werror -pedantic",
+            "-D_WIN32_WINNT=0x0501 -DWINVER=0x0501",
             shellQuote(captured),
             "-o",
             "%s",
-            "-static-libgcc -Wl,--no-insert-timestamp -ladvapi32",
+            "-static-libgcc -Wl,--no-insert-timestamp"
+                .. " -Wl,--major-subsystem-version," .. cross.subsystem_major
+                .. ",--minor-subsystem-version," .. cross.subsystem_minor
+                .. " -ladvapi32",
         }, " ")
         runCommand(string.format(windows_command, shellQuote(windows_one)))
         runCommand(string.format(windows_command, shellQuote(windows_two)))
-        assert(readFile(windows_one) == readFile(windows_two), "MinGW extractor is not reproducible")
+        assert(readFile(windows_one) == readFile(windows_two),
+            "MinGW " .. cross.label .. " extractor is not reproducible")
+        local pe = commandOutputTrimmed(cross.objdump .. " -p " .. shellQuote(windows_one))
+        assert(pe:match("MajorSubsystemVersion%s+" .. cross.subsystem_major),
+            "MinGW " .. cross.label .. " extractor has the wrong major subsystem")
+        assert(pe:match("MinorSubsystemVersion%s+" .. cross.subsystem_minor),
+            "MinGW " .. cross.label .. " extractor has the wrong minor subsystem")
+        local allowed_dlls = {
+            ["advapi32.dll"] = true,
+            ["kernel32.dll"] = true,
+            ["msvcrt.dll"] = true,
+        }
+        local imported_dlls = 0
+        for raw_dll in pe:gmatch("DLL Name:%s*([^\r\n]+)") do
+            local dll = raw_dll:match("^%s*(.-)%s*$"):lower()
+            assert(allowed_dlls[dll],
+                "MinGW " .. cross.label .. " extractor imports non-XP runtime " .. dll)
+            imported_dlls = imported_dlls + 1
+        end
+        assert(imported_dlls >= 2,
+            "MinGW " .. cross.label .. " PE import table was not decoded")
+        for _, api in ipairs({
+            "AssignProcessToJobObject",
+            "CreateJobObjectA",
+            "DuplicateHandle",
+            "SetInformationJobObject",
+            "TerminateJobObject",
+        }) do
+            assert(pe:find(api, 1, true),
+                "MinGW " .. cross.label .. " extractor does not import " .. api)
+        end
+        for _, post_xp_api in ipairs({
+            "AddDllDirectory",
+            "CancelIoEx",
+            "CreateSymbolicLinkA",
+            "GetFileInformationByHandleEx",
+            "GetFinalPathNameByHandleA",
+            "GetTickCount64",
+            "InitializeCriticalSectionEx",
+            "InitializeProcThreadAttributeList",
+            "SetThreadStackGuarantee",
+        }) do
+            assert(not pe:find(post_xp_api, 1, true),
+                "MinGW " .. cross.label .. " extractor imports post-XP API "
+                    .. post_xp_api)
+        end
+      end
     end
 
     local clang = commandSucceeds("command -v clang >/dev/null 2>&1")
     if clang then
         local clang_exe = root .. "/extractor-clang"
         runCommand(table.concat({
-            "clang -std=c11 -Wall -Wextra -Werror -pedantic",
+            "clang -std=c99 -Wall -Wextra -Werror -pedantic",
             "-fsanitize=address,undefined -fno-omit-frame-pointer",
             shellQuote(captured),
             "-o",
@@ -4791,6 +5082,7 @@ test("remote scripts are pinned and non-destructive", function()
     local linux_runner = readFile("tools/remote-test-linux.sh")
     local macos_runner = readFile("tools/remote-test-macos.sh")
     local windows_runner = readFile("tools/remote-test-windows.sh")
+    local portable_runner = readFile("tools/test-portable-host.sh")
     local ci_workflow = readFile(".github/workflows/ci.yml")
     local ci_sample_deps = readFile("tools/ci-install-sample-deps.sh")
     local benchmark_runner = readFile("tools/benchmark-real-world.sh")
@@ -4838,6 +5130,21 @@ test("remote scripts are pinned and non-destructive", function()
         "CI Lua ABI jobs stop after the first failure")
     assert(ci_workflow:find("VERSION_FILTER='${{ matrix.lua }}'", 1, true),
         "CI still runs all Lua ABIs serially inside one timeout")
+    assert(ci_workflow:find("linux%-x86%-native:"),
+        "CI has no native 32-bit Linux gate")
+    assert(ci_workflow:find("gcc%-mingw%-w64%-i686"),
+        "CI cannot compile the generated Windows x86 source")
+    assert(portable_runner:find("TERMUX__PREFIX", 1, true)
+            and portable_runner:find("FreeBSD", 1, true),
+        "portable-host runner omits Termux or FreeBSD classification")
+    local onefile_source = readFile("src/onefile.lua")
+    assert(onefile_source:find(
+        'profile.target_os == "windows" and fs.rename or fs.hardLink',
+        1,
+        true
+    ), "Windows onefile publication does not use the XP-compatible move adapter")
+    assert(not onefile_source:find("fs.move", 1, true),
+        "Windows onefile publication calls a nonexistent filesystem adapter")
     assert(ci_sample_deps:find("--deps-mode=none", 1, true),
         "local CI sample install permits unpinned dependency resolution")
     assert(ci_sample_deps:find("config deploy_lib_dir", 1, true),
@@ -4978,6 +5285,8 @@ test("remote scripts are pinned and non-destructive", function()
         "POSIX matrix lacks a portable SHA-256 adapter")
     assert(posix_matrix:find("shasum -a 256", 1, true),
         "POSIX matrix cannot verify sources on a clean macOS host")
+    assert(posix_matrix:find("sha256 -q", 1, true),
+        "POSIX matrix cannot verify sources with FreeBSD's native sha256")
     assert(not posix_matrix:find("sha256sum -c", 1, true),
         "POSIX matrix retains a GNU-only hash verification path")
     assert(posix_matrix:find("CACHE_SCHEMA=", 1, true),

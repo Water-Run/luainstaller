@@ -40,15 +40,20 @@ assert(config, table.concat(diagnostic, "\n"))
 assert(type(config.cc) == "string" and config.cc ~= "")
 assert(type(config.include_dir) == "string" and config.include_dir ~= "")
 assert(config.lua_version.abi == compat.luaVersion().abi)
-local expected_link_mode = config.host.os == "macos" and "static" or "shared"
-assert(config.link_mode == expected_link_mode, string.format(
-    "%s requires %s liblua, got %s",
-    tostring(config.host.os),
-    expected_link_mode,
-    tostring(config.link_mode)
+local supported_link_modes = {}
+for _, mode in ipairs(config.profile.supported_link_modes or {}) do
+    supported_link_modes[mode] = true
+end
+assert(supported_link_modes[config.link_mode], string.format(
+    "%s profile does not permit selected liblua mode %s",
+    tostring(config.host.os), tostring(config.link_mode)
 ))
-if expected_link_mode == "shared" then
+if config.link_mode == "shared" then
     assert(type(config.runtime_path) == "string" and config.runtime_path ~= "")
+else
+    assert(config.link_mode == "static")
+    assert(type(config.static_library_path) == "string"
+        and config.static_library_path ~= "")
 end
 assert(config.native_module_verified == true,
     "toolchain did not verify an ordinary Lua C module")

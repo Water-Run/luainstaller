@@ -270,7 +270,14 @@ hasTimeoutUtility = function()
         if IS_WINDOWS then
             timeout_utility_available = false
         else
-            local ok, _ = M.output("command -v timeout >/dev/null 2>&1")
+            -- The implementation below deliberately uses GNU timeout's
+            -- --kill-after process-group semantics.  FreeBSD also ships a
+            -- command named timeout, but older releases use a different CLI;
+            -- treating name presence as capability breaks every compiler
+            -- invocation on those hosts.
+            local ok, _ = M.output(
+                "timeout --kill-after=1s 1s sh -c 'exit 0' >/dev/null 2>&1"
+            )
             timeout_utility_available = (ok == true)
         end
     end
@@ -374,7 +381,8 @@ function M.outputPowerShell(script)
             "$ErrorActionPreference='Stop';$p=", decodeExpression(temporary), ";",
             "$s=New-Object IO.FileStream($p,[IO.FileMode]::CreateNew,",
             "[IO.FileAccess]::Write,[IO.FileShare]::None);",
-            "try{$LuaiInput.CopyTo($s);$s.Flush($true)}finally{$s.Dispose()}",
+            "$b=New-Object byte[] 65536;try{while(($n=$LuaiInput.Read($b,0,$b.Length))-gt 0)",
+            "{$s.Write($b,0,$n)};$s.Flush()}finally{$s.Dispose()}",
         })
         local wrote, write_err = M.inputPowerShell(write_script, script)
         if not wrote then return false, write_err end
@@ -473,32 +481,36 @@ local function windowsOutputCommand(validated, opts)
         "$Start.Arguments=" .. decodeExpression(table.concat(quoted_arguments, " ")),
         "$Start.UseShellExecute=$false",
         "$Start.CreateNoWindow=$true",
-        "$Start.RedirectStandardOutput=$true",
-        "$Start.RedirectStandardError=$true",
+        -- Inherit the outer PowerShell stdout/stderr handles. This streams
+        -- both channels directly to io.popen, avoids redirected-pipe
+        -- deadlocks, and works on the .NET 2.0 API surface used by
+        -- PowerShell 2 on Windows XP.
+        "$Start.RedirectStandardOutput=$false",
+        "$Start.RedirectStandardError=$false",
         "$Utf8=New-Object Text.UTF8Encoding($false)",
-        "$Start.StandardOutputEncoding=[Text.Encoding]::Default",
-        "$Start.StandardErrorEncoding=[Text.Encoding]::Default",
     }
     for _, name in ipairs(sortedKeys(validated.environment)) do
         script[#script + 1] = "$Start.EnvironmentVariables[(" .. decodeExpression(name)
             .. ")]=" .. decodeExpression(validated.environment[name])
     end
     script[#script + 1] = "try{$Child=New-Object System.Diagnostics.Process;$Child.StartInfo=$Start;"
-        .. "if(-not $Child.Start()){exit 127};$OutTask=$Child.StandardOutput.ReadToEndAsync();"
-        .. "$ErrTask=$Child.StandardError.ReadToEndAsync();"
+        .. "if(-not $Child.Start()){exit 127};"
     if timeout_seconds then
         script[#script + 1] = "if(-not $Child.WaitForExit("
             .. tostring(math.floor(timeout_seconds * 1000)) .. ")){"
-            .. "$Child.Kill($true);$Child.WaitForExit();"
+            .. "$TaskKill=[IO.Path]::Combine([IO.Path]::Combine("
+            .. "$env:SystemRoot,'System32'),'taskkill.exe');"
+            .. "if([IO.File]::Exists($TaskKill)){& $TaskKill /PID $Child.Id /T /F | Out-Null};"
+            .. "if(-not $Child.HasExited){$Child.Kill()};$Child.WaitForExit();"
             .. "[Console]::OutputEncoding=$Utf8;"
             .. "[Console]::Error.Write('luainstaller: command timed out after "
             .. tostring(timeout_seconds) .. "s');exit 124};"
     else
         script[#script + 1] = "$Child.WaitForExit();"
     end
-    script[#script + 1] = "$Stdout=$OutTask.Result;$Stderr=$ErrTask.Result;$Code=$Child.ExitCode;"
-        .. "[Console]::OutputEncoding=$Utf8;[Console]::Out.Write($Stdout);"
-        .. "[Console]::Error.Write($Stderr);exit $Code}catch{[Console]::Error.Write($_.Exception.Message);exit 127}"
+    script[#script + 1] = "$Code=$Child.ExitCode;exit $Code}"
+        .. "catch{[Console]::OutputEncoding=$Utf8;"
+        .. "[Console]::Error.Write($_.Exception.Message);exit 127}"
     return M.outputPowerShell(table.concat(script, ";"))
 end
 

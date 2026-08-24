@@ -1997,10 +1997,9 @@ local function bundleOnedir(opts, lifecycle)
         if err then return abandon(err) end
     end
     local abi_environment = {}
-    if profile.target_os == "linux" and native_toolchain.link_mode == "shared" then
-        abi_environment.LD_LIBRARY_PATH = native_dir
-    elseif profile.target_os == "macos" and native_toolchain.link_mode == "shared" then
-        abi_environment.DYLD_LIBRARY_PATH = native_dir
+    if native_toolchain.link_mode == "shared"
+        and profile.runtime_library_path_var then
+        abi_environment[profile.runtime_library_path_var] = native_dir
     end
     local abi_ok, abi_output = process.outputCommand(
         abi_probe_exe,

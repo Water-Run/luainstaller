@@ -91,7 +91,7 @@ auto-replaced
 |Compiler ran and failed
 
 |`LuaRuntimeNotFoundError`
-|Linux cannot find shared liblua
+|The selected shared liblua cannot be identified or staged
 
 |`DiscoveryError`
 |Runtime discovery failed or incomplete
@@ -142,11 +142,37 @@ cc --version
 lua -v
 ----
 
+For a 32-bit build, all three must describe the same ABI. Check the running
+interpreter and every selected native object; setting `CC='cc -m32'` alone
+does not turn 64-bit headers/libraries into a 32-bit toolchain.
+
+[source,bash]
+----
+file "$(command -v lua)"
+file /your/lua/prefix/lib/liblua.*
+----
+
+When no usable `pkg-config` entry exists, pass the native installation root
+with `--lua-prefix`. The root may contain either a shared library or
+`liblua.a`; a bad explicit prefix is reported instead of silently replaced.
+
+**Android/Termux**: install the compiler and the matching official Lua
+development files inside the same Termux environment. Confirm that
+`TERMUX__PREFIX` (or legacy `PREFIX`) and `TMPDIR` point into the app-private
+filesystem. Do not create `/bin/sh` or `/tmp` compatibility links.
+
+**FreeBSD**: use the native compiler and Lua headers/library. `-ldl` is a Linux
+dependency and should not be added manually on FreeBSD. An absent GNU-style
+`timeout` or non-Linux `ldd` output is not itself a toolchain failure.
+
 **macOS**: check `include/lua.h`, `lib/liblua.a`, and architecture under
 `--lua-prefix`.
 
-**Windows**: in an MSVC + Windows SDK environment, check `cl.exe` and
-`lua*.dll` under the prefix.
+**Windows**: in an MSVC + Windows SDK environment, check `cl.exe`, the import
+library, and `lua*.dll` under the prefix. For Windows XP, run from the prepared
+prompt of an XP-capable compiler, use PowerShell 2 or newer, and inspect the
+final PE subsystem (5.01 for x86, 5.02 for x86_64). A modern UCRT build does
+not become XP-compatible merely because `_WIN32_WINNT` is 0x0501.
 
 [#troubleshooting-native]
 == Native module fails after start
@@ -157,7 +183,7 @@ clear Lua environment variables; test on the real target OS.
 [source,bash]
 ----
 file build/app/.luai/native/*
-ldd build/app/.luai/native/*.so
+ldd build/app/.luai/native/*.so  # where the host provides compatible ldd output
 EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
 env -i PATH="$EMPTY_PATH" build/app/app
 rmdir "$EMPTY_PATH"
@@ -185,8 +211,9 @@ running, remove the lock indicated by `owner.*`.
 == Single-file extraction fails
 
 Confirm the directory bundle first. Check `TMPDIR` and
-`luainstaller-onefile-<uid>` ownership/mode. Cache hits compare full bytes, not
-size alone.
+`luainstaller-onefile-<uid>` ownership/mode. On Termux, use the app-private
+prefix's `tmp` directory; `/tmp` normally does not exist. Cache hits compare
+full bytes, not size alone.
 
 [source,bash]
 ----

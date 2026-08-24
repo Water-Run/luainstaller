@@ -96,8 +96,10 @@ sha256_file() {
         sha256sum "$1" | awk '{ print $1 }'
     elif command -v shasum >/dev/null 2>&1; then
         shasum -a 256 "$1" | awk '{ print $1 }'
+    elif command -v sha256 >/dev/null 2>&1; then
+        sha256 -q "$1"
     else
-        echo "missing SHA-256 command: install sha256sum or shasum" >&2
+        echo "missing SHA-256 command: install sha256sum, shasum, or sha256" >&2
         return 1
     fi
 }
@@ -107,8 +109,10 @@ sha256_stream() {
         sha256sum | awk '{ print $1 }'
     elif command -v shasum >/dev/null 2>&1; then
         shasum -a 256 | awk '{ print $1 }'
+    elif command -v sha256 >/dev/null 2>&1; then
+        sha256 -q
     else
-        echo "missing SHA-256 command: install sha256sum or shasum" >&2
+        echo "missing SHA-256 command: install sha256sum, shasum, or sha256" >&2
         return 1
     fi
 }
@@ -579,7 +583,7 @@ run_version() {
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.1.1-1.rockspec
+    "$luarocks" lint luainstaller-1.3.0-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/toolchain_native.lua
     "$lua" test/native_bundle.lua

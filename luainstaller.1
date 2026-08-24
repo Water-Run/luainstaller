@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "August 2026" "luainstaller 1.1.1" "User Commands"
+.TH LUAINSTALLER 1 "August 2026" "luainstaller 1.3.0" "User Commands"
 .SH NAME
 luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
@@ -44,6 +44,15 @@ match the interpreter's Lua major/minor ABI. LuaJIT is rejected.
 Before publishing, every native backend compiles and executes a linked-runtime
 probe on the build host. Generated launchers repeat the runtime version check
 when started. Cross-building is not provided.
+.PP
+POSIX hosts can use either a shared liblua or a verified static liblua.a.
+Native profiles cover 32-bit and 64-bit Linux, Android/Termux, FreeBSD,
+macOS, and capability-compatible POSIX systems. Windows selects the native
+x86, x86_64, ARM, or ARM64 linker machine. Generated x86/x86_64 Windows code
+uses the Windows XP API floor and records the matching 5.01/5.02 PE subsystem;
+the compiler CRT and Lua DLL must independently be XP-compatible. Onefile uses
+an inherited-handle watchdog when XP rejects the newer Job Object kill-on-close
+flag.
 .PP
 .B luai
 and
@@ -253,6 +262,9 @@ finished bundle does not rely on host modules.
 .B TMPDIR
 Temporary root for runtime discovery and POSIX onefile extraction.
 .TP
+.B PREFIX
+Termux installation prefix and fallback onefile temporary root.
+.TP
 .B HOME, USERPROFILE
 Home directory used for persistent logs.
 .TP
@@ -279,7 +291,7 @@ luarocks install luainstaller
 .fi
 .PP
 LuaRocks is the supported installation path. Package metadata requires Lua
-versions at least 5.1 and below 6.0; luainstaller rejects LuaJIT when used.
+versions at least 5.1 and below 5.6; luainstaller rejects LuaJIT when used.
 Lua 5.5 requires LuaRocks 3.13.0 or newer.
 .SH LUA API
 The module

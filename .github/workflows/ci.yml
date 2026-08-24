@@ -109,7 +109,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libreadline-dev \
-            unzip curl ca-certificates clang luajit gcc-mingw-w64-x86-64
+            unzip curl ca-certificates clang luajit gcc-mingw-w64-x86-64 \
+            gcc-mingw-w64-i686
 
       - name: Run the pinned Lua version
         run: |
@@ -117,6 +118,42 @@ jobs:
             LUAI_MATRIX_EDGE_COVERAGE_MODE=available HOST_LABEL=ci \
             sh tools/test-lua-versions.sh
         timeout-minutes: 120
+
+  linux-x86-native:
+    name: Linux x86 native Lua 5.4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install 32-bit toolchain
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential gcc-multilib libc6-dev-i386 ca-certificates curl \
+            file pkg-config
+
+      - name: Build and exercise native 32-bit artifacts
+        run: |
+          chmod +x tools/cc-m32.sh
+          prefix="$RUNNER_TEMP/luai-lua-x86"
+          LUAI_CI_LUA_PREFIX="$prefix" \
+            LUAI_CI_WORK="$RUNNER_TEMP/luai-build-x86" \
+            LUAI_CI_CC="$GITHUB_WORKSPACE/tools/cc-m32.sh" \
+            sh tools/ci-build-lua54.sh
+          export LUAI_TEST_LUA="$prefix/bin/lua"
+          export LUAI_TEST_LUAC="$prefix/bin/luac"
+          export LUAI_LUA_PREFIX="$prefix"
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$prefix/lib"
+          export CC="$GITHUB_WORKSPACE/tools/cc-m32.sh"
+          export LUAI_EXPECT_HOST_ARCH=x86
+          file "$LUAI_TEST_LUA" | grep -F 'ELF 32-bit'
+          "$LUAI_TEST_LUA" test/version_contract.lua
+          "$LUAI_TEST_LUA" test/toolchain_native.lua
+          "$LUAI_TEST_LUA" test/native_bundle.lua
+          "$LUAI_TEST_LUA" test/native_onefile.lua
+          "$LUAI_TEST_LUA" test/onefile_lifecycle.lua
 
   windows-version-matrix:
     name: official Lua ${{ matrix.lua }} (Windows MSVC)

@@ -540,6 +540,14 @@ local function check_documentation_contract()
     assert_contains(ci, "tools\\test-lua-versions.ps1")
     assert_contains(ci, "windows-lua-${{ matrix.lua }}-evidence")
     assert_contains(ci, "actions/upload-artifact@")
+    assert_contains(ci, "linux-x86-native:")
+    assert_contains(ci, "gcc-mingw-w64-i686")
+    assert_contains(ci, "tools/cc-m32.sh")
+    assert_contains(ci, "LUAI_EXPECT_HOST_ARCH=x86")
+
+    local portable_host = read_file("tools/test-portable-host.sh")
+    assert_contains(portable_host, "TERMUX__PREFIX")
+    assert_contains(portable_host, "FreeBSD")
 
     local benchmark = read_file("tools/benchmark-real-world.sh")
     local realworld_cases = read_file("REALWORLD_TEST_CASES.txt")
@@ -573,6 +581,7 @@ local function check_documentation_contract()
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
     assert_contains(changelog, "== 1.1.1")
+    assert_contains(changelog, "== 1.3.0")
     assert_contains(changelog, "== 1.1.0")
     assert_contains(changelog, "=== Upgrade notes")
 
@@ -591,7 +600,7 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.1.1-1.rockspec")
+    local rockspec = read_file("luainstaller-1.3.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -604,7 +613,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.1.1-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.3.0-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

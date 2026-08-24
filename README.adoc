@@ -176,30 +176,51 @@ Option meaning matches the CLI. Full API notes are in
 xref:docs/USAGE.adoc[Usage].
 
 [#test-environments]
-== Tested environments
+== Platform coverage
 
-The required CI gate exercises these native runner classes. Additional Linux
-distributions and macOS systems are used as supplemental compatibility checks,
-not as release prerequisites:
+v1.3 selects implementations by native capability rather than by a short OS
+allowlist. Builds remain native: the compiler, Lua headers/library, native
+modules, architecture and target OS must agree. The release gates and
+platform-specific contract cover:
 
-[cols="2,1",options="header"]
+[cols="2,1,2",options="header"]
 |===
-|System |Architecture
+|System |Architecture |Compatibility path
 
-|Windows with MSVC and the Windows SDK
-|x86_64
+|Windows XP SP3 / XP x64 SP2 or newer
+|x86 / x86_64
+|XP API baseline and onefile watchdog fallback; XP-capable CRT and Lua DLL
+
+|Modern Windows
+|x86, x86_64, ARM, ARM64
+|Native MSVC/MinGW linker-machine selection
 
 |Linux
-|x86_64
+|x86 and x86_64
+|32/64-bit userland detection; shared or static Lua
 
 |Linux
-|ARM64
+|ARM and ARM64
+|Shared or static Lua
+
+|Android / Termux
+|native Termux architecture
+|App-private prefix, Bionic ABI and Termux temporary root
+
+|FreeBSD
+|native architecture
+|libc `dlopen`, `sysctl` executable path, shared or static Lua
 
 |macOS
-|ARM64
+|x86_64 and ARM64
+|Static Lua preferred; verified dylib fallback
 |===
 
-Full gates: xref:docs/TESTING.adoc[Testing].
+Windows XP builds require PowerShell 2 or newer and an XP-targeting compiler
+runtime; installing a modern compiler on a new host does not by itself make
+its CRT XP-compatible. Full requirements and evidence tiers:
+xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules] and
+xref:docs/TESTING.adoc[Testing].
 
 [#documentation-index]
 == Documentation

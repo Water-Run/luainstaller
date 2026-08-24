@@ -155,7 +155,7 @@ local function createPrivateDirectory(name, parent)
     local candidate, output = fs.makePrivateDirectory(name, parent)
     if candidate then return normalizePath(candidate) end
     return nil, makeError("FilesystemError", "Cannot create private build directory", {
-        path = parent or os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp",
+        path = parent or fs.temporaryRoot(),
         output = output,
     })
 end
@@ -282,6 +282,12 @@ local EXTRACTOR_TEMPLATE = [=[
 #include <string.h>
 
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0501
+#endif
+#ifndef WINVER
+#define WINVER _WIN32_WINNT
+#endif
 #include <direct.h>
 #include <fcntl.h>
 #include <io.h>
@@ -290,6 +296,12 @@ local EXTRACTOR_TEMPLATE = [=[
 #include <windows.h>
 #include <aclapi.h>
 #include <sddl.h>
+#if defined(_MSC_VER) && _MSC_VER < 1900
+#define snprintf _snprintf
+#endif
+#ifndef JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+#define JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE 0x00002000
+#endif
 #define L_SEP "\\"
 #else
 #include <fcntl.h>
@@ -704,6 +716,13 @@ static int luai_directory_entry_is_stable(int fd) {
     struct stat st;
     mode_t shared_write;
     if (fstat(fd, &st) != 0 || !S_ISDIR(st.st_mode)) return 0;
+#if defined(__ANDROID__)
+    /* Android init owns /data and /data/data as AID_SYSTEM (1000).  They are
+       part of the trusted platform boundary even though a Termux process has
+       its own app UID; rejecting them makes every app-private prefix
+       unreachable before the ownership check reaches com.termux itself. */
+    if (st.st_uid == (uid_t)1000) return 1;
+#endif
     if (st.st_uid != 0 && st.st_uid != geteuid()) return 0;
     shared_write = st.st_mode & (S_IWGRP | S_IWOTH);
     if (shared_write != 0) {
@@ -1043,19 +1062,29 @@ static int luai_temp_root(char *out, size_t out_size) {
     return length > 0 && (size_t)length < out_size ? 0 : -1;
 #else
     const char *value = getenv("TMPDIR");
-    char *resolved;
-    size_t length;
+    char resolved[4096];
+    if (!value || !*value) value = getenv("TEMP");
+    if (!value || !*value) value = getenv("TMP");
     if (!value || !*value) value = "/tmp";
-    resolved = realpath(value, NULL);
-    if (!resolved) return -1;
-    length = strlen(resolved);
-    if (length >= out_size) {
-        free(resolved);
-        return -1;
+#if defined(__ANDROID__)
+    if (strcmp(value, "/tmp") == 0) {
+        char fallback[4096];
+        const char *prefix = getenv("TERMUX__PREFIX");
+        if (!prefix || !*prefix) prefix = getenv("PREFIX");
+        if (!prefix || !*prefix) prefix = getenv("TERMUX_PREFIX");
+        if (prefix && *prefix) {
+            int length = snprintf(fallback, sizeof(fallback), "%s/tmp", prefix);
+            if (length > 0 && (size_t)length < sizeof(fallback)
+                && realpath(fallback, resolved) != NULL) {
+                return strlen(resolved) < out_size
+                    ? (memcpy(out, resolved, strlen(resolved) + 1), 0) : -1;
+            }
+        }
     }
-    memcpy(out, resolved, length + 1);
-    free(resolved);
-    return 0;
+#endif
+    if (realpath(value, resolved) == NULL) return -1;
+    return strlen(resolved) < out_size
+        ? (memcpy(out, resolved, strlen(resolved) + 1), 0) : -1;
 #endif
 }
 
@@ -1203,6 +1232,84 @@ static int luai_append_quoted(char *cmd, size_t cmd_size, const char *value) {
     return 0;
 }
 
+#define LUAI_WATCHDOG_ARGUMENT "--luainstaller-internal-watchdog-v1"
+
+static int luai_parse_inherited_handle(const char *text, HANDLE *handle) {
+    void *value = NULL;
+    int consumed = 0;
+    if (!text || !handle || sscanf(text, "%p%n", &value, &consumed) != 1
+        || consumed <= 0 || text[consumed] != '\0' || value == NULL) return -1;
+    *handle = (HANDLE)value;
+    return 0;
+}
+
+static int luai_watchdog_main(const char *parent_text, const char *job_text) {
+    HANDLE parent = NULL;
+    HANDLE job = NULL;
+    DWORD waited;
+    int result = 1;
+    if (luai_parse_inherited_handle(parent_text, &parent) != 0
+        || luai_parse_inherited_handle(job_text, &job) != 0) {
+        fputs("luainstaller-onefile: invalid watchdog handles\n", stderr);
+        return 1;
+    }
+    waited = WaitForSingleObject(parent, INFINITE);
+    if (waited == WAIT_OBJECT_0 && TerminateJobObject(job, 1)) result = 0;
+    CloseHandle(job);
+    CloseHandle(parent);
+    return result;
+}
+
+static int luai_start_legacy_watchdog(HANDLE job) {
+    char self_path[4096];
+    char command[32768] = "";
+    char parent_text[2 * sizeof(void *) + 3];
+    char job_text[2 * sizeof(void *) + 3];
+    HANDLE process = GetCurrentProcess();
+    HANDLE parent_copy = NULL;
+    HANDLE job_copy = NULL;
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    DWORD self_length;
+    size_t command_length;
+    size_t command_available;
+    int length;
+    int result = -1;
+    self_length = GetModuleFileNameA(NULL, self_path, (DWORD)sizeof(self_path));
+    if (self_length == 0 || (size_t)self_length >= sizeof(self_path)) return -1;
+    if (!DuplicateHandle(process, process, process, &parent_copy,
+                         SYNCHRONIZE, TRUE, 0)) return -1;
+    if (!DuplicateHandle(process, job, process, &job_copy,
+                         JOB_OBJECT_TERMINATE, TRUE, 0)) {
+        CloseHandle(parent_copy);
+        return -1;
+    }
+    length = snprintf(parent_text, sizeof(parent_text), "%p", (void *)parent_copy);
+    if (length <= 0 || (size_t)length >= sizeof(parent_text)) goto cleanup;
+    length = snprintf(job_text, sizeof(job_text), "%p", (void *)job_copy);
+    if (length <= 0 || (size_t)length >= sizeof(job_text)) goto cleanup;
+    if (luai_append_quoted(command, sizeof(command), self_path) != 0) goto cleanup;
+    command_length = strlen(command);
+    command_available = sizeof(command) - command_length;
+    length = snprintf(command + command_length, command_available,
+                      " %s %s %s", LUAI_WATCHDOG_ARGUMENT,
+                      parent_text, job_text);
+    if (length <= 0 || (size_t)length >= command_available) goto cleanup;
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+    if (!CreateProcessA(self_path, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
+                        NULL, NULL, &si, &pi)) goto cleanup;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    result = 0;
+
+cleanup:
+    CloseHandle(job_copy);
+    CloseHandle(parent_copy);
+    return result;
+}
+
 static int luai_run_inner(const char *exe_path, int argc, char **argv) {
     char cmd[32768] = "";
     STARTUPINFOA si;
@@ -1210,6 +1317,7 @@ static int luai_run_inner(const char *exe_path, int argc, char **argv) {
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info;
     HANDLE job = NULL;
     DWORD exit_code = 1;
+    DWORD job_error;
     int child_completed = 0;
     int i;
     if (luai_append_quoted(cmd, sizeof(cmd),
@@ -1242,9 +1350,13 @@ static int luai_run_inner(const char *exe_path, int argc, char **argv) {
     job_info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
                                  &job_info, sizeof(job_info))) {
-        fprintf(stderr, "luainstaller-onefile: cannot configure child-containment job\n");
-        CloseHandle(job);
-        return 1;
+        job_error = GetLastError();
+        if ((job_error != ERROR_INVALID_PARAMETER && job_error != ERROR_NOT_SUPPORTED)
+            || luai_start_legacy_watchdog(job) != 0) {
+            fprintf(stderr, "luainstaller-onefile: cannot configure child-containment job\n");
+            CloseHandle(job);
+            return 1;
+        }
     }
     if (!CreateProcessA(exe_path, cmd, NULL, NULL, FALSE, CREATE_SUSPENDED,
                         NULL, NULL, &si, &pi)) {
@@ -1273,6 +1385,10 @@ cleanup:
         WaitForSingleObject(pi.hProcess, INFINITE);
         exit_code = 1;
     }
+    if (!TerminateJobObject(job, 1)) {
+        fprintf(stderr, "luainstaller-onefile: cannot terminate child-containment job\n");
+        exit_code = 1;
+    }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     CloseHandle(job);
@@ -1299,6 +1415,9 @@ int main(int argc, char **argv) {
 #ifdef _WIN32
     struct luai_pinned_objects pins = { NULL, 0, 0 };
     int result;
+    if (argc == 4 && strcmp(argv[1], LUAI_WATCHDOG_ARGUMENT) == 0) {
+        return luai_watchdog_main(argv[2], argv[3]);
+    }
     if (luai_extract_all(bundle_dir, sizeof(bundle_dir), &pins) != 0) {
         luai_close_pins(&pins);
 #else
@@ -1542,18 +1661,24 @@ function M.bundleOnefile(opts)
     end
     local published = false
     if not err then
-        local linked, link_output = fs.hardLink(staged_exe, out_path)
-        if not linked then
+        -- File.Move maps to a same-volume, no-replace MoveFile operation on
+        -- Windows and is available through .NET 2/PowerShell 2.  This avoids
+        -- both PowerShell 5's New-Item -ItemType HardLink and XP's
+        -- administrator-only fsutil path.  POSIX link(2) retains the same
+        -- no-replace publication guarantee without rename-overwrite races.
+        local publish = profile.target_os == "windows" and fs.rename or fs.hardLink
+        local committed, publish_output = publish(staged_exe, out_path)
+        if not committed then
             if pathExists(out_path) or isSymlink(out_path) then
                 err = makeError("InvalidOutputError", "Onefile output appeared while the bundle was being built", {
                     path = out_path,
-                    output = link_output,
+                    output = publish_output,
                 })
             else
-                err = makeError("FilesystemError", "Cannot publish onefile output atomically; the output filesystem may not support hard links", {
+                err = makeError("FilesystemError", "Cannot publish onefile output atomically", {
                     path = out_path,
                     staging_path = staged_exe,
-                    output = link_output,
+                    output = publish_output,
                 })
             end
         else

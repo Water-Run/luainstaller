@@ -96,6 +96,7 @@ local function commandDigest(file_path)
         commands = {
             "sha256sum " .. quotePosix(file_path) .. " 2>/dev/null",
             "shasum -a 256 " .. quotePosix(file_path) .. " 2>/dev/null",
+            "sha256 -q " .. quotePosix(file_path) .. " 2>/dev/null",
         }
     end
     for _, command in ipairs(commands) do

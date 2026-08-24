@@ -21,14 +21,29 @@ local DEFAULT_TEMPLATE = [=[
  * Shared-Lua launcher template for luainstaller.
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0501
+#endif
+#ifndef WINVER
+#define WINVER _WIN32_WINNT
+#endif
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
+#include <unistd.h>
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 #else
 #include <unistd.h>
@@ -76,32 +91,83 @@ static int luai_traceback(lua_State *L) {
     return 1;
 }
 
-static int luai_executable_path(char *out, size_t out_size) {
+#ifndef _WIN32
+static int luai_copy_path(char *out, size_t out_size, const char *value) {
+    size_t length;
+    if (value == NULL) return -1;
+    length = strlen(value);
+    if (length == 0 || length >= out_size) return -1;
+    memcpy(out, value, length + 1);
+    return 0;
+}
+
+static int luai_real_executable(char *out, size_t out_size, const char *candidate) {
+    char resolved[4096];
+    if (candidate == NULL || realpath(candidate, resolved) == NULL) return -1;
+    if (access(resolved, X_OK) != 0) return -1;
+    return luai_copy_path(out, out_size, resolved);
+}
+
+static int luai_executable_from_argv0(char *out, size_t out_size, const char *arg0) {
+    const char *search;
+    const char *cursor;
+    if (arg0 == NULL || *arg0 == '\0') return -1;
+    if (strchr(arg0, '/') != NULL) return luai_real_executable(out, out_size, arg0);
+    search = getenv("PATH");
+    if (search == NULL) return -1;
+    cursor = search;
+    for (;;) {
+        const char *separator = strchr(cursor, ':');
+        size_t directory_length = separator ? (size_t)(separator - cursor) : strlen(cursor);
+        char candidate[4096];
+        int length;
+        if (directory_length == 0) {
+            length = snprintf(candidate, sizeof(candidate), "./%s", arg0);
+        } else if (directory_length >= sizeof(candidate) - 2) {
+            length = -1;
+        } else {
+            length = snprintf(candidate, sizeof(candidate), "%.*s/%s",
+                              (int)directory_length, cursor, arg0);
+        }
+        if (length > 0 && (size_t)length < sizeof(candidate)
+            && luai_real_executable(out, out_size, candidate) == 0) return 0;
+        if (!separator) break;
+        cursor = separator + 1;
+    }
+    return -1;
+}
+#endif
+
+static int luai_executable_path(char *out, size_t out_size, const char *arg0) {
 #ifdef _WIN32
     DWORD length = GetModuleFileNameA(NULL, out, (DWORD)out_size);
     if (length == 0 || (size_t)length >= out_size) return -1;
     return 0;
 #elif defined(__APPLE__)
     char raw[4096];
-    char *resolved;
-    size_t length;
     uint32_t size = (uint32_t)sizeof(raw);
     if (_NSGetExecutablePath(raw, &size) != 0) return -1;
-    resolved = realpath(raw, NULL);
-    if (!resolved) return -1;
-    length = strlen(resolved);
-    if (length >= out_size) {
-        free(resolved);
-        return -1;
-    }
-    memcpy(out, resolved, length + 1);
-    free(resolved);
-    return 0;
-#else
+    if (luai_real_executable(out, out_size, raw) == 0) return 0;
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+    size_t size = out_size;
+    if (sysctl(mib, 4, out, &size, NULL, 0) == 0
+        && size > 1 && size <= out_size && out[0] != '\0') return 0;
+#elif defined(__linux__) || defined(__ANDROID__)
     ssize_t length = readlink("/proc/self/exe", out, out_size - 1);
-    if (length < 0 || (size_t)length >= out_size - 1) return -1;
-    out[length] = '\0';
-    return 0;
+    if (length >= 0 && (size_t)length < out_size - 1) {
+        out[length] = '\0';
+        return 0;
+    }
+#else
+    (void)out;
+    (void)out_size;
+#endif
+#ifndef _WIN32
+    return luai_executable_from_argv0(out, out_size, arg0);
+#else
+    (void)arg0;
+    return -1;
 #endif
 }
 
@@ -110,7 +176,7 @@ static void luai_push_arg(lua_State *L, int argc, char **argv) {
     const char *arg0 = argc > 0 && argv[0] != NULL ? argv[0] : "";
     const char *executable_path = arg0;
     int i;
-    if (luai_executable_path(executable, sizeof(executable)) == 0) {
+    if (luai_executable_path(executable, sizeof(executable), arg0) == 0) {
         executable_path = executable;
     }
     lua_createtable(L, argc > 1 ? argc - 1 : 0, 1);

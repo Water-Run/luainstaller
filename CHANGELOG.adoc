@@ -7,6 +7,50 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+== 1.3.0 - 2026-08-24
+
+=== Added
+
+* Capability-driven native profiles for 32-bit x86/ARM, Android/Termux,
+  FreeBSD and other ELF/POSIX hosts. Host detection now distinguishes a
+  32-bit userland from a 64-bit kernel and records Android as its own target.
+* Verified static-liblua fallback on POSIX. Linux, Android and the BSDs can
+  build from either a shared library or `liblua.a`; a statically linked
+  launcher exports the Lua C API so ordinary native modules continue to load.
+* Windows linker-machine selection for x86, x86_64, ARM and ARM64, including
+  MinGW `.dll.a` import libraries and an XP (`_WIN32_WINNT=0x0501`) API
+  baseline for x86/x86_64 generated launchers and onefile extractors. PE
+  subsystem floors are 5.01 on x86 and 5.02 on x86_64.
+
+=== Changed
+
+* Replace Linux-specific `libdl`, `/bin/sh`, `ldd`, `/proc/self/exe`, GNU
+  `find -mindepth`, and GNU `timeout` assumptions with OS capabilities or
+  safe fallbacks. FreeBSD launchers use `KERN_PROC_PATHNAME`; generic POSIX
+  launchers resolve `argv[0]` through `PATH`; Termux uses its app-private
+  prefix for temporary extraction when needed.
+* Lower generated compiler requirements from mandatory C11 to portable C99.
+  Windows process/filesystem bridges avoid post-.NET-2 APIs so PowerShell 2
+  remains usable on Windows XP; `/Brepro` is used only when the linker reports
+  that capability. Windows onefile publication uses the same-volume,
+  no-replace `File.Move` path instead of an administrator-only hard-link tool.
+* Runtime-library probing no longer requires `ldd` when an exact accepted
+  shared-library candidate has already passed the native compile-and-run ABI
+  probe. ELF SONAME (or the macOS install name) inspection preserves the
+  loader-visible runtime filename when the candidate itself has another name;
+  macOS dylib output must remain relocatable through `@rpath`.
+* Release-source hashing accepts FreeBSD's native `sha256` command in addition
+  to GNU `sha256sum` and macOS `shasum`.
+
+=== Fixed
+
+* Keep onefile descendant containment on Windows XP without assuming the
+  newer `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` flag. When that flag is rejected,
+  an inherited-handle watchdog terminates the same Job Object after an abrupt
+  outer-process exit; normal completion also terminates the job explicitly.
+* Treat an inherited `TMPDIR=/tmp` as unavailable on Termux and consistently
+  fall back to the application-private prefix for both builds and extraction.
+
 == 1.1.1 - 2026-08-22
 
 === Changed

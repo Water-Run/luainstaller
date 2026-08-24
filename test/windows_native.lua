@@ -21,8 +21,9 @@ local path = require("luainstaller.path")
 local process = require("luainstaller.process")
 local platform = require("luainstaller.platform")
 local windows_host = platform.detectHost()
-assert(windows_host.arch == "x86_64",
-    "luainstaller 1.1 Windows tests require native x86_64")
+assert(windows_host.arch == "x86" or windows_host.arch == "x86_64"
+        or windows_host.arch == "arm" or windows_host.arch == "arm64",
+    "Windows tests require a recognized native architecture: " .. windows_host.arch)
 assert(platform.profile({ target_os = "windows" }))
 
 local binary_stdin = "\0\255A\nB"

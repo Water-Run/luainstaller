@@ -31,7 +31,11 @@ local COMPILE_TIMEOUT_SECONDS = 900
 local PROBE_TIMEOUT_SECONDS = 120
 -- VS 2019 16.11 can report C5105 from the Windows 10 SDK's own winbase.h.
 -- Keep project warnings strict while excluding that toolchain-header defect.
-local MSVC_COMPILE_FLAGS = { "/nologo", "/std:c11", "/W4", "/WX", "/wd5105", "/MT" }
+-- Generated sources intentionally stay within portable C99.  Do not require
+-- MSVC's much newer /std:c11 switch: Lua itself still builds with toolchains
+-- used for legacy Windows targets, including the XP-capable MinGW/MSVC era.
+local MSVC_COMPILE_FLAGS = { "/nologo", "/W4", "/WX", "/wd5105", "/MT" }
+local PORTABLE_C_FLAGS = { "-std=c99", "-Wall", "-Wextra" }
 local configured_timeout = tonumber(os.getenv("LUAI_CMD_TIMEOUT"))
 local function compileTimeout()
     if type(configured_timeout) == "number" and configured_timeout > 0 then
@@ -120,6 +124,48 @@ local function compilerFamily(command)
     return "cc"
 end
 
+local WINDOWS_MACHINES = {
+    x86 = "X86",
+    x86_64 = "X64",
+    arm = "ARM",
+    arm64 = "ARM64",
+}
+
+local function windowsMachine(arch)
+    return WINDOWS_MACHINES[platform.normalizeArch(arch)]
+end
+
+local function windowsVersionDefines(arch, family)
+    local normalized = platform.normalizeArch(arch)
+    -- Desktop x86/x64 artifacts use the XP API surface. Windows on ARM did
+    -- not exist on XP, so its first generally usable desktop baseline is 6.2.
+    local version = (normalized == "arm" or normalized == "arm64")
+        and "0x0602" or "0x0501"
+    if family == "msvc" then
+        return { "/D_WIN32_WINNT=" .. version, "/DWINVER=" .. version }
+    end
+    return { "-D_WIN32_WINNT=" .. version, "-DWINVER=" .. version }
+end
+
+local WINDOWS_SUBSYSTEM_VERSIONS = {
+    x86 = { major = "5", minor = "1", msvc = "5.01" },
+    x86_64 = { major = "5", minor = "2", msvc = "5.02" },
+    arm = { major = "6", minor = "2", msvc = "6.02" },
+    arm64 = { major = "6", minor = "2", msvc = "6.02" },
+}
+
+local function windowsSubsystemFlags(arch, family)
+    local version = WINDOWS_SUBSYSTEM_VERSIONS[platform.normalizeArch(arch)]
+    if not version then return nil end
+    if family == "msvc" then
+        return { "/SUBSYSTEM:CONSOLE," .. version.msvc }
+    end
+    return {
+        "-Wl,--major-subsystem-version," .. version.major
+            .. ",--minor-subsystem-version," .. version.minor,
+    }
+end
+
 --@description: Classify a compiler command into its flag family
 --@param command: string - Compiler command name or path
 --@return: string - "msvc", "clang", "gcc", or "cc"
@@ -157,6 +203,12 @@ local function whereProgram(name, environment)
     return nil
 end
 
+local function linkerSupportsBrepro(linker, environment)
+    if not linker then return false end
+    local _, output = process.outputCommand(linker, { "/?" }, environment)
+    return tostring(output):lower():find("/brepro", 1, true) ~= nil
+end
+
 local function compilerFromCommand(command, family, environment)
     local compiler = {
         cc = command,
@@ -169,11 +221,16 @@ local function compilerFromCommand(command, family, environment)
     if IS_WINDOWS and family == "msvc" then
         compiler.librarian = whereProgram("lib.exe", compiler.environment)
         compiler.dumpbin = whereProgram("dumpbin.exe", compiler.environment)
+        compiler.linker = whereProgram("link.exe", compiler.environment)
+        compiler.supports_brepro = linkerSupportsBrepro(
+            compiler.linker,
+            compiler.environment
+        )
     end
     return compiler
 end
 
-local function discoverMsvc()
+local function discoverMsvc(host)
     local program_files = os.getenv("ProgramFiles(x86)") or os.getenv("ProgramFiles")
     local vswhere = program_files and normalizePath(
         program_files .. "/Microsoft Visual Studio/Installer/vswhere.exe"
@@ -181,7 +238,6 @@ local function discoverMsvc()
     if not regularFile(vswhere) then return nil, "vswhere.exe was not found" end
     local ok, output = process.outputCommand(vswhere, {
         "-latest", "-prerelease", "-products", "*",
-        "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
         "-property", "installationPath",
     })
     local installation = ok and trimmed(output):match("[^\r\n]+") or nil
@@ -196,17 +252,39 @@ local function discoverMsvc()
         return nil, "Visual C++ tools version metadata is unavailable"
     end
     local tools_root = normalizePath(installation .. "/VC/Tools/MSVC/" .. version)
-    local binary_dir = normalizePath(tools_root .. "/bin/Hostx64/x64")
+    local target_arch = platform.normalizeArch(host and host.arch)
+    local target_dir = ({
+        x86 = "x86", x86_64 = "x64", arm = "arm", arm64 = "arm64",
+    })[target_arch]
+    if not target_dir then
+        return nil, "Visual C++ does not recognize the native architecture " .. target_arch
+    end
+    local binary_dir
+    for _, host_dir in ipairs({ "Host" .. target_dir, "Hostx64", "Hostx86" }) do
+        local candidate = normalizePath(tools_root .. "/bin/" .. host_dir .. "/" .. target_dir)
+        if regularFile(candidate .. "/cl.exe") then
+            binary_dir = candidate
+            break
+        end
+    end
+    if not binary_dir then
+        return nil, "Visual C++ tools for the native architecture are unavailable"
+    end
     local cc = normalizePath(binary_dir .. "/cl.exe")
     local librarian = normalizePath(binary_dir .. "/lib.exe")
     local dumpbin = normalizePath(binary_dir .. "/dumpbin.exe")
-    if not regularFile(cc) or not regularFile(librarian) or not regularFile(dumpbin) then
-        return nil, "Visual C++ x64 compiler tools are incomplete"
+    local linker = normalizePath(binary_dir .. "/link.exe")
+    if not regularFile(cc) or not regularFile(librarian)
+        or not regularFile(dumpbin) or not regularFile(linker) then
+        return nil, "Visual C++ compiler tools for " .. target_arch .. " are incomplete"
     end
     local sdk_ok, sdk_output = process.outputPowerShell(table.concat({
-        "$Root=[IO.Path]::Combine(${env:ProgramFiles(x86)},'Windows Kits','10','Include');",
-        "$Version=Get-ChildItem -LiteralPath $Root -Directory -ErrorAction Stop|",
-        "Where-Object{Test-Path -LiteralPath ([IO.Path]::Combine($_.FullName,'um','Windows.h'))}|",
+        "$Root=[IO.Path]::Combine([IO.Path]::Combine(",
+        "${env:ProgramFiles(x86)},'Windows Kits'),'10');",
+        "$Root=[IO.Path]::Combine($Root,'Include');",
+        "$Version=Get-ChildItem -LiteralPath $Root -ErrorAction Stop|",
+        "Where-Object{$_.PSIsContainer -and ",
+        "(Test-Path -LiteralPath ([IO.Path]::Combine($_.FullName,'um','Windows.h')))}|",
         "Sort-Object Name -Descending|Select-Object -First 1;",
         "if($null -eq $Version){exit 1};[Console]::Write($Version.Name)",
     }))
@@ -226,9 +304,9 @@ local function discoverMsvc()
             include_root .. "/winrt",
         }, ";"):gsub("/", "\\"),
         LIB = table.concat({
-            tools_root .. "/lib/x64",
-            library_root .. "/ucrt/x64",
-            library_root .. "/um/x64",
+            tools_root .. "/lib/" .. target_dir,
+            library_root .. "/ucrt/" .. target_dir,
+            library_root .. "/um/" .. target_dir,
         }, ";"):gsub("/", "\\"),
         PATH = (binary_dir .. ";" .. tostring(os.getenv("PATH") or "")):gsub("/", "\\"),
     }
@@ -238,6 +316,9 @@ local function discoverMsvc()
         environment = environment,
         librarian = librarian,
         dumpbin = dumpbin,
+        linker = linker,
+        supports_brepro = linkerSupportsBrepro(linker, environment),
+        target_arch = target_arch,
         discovery_source = "visual-studio",
     }
 end
@@ -260,7 +341,7 @@ local function discoverCompiler(opts, host)
                 return compilerFromCommand(name, family, {})
             end
         end
-        local msvc, discovery_err = discoverMsvc()
+        local msvc, discovery_err = discoverMsvc(host)
         if msvc then return msvc end
         return nil, makeError("ToolchainError", "A native Windows C compiler is required", {
             cause = discovery_err,
@@ -280,7 +361,9 @@ local function prefixFromInterpreter(interpreter)
         if IS_WINDOWS then
             located = whereProgram(interpreter, {})
         else
-            local ok, output = process.outputCommand("/bin/sh", {
+            -- Android/Termux has a POSIX shell on PATH but normally no
+            -- /bin/sh.  The command is fixed and argv remains validated.
+            local ok, output = process.outputCommand("sh", {
                 "-c", "command -v \"$1\"", "sh", interpreter,
             })
             located = ok and trimmed(output):match("[^\r\n]+") or nil
@@ -400,13 +483,33 @@ local function prefixCandidate(prefix, lua_version, source, config)
     local library_paths = {}
     local extensions
     if config.host.os == "windows" then
-        extensions = config.compiler_family == "msvc" and { ".lib", ".a" } or { ".a", ".lib" }
+        extensions = config.compiler_family == "msvc"
+            and { ".lib", ".dll.a", ".a" }
+            or { ".dll.a", ".a", ".lib" }
     elseif config.host.os == "macos" then
         extensions = { ".a", ".dylib", ".so" }
     else
         extensions = { ".so", ".a", ".dylib" }
     end
-    for _, directory in ipairs({ prefix .. "/lib", prefix .. "/lib64", prefix }) do
+    local library_directories = {
+        prefix .. "/lib",
+        prefix .. "/lib64",
+        prefix .. "/lib32",
+    }
+    local multiarch = {
+        x86 = "i386-linux-gnu",
+        x86_64 = "x86_64-linux-gnu",
+        arm = "arm-linux-gnueabihf",
+        arm64 = "aarch64-linux-gnu",
+        powerpc64le = "powerpc64le-linux-gnu",
+        riscv64 = "riscv64-linux-gnu",
+    }
+    local triplet = multiarch[platform.normalizeArch(config.host.arch)]
+    if triplet then
+        library_directories[#library_directories + 1] = prefix .. "/lib/" .. triplet
+    end
+    library_directories[#library_directories + 1] = prefix
+    for _, directory in ipairs(library_directories) do
         for _, name in ipairs(names) do
             for _, extension in ipairs(extensions) do
                 library_paths[#library_paths + 1] = directory .. "/lib" .. name .. extension
@@ -476,7 +579,7 @@ local function luarocksCandidate(lua_version, config)
         or luaNames(lua_version)
     local paths = {}
     for _, name in ipairs(names) do
-        for _, extension in ipairs({ ".lib", ".a", ".so", ".dylib" }) do
+        for _, extension in ipairs({ ".lib", ".dll.a", ".a", ".so", ".dylib" }) do
             paths[#paths + 1] = normalizePath(library_dir .. "/lib" .. name .. extension)
             paths[#paths + 1] = normalizePath(library_dir .. "/" .. name .. extension)
         end
@@ -531,7 +634,7 @@ local function pkgConfigCandidate(lua_version, config)
                 local library_paths = copyList(absolute_libraries)
                 if library_dir then
                     for _, library_name in ipairs(library_names) do
-                        for _, extension in ipairs({ ".so", ".a", ".dylib", ".lib" }) do
+                        for _, extension in ipairs({ ".so", ".a", ".dylib", ".lib", ".dll.a" }) do
                             library_paths[#library_paths + 1] = normalizePath(
                                 library_dir .. "/lib" .. library_name .. extension
                             )
@@ -547,6 +650,19 @@ local function pkgConfigCandidate(lua_version, config)
                     library_dir
                 )
                 if library_path then
+                    if native_profile.linkMode(library_path) == "static" then
+                        local static_ok, static_flags = process.outputCommand(
+                            "pkg-config",
+                            { "--static", "--cflags", "--libs", module_name }
+                        )
+                        if static_ok then
+                            local static_tokens, static_err = safeFlagTokens(
+                                trimmed(static_flags)
+                            )
+                            if static_err then return nil, static_err end
+                            if static_tokens then tokens = static_tokens end
+                        end
+                    end
                     return {
                         source = "pkg-config",
                         pkg_config_module = module_name,
@@ -647,9 +763,10 @@ local function cleanupProbeDirectory(directory)
 end
 
 local function candidateLinkArgs(config, candidate)
-    if candidate.flags then return copyList(candidate.flags) end
     local arguments = {}
-    if candidate.library_path then
+    if candidate.flags then
+        arguments = copyList(candidate.flags)
+    elseif candidate.library_path then
         local extension = candidate.library_path:lower():match("(%.[^.]+)$")
         if config.compiler_family == "msvc" then
             if extension == ".lib" then arguments[#arguments + 1] = candidate.library_path end
@@ -658,8 +775,19 @@ local function candidateLinkArgs(config, candidate)
         end
     end
     if config.host.os ~= "windows" then
-        arguments[#arguments + 1] = "-lm"
-        if config.host.os ~= "macos" then arguments[#arguments + 1] = "-ldl" end
+        for _, library in ipairs(config.profile.system_libraries or { "-lm" }) do
+            local present = false
+            for _, existing in ipairs(arguments) do
+                if existing == library then present = true break end
+            end
+            if not present then arguments[#arguments + 1] = library end
+        end
+    end
+    if native_profile.expectedLinkMode(config.profile, candidate) == "static"
+        and config.host.os ~= "windows" and config.host.os ~= "macos" then
+        -- Native Lua modules loaded by a statically linked interpreter resolve
+        -- the Lua C API from the main executable.
+        arguments[#arguments + 1] = "-Wl,-E"
     end
     return arguments
 end
@@ -698,11 +826,17 @@ local function generateMsvcImportLibrary(config, work_dir)
             cause = write_err,
         })
     end
+    local machine = windowsMachine(config.profile.target_arch)
+    if not machine then
+        return nil, makeError("ToolchainError", "Unsupported Windows linker architecture", {
+            target_arch = config.profile.target_arch,
+        })
+    end
     local made, make_output = process.outputCommand(config.librarian, {
         "/nologo",
         "/def:" .. definition_path:gsub("/", "\\"),
         "/out:" .. output_path:gsub("/", "\\"),
-        "/MACHINE:X64",
+        "/MACHINE:" .. machine,
     }, config.environment)
     if not made or not regularFile(output_path) then
         return nil, makeError("ToolchainError", "Cannot generate the Lua import library", {
@@ -712,13 +846,68 @@ local function generateMsvcImportLibrary(config, work_dir)
     return output_path
 end
 
+local function appendValues(target, values)
+    for _, value in ipairs(values or {}) do target[#target + 1] = value end
+end
+
+local function appendPortableCompileFlags(arguments)
+    appendValues(arguments, PORTABLE_C_FLAGS)
+end
+
+local function appendWindowsCompatibilityDefines(arguments, config)
+    if config.host and config.host.os == "windows" then
+        appendValues(arguments, windowsVersionDefines(
+            config.profile and config.profile.target_arch or config.host.arch,
+            config.compiler_family
+        ))
+    end
+end
+
+local function appendWindowsSubsystem(arguments, config)
+    if not config.host or config.host.os ~= "windows" then return true end
+    local flags = windowsSubsystemFlags(
+        config.profile and config.profile.target_arch or config.host.arch,
+        config.compiler_family
+    )
+    if not flags then return false end
+    appendValues(arguments, flags)
+    return true
+end
+
+local function appendMsvcReproducibleLink(arguments, config)
+    if config.supports_brepro then arguments[#arguments + 1] = "/Brepro" end
+end
+
+local function verifyMacosSharedRuntime(config, output_path)
+    if not config.host or config.host.os ~= "macos"
+        or config.link_mode ~= "shared" then
+        return true
+    end
+    local runtime_name = config.runtime_name
+    if type(runtime_name) ~= "string" or runtime_name == ""
+        or runtime_name ~= path.basename(runtime_name) then
+        return false, "the shared Lua dylib has no safe runtime filename"
+    end
+    local inspected, output = process.outputCommand(
+        "otool", { "-L", output_path }, { LC_ALL = "C" }
+    )
+    if not inspected then
+        return false, "cannot inspect the linked shared Lua dylib: " .. tostring(output)
+    end
+    local expected = "@rpath/" .. runtime_name
+    for line in tostring(output):gmatch("[^\r\n]+") do
+        local dependency = line:match("^%s*(.-)%s+%(compatibility version")
+        if dependency == expected then return true end
+    end
+    return false, "the linked shared Lua dylib is not relocatable as " .. expected
+end
+
 function M.compile(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs(MSVC_COMPILE_FLAGS) do
-            arguments[#arguments + 1] = value
-        end
+        appendValues(arguments, MSVC_COMPILE_FLAGS)
+        appendWindowsCompatibilityDefines(arguments, config)
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
         local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
         arguments[#arguments + 1] = "/I" .. config.include_dir:gsub("/", "\\")
@@ -742,12 +931,16 @@ function M.compile(config, source_path, output_path, opts)
         end
         arguments[#arguments + 1] = "/link"
         arguments[#arguments + 1] = "/INCREMENTAL:NO"
-        arguments[#arguments + 1] = "/Brepro"
-        arguments[#arguments + 1] = "/MACHINE:X64"
-    else
-        for _, value in ipairs({ "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic" }) do
-            arguments[#arguments + 1] = value
+        appendMsvcReproducibleLink(arguments, config)
+        local machine = windowsMachine(config.profile.target_arch)
+        if not machine then return false, "unsupported Windows linker architecture" end
+        arguments[#arguments + 1] = "/MACHINE:" .. machine
+        if not appendWindowsSubsystem(arguments, config) then
+            return false, "unsupported Windows subsystem architecture"
         end
+    else
+        appendPortableCompileFlags(arguments)
+        appendWindowsCompatibilityDefines(arguments, config)
         if config.include_dir then arguments[#arguments + 1] = "-I" .. config.include_dir end
         arguments[#arguments + 1] = source_path
         arguments[#arguments + 1] = "-o"
@@ -756,11 +949,18 @@ function M.compile(config, source_path, output_path, opts)
             arguments[#arguments + 1] = "-Wl,-rpath," .. opts.rpath
         end
         for _, value in ipairs(config.link_args or {}) do arguments[#arguments + 1] = value end
+        if not appendWindowsSubsystem(arguments, config) then
+            return false, "unsupported Windows subsystem architecture"
+        end
     end
     local ok, output = process.outputCommand(config.cc, arguments, config.environment, {
         timeout_seconds = compileTimeout(),
     })
     local descriptor = process.command(config.cc, arguments)
+    if ok then
+        local runtime_ok, runtime_output = verifyMacosSharedRuntime(config, output_path)
+        if not runtime_ok then return false, runtime_output, descriptor end
+    end
     return ok, output, descriptor
 end
 
@@ -772,9 +972,8 @@ function M.compileNativeModule(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs(MSVC_COMPILE_FLAGS) do
-            arguments[#arguments + 1] = value
-        end
+        appendValues(arguments, MSVC_COMPILE_FLAGS)
+        appendWindowsCompatibilityDefines(arguments, config)
         arguments[#arguments + 1] = "/LD"
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
         local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
@@ -799,12 +998,13 @@ function M.compileNativeModule(config, source_path, output_path, opts)
         arguments[#arguments + 1] = "/link"
         arguments[#arguments + 1] = "/DLL"
         arguments[#arguments + 1] = "/INCREMENTAL:NO"
-        arguments[#arguments + 1] = "/Brepro"
-        arguments[#arguments + 1] = "/MACHINE:X64"
+        appendMsvcReproducibleLink(arguments, config)
+        local machine = windowsMachine(config.profile.target_arch)
+        if not machine then return false, "unsupported Windows linker architecture" end
+        arguments[#arguments + 1] = "/MACHINE:" .. machine
     else
-        for _, value in ipairs({ "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic" }) do
-            arguments[#arguments + 1] = value
-        end
+        appendPortableCompileFlags(arguments)
+        appendWindowsCompatibilityDefines(arguments, config)
         if config.host.os == "macos" then
             arguments[#arguments + 1] = "-bundle"
             arguments[#arguments + 1] = "-undefined"
@@ -839,6 +1039,11 @@ function M.resolveCompiler(opts)
     local compiler, compiler_err = discoverCompiler(opts, host)
     if not compiler then return nil, compiler_err end
     compiler.host = host
+    compiler.profile = assert(platform.profile({
+        host = host,
+        target_os = host.os,
+        target_arch = host.arch,
+    }))
     return compiler
 end
 
@@ -846,9 +1051,8 @@ function M.compileStandalone(config, source_path, output_path, opts)
     opts = opts or {}
     local arguments = {}
     if config.compiler_family == "msvc" then
-        for _, value in ipairs(MSVC_COMPILE_FLAGS) do
-            arguments[#arguments + 1] = value
-        end
+        appendValues(arguments, MSVC_COMPILE_FLAGS)
+        appendWindowsCompatibilityDefines(arguments, config)
         if config.host and config.host.os == "windows" then
             arguments[#arguments + 1] = "/D_CRT_SECURE_NO_WARNINGS"
         end
@@ -861,15 +1065,19 @@ function M.compileStandalone(config, source_path, output_path, opts)
         arguments[#arguments + 1] = "/Fe:" .. output_path:gsub("/", "\\")
         arguments[#arguments + 1] = "/link"
         arguments[#arguments + 1] = "/INCREMENTAL:NO"
-        arguments[#arguments + 1] = "/Brepro"
-        arguments[#arguments + 1] = "/MACHINE:X64"
+        appendMsvcReproducibleLink(arguments, config)
+        local machine = windowsMachine(config.profile.target_arch)
+        if not machine then return false, "unsupported Windows linker architecture" end
+        arguments[#arguments + 1] = "/MACHINE:" .. machine
+        if not appendWindowsSubsystem(arguments, config) then
+            return false, "unsupported Windows subsystem architecture"
+        end
         if config.host and config.host.os == "windows" then
             arguments[#arguments + 1] = "Advapi32.lib"
         end
     else
-        for _, value in ipairs({ "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic" }) do
-            arguments[#arguments + 1] = value
-        end
+        appendPortableCompileFlags(arguments)
+        appendWindowsCompatibilityDefines(arguments, config)
         arguments[#arguments + 1] = source_path
         arguments[#arguments + 1] = "-o"
         arguments[#arguments + 1] = output_path
@@ -877,6 +1085,9 @@ function M.compileStandalone(config, source_path, output_path, opts)
             arguments[#arguments + 1] = "-static-libgcc"
             arguments[#arguments + 1] = "-Wl,--no-insert-timestamp"
             arguments[#arguments + 1] = "-ladvapi32"
+        end
+        if not appendWindowsSubsystem(arguments, config) then
+            return false, "unsupported Windows subsystem architecture"
         end
     end
     local ok, output = process.outputCommand(config.cc, arguments, config.environment, {
@@ -920,6 +1131,53 @@ local function findLinkedRuntime(config, executable, environment)
         end
     end
     return nil, output
+end
+
+local function sharedRuntimeInstallName(config, candidate)
+    local library_path = candidate and candidate.library_path
+    if type(library_path) ~= "string" or library_path == "" then return nil end
+    if config.host.os == "macos" then
+        local ok, output = process.outputCommand(
+            "otool", { "-D", library_path }, { LC_ALL = "C" }
+        )
+        if ok then
+            local first = true
+            for line in tostring(output):gmatch("[^\r\n]+") do
+                if first then
+                    first = false
+                else
+                    local install_name = trimmed(line)
+                    local name = path.basename(install_name)
+                    if name ~= "" and not name:find("[\\/]", 1) then return name end
+                end
+            end
+        end
+        return path.basename(library_path)
+    end
+    for _, inspection in ipairs({
+        { "readelf", { "-d", library_path } },
+        { "llvm-readelf", { "-d", library_path } },
+        { "objdump", { "-p", library_path } },
+        { "llvm-objdump", { "-p", library_path } },
+    }) do
+        local ok, output = process.outputCommand(
+            inspection[1], inspection[2], { LC_ALL = "C" }
+        )
+        if ok then
+            for line in tostring(output):gmatch("[^\r\n]+") do
+                local name = line:match("%(SONAME%)%s+Library soname:%s+%[([^%]]+)%]")
+                    or line:match("^%s*SONAME%s+([^%s]+)")
+                if name and name ~= "" and name == path.basename(name)
+                    and not name:find("[%c/\\]") then
+                    return name
+                end
+            end
+        end
+    end
+    -- A shared object without DT_SONAME is loaded under the basename supplied
+    -- to the linker. This is also the least-surprising fallback when a very
+    -- small native environment has no object-file inspection utility.
+    return path.basename(library_path)
 end
 
 local function verifyCandidate(config, candidate)
@@ -999,11 +1257,10 @@ local function verifyCandidate(config, candidate)
             end
         end
     end
-    local environment = {}
-    if config.host.os == "linux" and config.library_dir then
-        environment.LD_LIBRARY_PATH = config.library_dir
-    elseif config.host.os == "macos" and config.library_dir then
-        environment.DYLD_LIBRARY_PATH = config.library_dir
+    local environment = { LC_ALL = "C" }
+    local library_path_var = config.profile.runtime_library_path_var
+    if library_path_var and config.library_dir then
+        environment[library_path_var] = config.library_dir
     end
     local ran, run_output = process.outputCommand(executable_path, {}, environment, {
         timeout_seconds = probeTimeout(),
@@ -1020,7 +1277,26 @@ local function verifyCandidate(config, candidate)
         executable_path,
         environment
     )
-    local expected_link_mode = native_profile.expectedLinkMode(config.profile)
+    local expected_link_mode = native_profile.expectedLinkMode(config.profile, candidate)
+    -- ldd is optional on small Android/Termux installations and its output is
+    -- not standardized across the BSDs.  The exact accepted library candidate
+    -- remains a valid identity fallback after the compile-and-run ABI probe.
+    if expected_link_mode == "shared" and not runtime_path
+        and candidate.library_path
+        and native_profile.linkMode(candidate.library_path) == "shared" then
+        local fallback_path = candidate.library_path
+        if fs.pathType(fallback_path) == "reparse" then
+            fallback_path = resolveContainedRegularFile(
+                fallback_path,
+                candidate.library_dir or path.dirname(fallback_path)
+            )
+        end
+        runtime_path = fallback_path
+        local install_name = sharedRuntimeInstallName(config, candidate)
+        runtime_identity = install_name and normalizePath(
+            path.dirname(candidate.library_path) .. "/" .. install_name
+        ) or candidate.library_path
+    end
     if runtime_path then
         local runtime_ok, runtime_err = native_profile.acceptsLibrary(
             config.profile,
@@ -1048,6 +1324,12 @@ local function verifyCandidate(config, candidate)
     if runtime_path then
         config.runtime_path = runtime_path
         config.runtime_name = path.basename(runtime_identity or runtime_path)
+    end
+    if not expected_link_mode then
+        cleanupProbeDirectory(directory)
+        return nil, makeError("ToolchainError", "Cannot determine the Lua runtime link mode", {
+            library_path = candidate.library_path,
+        })
     end
     config.link_mode = expected_link_mode
     config.static_library_path = expected_link_mode == "static"
@@ -1132,6 +1414,8 @@ function M.resolve(opts)
     config.environment = compiler.environment or {}
     config.librarian = compiler.librarian
     config.dumpbin = compiler.dumpbin
+    config.linker = compiler.linker
+    config.supports_brepro = compiler.supports_brepro
 
     local failures = {}
     for _, candidate in ipairs(candidates) do

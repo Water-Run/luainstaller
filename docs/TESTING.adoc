@@ -7,10 +7,12 @@
 xref:../README.adoc#documentation-index[Back to documentation index]
 
 Required release evidence comes from the GitHub Actions workflow: native Linux
-x86_64 builds and native Windows x86_64 builds with MSVC and the Windows SDK.
-GitHub-hosted runners are accepted. Supplemental lab and local runs broaden
-coverage but are not release prerequisites. Wine, MinGW, and cross-compilers
-do not substitute for the Windows MSVC job.
+x86_64, a native 32-bit Lua/compiler/library/artifact path on Linux, and native
+Windows x86_64 with MSVC and the Windows SDK. GitHub-hosted runners are accepted.
+Strict i686/x86_64 MinGW compilation, PE dependency/API inspection and the
+legacy Job Object watchdog contract check the generated Windows XP surface,
+but these checks do not substitute for the Windows MSVC job. Native FreeBSD,
+Android/Termux, Linux ARM64 and macOS runs broaden physical-host evidence.
 
 toc::[]
 
@@ -32,7 +34,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.1.1-1.rockspec
+luarocks lint luainstaller-1.3.0-1.rockspec
 ----
 
 [cols="2,3",options="header"]
@@ -52,7 +54,9 @@ luarocks lint luainstaller-1.1.1-1.rockspec
 |Public documentation contracts
 
 |`test/production_edges.lua`
-|Boundary and safety-related behavior
+|Boundary and safety-related behavior, static/shared Lua fallback, optional
+FreeBSD cross-compilation, executable Termux fallback probes, and x86/x86_64
+XP-targeted generated-C/PE audits
 
 |`test/build_interruption.lua`
 |Relayed SIGINT compiler shutdown, bounded SIGKILL descendants, dead-owner
@@ -111,8 +115,8 @@ install, invoking commands outside the checkout, and running artifacts with
 |===
 
 Archives are verified with SHA-256 before extract. The POSIX runner accepts
-either `sha256sum` or the macOS-provided `shasum`; a missing verifier is a hard
-failure. Built Lua and LuaRocks prefixes carry exact cache-schema markers that
+`sha256sum`, the macOS-provided `shasum`, or FreeBSD `sha256`; a missing
+verifier is a hard failure. Built Lua and LuaRocks prefixes carry exact cache-schema markers that
 bind the pinned patch archive, build recipe, host class, and compiler. A cache
 with a missing or different marker is rebuilt rather than accepted by ABI name
 alone.
@@ -194,8 +198,9 @@ powershell.exe -NoLogo -NoProfile -NonInteractive `
   -HostLabel <label>
 ----
 
-A release requires all five versions in both required GitHub Actions jobs:
-Linux x86_64 and Windows x86_64 with MSVC. Every POSIX version runs the
+A release requires all five versions in both full-matrix GitHub Actions jobs:
+Linux x86_64 and Windows x86_64 with MSVC, plus the native Linux x86 Lua 5.4
+job. Every full-matrix POSIX version runs the
 complete local, native, interruption, onefile, license/relinking,
 reproducibility, production-edge, and smoke gates. Every Windows version runs
 all applicable native Windows gates, including lifecycle, license/relinking,
@@ -217,12 +222,16 @@ matches the interpreter's exact patch banner to the pinned source digest.
 |Linux
 |x86_64
 |`ubuntu-latest`
+
+|Linux 32-bit Lua, toolchain and artifacts
+|x86
+|`ubuntu-latest` with the `linux-x86-native` job
 |===
 
-Supplemental compatibility runs currently cover Debian 13 x86_64, Rocky Linux
-10 x86_64, Ubuntu 24.04 LTS ARM64, and macOS ARM64. These runs are retained as
-useful additional evidence but do not block a release when the required CI
-jobs are green.
+Supplemental compatibility targets include Debian and Rocky Linux x86_64,
+Ubuntu ARM64, macOS ARM64, FreeBSD x86_64, physical Windows XP, and
+Android/Termux. Their retained logs are useful additional evidence but do not
+replace the required CI jobs and are not release prerequisites.
 
 [#testing-orchestration]
 == Orchestration (maintainers)
@@ -231,6 +240,8 @@ jobs are green.
 ----
 sh tools/remote-test-linux.sh
 MAC_HOST=<host alias from local lab config> sh tools/remote-test-macos.sh
+LUAI_TEST_LUA=lua54 sh tools/test-portable-host.sh  # FreeBSD
+LUAI_TEST_LUA=lua sh tools/test-portable-host.sh    # Termux
 ----
 
 On Windows, CI and local native environments run
@@ -280,8 +291,8 @@ Summary and logs are written to:
 == Release checklist
 
 . rockspec lint and isolated install
-. Green `local-suites`, five-entry Linux matrix, and five-entry Windows/MSVC
-  matrix in GitHub Actions
+. Green `local-suites`, five-entry Linux matrix, five-entry Windows/MSVC
+  matrix, and native Linux x86 job in GitHub Actions
 . Production sources parse on all five pinned versions
 . Every required local suite above without required skips
 . Directory and single-file runs with `PATH` set to a private empty directory,
@@ -290,6 +301,11 @@ Summary and logs are written to:
 . Byte-identical cross-checkout artifacts and bundled-license relinking checks
 . Native modules and system libraries inspected on both required CI runner
   classes
+. i686 and x86_64 MinGW strict compilation of the exact generated onefile
+  extractor, XP PE subsystem/import closure, and legacy watchdog source
+  contract
+. Supplemental FreeBSD and Termux portable-host logs, when available, clearly
+  identified as non-blocking evidence
 . Documentation does not prescribe cross-build or a device allowlist
 . `git diff --check` and clean-checkout review
 
