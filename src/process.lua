@@ -10,7 +10,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-08-16
+    2026-08-24
 ]]
 
 local M = {}
@@ -77,7 +77,7 @@ end
 -- CreateProcess-style argument quoting (backslash/double-quote rules). This
 -- is NOT safe for cmd.exe command lines: cmd.exe additionally interprets
 -- % ^ & | < > and () metacharacters. Product data paths use the PowerShell
--- ProcessStartInfo backend (outputCommand) or base64-decoded PowerShell
+-- encoded PowerShell process backend (outputCommand) or base64-decoded PowerShell
 -- expressions, never a raw cmd.exe string built from external data. Callers
 -- that build raw strings for M.output on Windows remain responsible for
 -- cmd.exe quoting.
@@ -474,6 +474,8 @@ local function windowsOutputCommand(validated, opts)
     end
     local timeout_seconds = type(opts.timeout_seconds) == "number"
         and opts.timeout_seconds > 0 and opts.timeout_seconds or nil
+    local timeout_milliseconds = timeout_seconds
+        and math.floor(timeout_seconds * 1000) or 0
     local script = {
         "$ErrorActionPreference='Stop'",
         "$Start=New-Object System.Diagnostics.ProcessStartInfo",
@@ -481,34 +483,65 @@ local function windowsOutputCommand(validated, opts)
         "$Start.Arguments=" .. decodeExpression(table.concat(quoted_arguments, " ")),
         "$Start.UseShellExecute=$false",
         "$Start.CreateNoWindow=$true",
-        -- Inherit the outer PowerShell stdout/stderr handles. This streams
-        -- both channels directly to io.popen, avoids redirected-pipe
-        -- deadlocks, and works on the .NET 2.0 API surface used by
-        -- PowerShell 2 on Windows XP.
-        "$Start.RedirectStandardOutput=$false",
-        "$Start.RedirectStandardError=$false",
+        "$Start.RedirectStandardOutput=$true",
+        "$Start.RedirectStandardError=$true",
         "$Utf8=New-Object Text.UTF8Encoding($false)",
+        "$TimeoutMs=" .. tostring(timeout_milliseconds),
+        "$TimedOut=$false",
     }
     for _, name in ipairs(sortedKeys(validated.environment)) do
         script[#script + 1] = "$Start.EnvironmentVariables[(" .. decodeExpression(name)
             .. ")]=" .. decodeExpression(validated.environment[name])
     end
-    script[#script + 1] = "try{$Child=New-Object System.Diagnostics.Process;$Child.StartInfo=$Start;"
-        .. "if(-not $Child.Start()){exit 127};"
-    if timeout_seconds then
-        script[#script + 1] = "if(-not $Child.WaitForExit("
-            .. tostring(math.floor(timeout_seconds * 1000)) .. ")){"
-            .. "$TaskKill=[IO.Path]::Combine([IO.Path]::Combine("
-            .. "$env:SystemRoot,'System32'),'taskkill.exe');"
-            .. "if([IO.File]::Exists($TaskKill)){& $TaskKill /PID $Child.Id /T /F | Out-Null};"
-            .. "if(-not $Child.HasExited){$Child.Kill()};$Child.WaitForExit();"
-            .. "[Console]::OutputEncoding=$Utf8;"
-            .. "[Console]::Error.Write('luainstaller: command timed out after "
-            .. tostring(timeout_seconds) .. "s');exit 124};"
-    else
-        script[#script + 1] = "$Child.WaitForExit();"
-    end
-    script[#script + 1] = "$Code=$Child.ExitCode;exit $Code}"
+    -- BeginRead and WaitAny are available in .NET 2.0. Reading both raw
+    -- streams concurrently preserves exact bytes without the pipe deadlock of
+    -- sequential ReadToEnd, or a post-XP task-based async API.
+    script[#script + 1] = "try{$Child=New-Object System.Diagnostics.Process;"
+        .. "$Child.StartInfo=$Start;if(-not $Child.Start()){exit 127};"
+        .. "$OutStream=$Child.StandardOutput.BaseStream;"
+        .. "$ErrStream=$Child.StandardError.BaseStream;"
+        .. "$OutBuffer=New-Object byte[] 65536;"
+        .. "$ErrBuffer=New-Object byte[] 65536;"
+        .. "$OutBytes=New-Object IO.MemoryStream;"
+        .. "$ErrBytes=New-Object IO.MemoryStream;"
+        .. "$OutRead=$OutStream.BeginRead($OutBuffer,0,$OutBuffer.Length,$null,$null);"
+        .. "$ErrRead=$ErrStream.BeginRead($ErrBuffer,0,$ErrBuffer.Length,$null,$null);"
+        .. "$OutDone=$false;$ErrDone=$false;$Watch=[Diagnostics.Stopwatch]::StartNew();"
+        .. "$KillTree={"
+        .. "$TaskKill=[IO.Path]::Combine([IO.Path]::Combine("
+        .. "$env:SystemRoot,'System32'),'taskkill.exe');"
+        .. "if([IO.File]::Exists($TaskKill)){& $TaskKill /PID $Child.Id /T /F | Out-Null};"
+        .. "if(-not $Child.HasExited){$Child.Kill()};$Child.WaitForExit()};"
+        .. "while(-not($OutDone -and $ErrDone)){"
+        .. "[Threading.WaitHandle[]]$Handles=@();$OutIndex=-1;$ErrIndex=-1;"
+        .. "if(-not $OutDone){$OutIndex=$Handles.Length;"
+        .. "$OutWait=$OutRead.AsyncWaitHandle;$Handles+=$OutWait};"
+        .. "if(-not $ErrDone){$ErrIndex=$Handles.Length;"
+        .. "$ErrWait=$ErrRead.AsyncWaitHandle;$Handles+=$ErrWait};"
+        .. "$Signaled=[Threading.WaitHandle]::WaitAny($Handles,100);"
+        .. "if($Signaled -eq $OutIndex){$Count=$OutStream.EndRead($OutRead);"
+        .. "$OutWait.Close();if($Count -eq 0){$OutDone=$true}else{"
+        .. "$OutBytes.Write($OutBuffer,0,$Count);"
+        .. "$OutRead=$OutStream.BeginRead($OutBuffer,0,$OutBuffer.Length,$null,$null)}}"
+        .. "elseif($Signaled -eq $ErrIndex){$Count=$ErrStream.EndRead($ErrRead);"
+        .. "$ErrWait.Close();if($Count -eq 0){$ErrDone=$true}else{"
+        .. "$ErrBytes.Write($ErrBuffer,0,$Count);"
+        .. "$ErrRead=$ErrStream.BeginRead($ErrBuffer,0,$ErrBuffer.Length,$null,$null)}};"
+        .. "if($TimeoutMs -gt 0 -and -not $TimedOut -and "
+        .. "$Watch.ElapsedMilliseconds -ge $TimeoutMs){& $KillTree;$TimedOut=$true}};"
+        .. "if(-not $Child.HasExited){if($TimeoutMs -gt 0){"
+        .. "$Remaining=$TimeoutMs-[int]$Watch.ElapsedMilliseconds;"
+        .. "if($Remaining -lt 0){$Remaining=0};"
+        .. "if($Remaining -eq 0 -or -not $Child.WaitForExit($Remaining)){"
+        .. "& $KillTree;$TimedOut=$true}}else{$Child.WaitForExit()}};"
+        .. "$Child.WaitForExit();"
+        .. "$Stdout=[Text.Encoding]::Default.GetString($OutBytes.ToArray());"
+        .. "$Stderr=[Text.Encoding]::Default.GetString($ErrBytes.ToArray());"
+        .. "$Code=$Child.ExitCode;$OutBytes.Dispose();$ErrBytes.Dispose();"
+        .. "[Console]::OutputEncoding=$Utf8;[Console]::Out.Write($Stdout);"
+        .. "if($TimedOut){[Console]::Error.Write('luainstaller: command timed out after "
+        .. tostring(timeout_seconds or 0) .. "s');exit 124};"
+        .. "[Console]::Error.Write($Stderr);exit $Code}"
         .. "catch{[Console]::OutputEncoding=$Utf8;"
         .. "[Console]::Error.Write($_.Exception.Message);exit 127}"
     return M.outputPowerShell(table.concat(script, ";"))

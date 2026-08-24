@@ -86,18 +86,7 @@ if exact_release or source_sha256 then
     assert(tonumber(release_major) == info.major
             and tonumber(release_minor) == info.minor,
         "matrix exact Lua release does not match the running ABI")
-    local banner_ok, banner
-    if package.config:sub(1, 1) == "\\" then
-        -- The Windows argv backend deliberately inherits the child's standard
-        -- handles so long-running compilers cannot deadlock on redirected
-        -- pipes. Lua writes its version banner to stderr, so use the test
-        -- harness's cmd.exe-level 2>&1 capture for this small, fixed command.
-        banner_ok, banner = harness.command_result(
-            harness.command(interpreter, { "-v" })
-        )
-    else
-        banner_ok, banner = process.outputCommand(interpreter, { "-v" })
-    end
+    local banner_ok, banner = process.outputCommand(interpreter, { "-v" })
     assert(banner_ok, banner)
     local expected_prefix = "Lua " .. exact_release
     assert(banner:sub(1, #expected_prefix) == expected_prefix

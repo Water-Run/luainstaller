@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-08-22
+    2026-08-24
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -590,6 +590,14 @@ test("Windows process primitives document cmd.exe quoting hazards", function()
         "Windows timeout fallback requires a post-.NET-2 Path.Combine overload")
     assert(process_source:find("taskkill.exe", 1, true),
         "Windows timeout fallback does not terminate child trees on legacy hosts")
+    for _, capture_contract in ipairs({
+        "RedirectStandardOutput=$true", "RedirectStandardError=$true",
+        "BeginRead", "[Threading.WaitHandle]::WaitAny",
+    }) do
+        assert(process_source:find(capture_contract, 1, true),
+            "Windows process backend does not capture child output safely: "
+                .. capture_contract)
+    end
 end)
 
 test("result and helper contracts keep strict shapes", function()
