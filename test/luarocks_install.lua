@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-08-22
+    2026-08-24
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -81,7 +81,7 @@ assert(runtime_output:find("scripts: 1", 1, true), runtime_output)
 assert(runtime_output:find(path.join(project, "greeting.lua"), 1, true), runtime_output)
 local built, build_output = installedCommand(full, {
     "build", "--dir", path.join(project, "main.lua"),
-    "-o", out, "--max-deps", "20",
+    "-o", out, "--max-deps", "20", "--verbose",
 })
 assert(built, build_output)
 assert(harness.read_file(path.join(out, ".luai/licenses/Lua-MIT.txt"))

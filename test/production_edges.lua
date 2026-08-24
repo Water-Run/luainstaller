@@ -3891,6 +3891,11 @@ test("target launcher enforces the selected Lua ABI", function()
             source_name .. " launcher has no generic POSIX PATH fallback")
         assert(source:find("#define _WIN32_WINNT 0x0501", 1, true),
             source_name .. " launcher does not declare the Windows XP API baseline")
+        assert(source:find("#ifdef _WIN32\n    (void)arg0;", 1, true),
+            source_name .. " launcher does not consume the Windows-only fallback argument")
+        assert(not source:find(
+            "#ifndef _WIN32\n    return luai_executable_from_argv0", 1, true
+        ), source_name .. " launcher leaves an unreachable POSIX tail in the Windows branch")
     end
 
     if package.config:sub(1, 1) == "/" then

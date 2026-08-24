@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-08-22
+    2026-08-24
 ]]
 
 local function localFileExists(path)
@@ -477,11 +477,27 @@ local function parseActionOptions(parser, action)
     return opts
 end
 
-local function structuredErrorText(result)
+local function structuredErrorText(result, verbose)
     local err = result and result.error or {}
     local err_type = err.type or "LuaInstallerError"
     local message = err.message or "operation failed"
-    return string.format("%s: %s", err_type, message)
+    local text = string.format("%s: %s", err_type, message)
+    if not verbose then return text end
+    local details = {}
+    for _, item in ipairs({
+        { "command", err.command },
+        { "output", err.output },
+        { "cause", err.cause },
+    }) do
+        local value = item[2]
+        if type(value) == "string" and value ~= "" then
+            details[#details + 1] = item[1] .. ": " .. value:gsub("%s+$", "")
+        end
+    end
+    if #details > 0 then
+        text = text .. "\n" .. table.concat(details, "\n")
+    end
+    return text
 end
 
 local function renderClassicVerboseTrace(result)
@@ -668,9 +684,9 @@ local function runAction(style, ui, parser, action)
     end
 
     if style == "modern" then
-        writeModernError(ui, structuredErrorText(result))
+        writeModernError(ui, structuredErrorText(result, opts.verbose))
     else
-        writeClassicError(structuredErrorText(result))
+        writeClassicError(structuredErrorText(result, opts.verbose))
     end
     return result and result.error and result.error.type == "InterruptedError" and 130 or 1
 end

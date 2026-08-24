@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-29
+    2026-08-24
 ]]
 
 local cgen = require("luainstaller.cgen")
@@ -140,10 +140,12 @@ static int luai_executable_from_argv0(char *out, size_t out_size, const char *ar
 
 static int luai_executable_path(char *out, size_t out_size, const char *arg0) {
 #ifdef _WIN32
+    (void)arg0;
     DWORD length = GetModuleFileNameA(NULL, out, (DWORD)out_size);
     if (length == 0 || (size_t)length >= out_size) return -1;
     return 0;
-#elif defined(__APPLE__)
+#else
+#if defined(__APPLE__)
     char raw[4096];
     uint32_t size = (uint32_t)sizeof(raw);
     if (_NSGetExecutablePath(raw, &size) != 0) return -1;
@@ -159,15 +161,8 @@ static int luai_executable_path(char *out, size_t out_size, const char *arg0) {
         out[length] = '\0';
         return 0;
     }
-#else
-    (void)out;
-    (void)out_size;
 #endif
-#ifndef _WIN32
     return luai_executable_from_argv0(out, out_size, arg0);
-#else
-    (void)arg0;
-    return -1;
 #endif
 }
 

@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-24
 Updated:
-    2026-07-29
+    2026-08-24
 ]]
 
 package.preload["luainstaller.lua_abi"] = function() return dofile("src/lua_abi.lua") end
@@ -113,6 +113,34 @@ code, out, err = run_cli("luainstaller", { "engines" }, { color = false })
 assert(code == 1)
 assert(out == "")
 assert_contains(err, "error: unknown luainstaller command: engines")
+
+local api = require("luainstaller")
+local original_bundle = api.bundle
+api.bundle = function()
+    return {
+        ok = false,
+        error = {
+            type = "CompilationFailedError",
+            message = "diagnostic fixture",
+            command = "cc fixture.c",
+            output = "compiler diagnostic fixture\n",
+        },
+    }
+end
+code, out, err = run_cli("luainstaller", {
+    "build", "test/single_file/01_hello_luainstaller.lua",
+}, { color = false })
+assert(code == 1)
+assert(out == "")
+assert_not_contains(err, "cc fixture.c")
+code, out, err = run_cli("luainstaller", {
+    "build", "test/single_file/01_hello_luainstaller.lua", "--verbose",
+}, { color = false })
+api.bundle = original_bundle
+assert(code == 1)
+assert(out == "")
+assert_contains(err, "command: cc fixture.c")
+assert_contains(err, "output: compiler diagnostic fixture")
 
 code, out, err = run_cli("luai", {
     "-a",
