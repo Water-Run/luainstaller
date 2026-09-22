@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-08-24
+    2026-09-22
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -5300,6 +5300,7 @@ test("remote scripts are pinned and non-destructive", function()
     assert(windows_matrix:find("Invoke-Native $luac @('-p'", 1, true),
         "Windows matrix does not parse sources and tests with the selected luac")
     for _, suite in ipairs({
+        "test/standalone_install.lua",
         "test/distribution_licenses.lua",
         "test/reproducible_artifacts.lua",
         "test/production_edges.lua",
@@ -5310,6 +5311,7 @@ test("remote scripts are pinned and non-destructive", function()
     end
     for _, suite in ipairs({
         "'release_docs_contract.lua'",
+        "'standalone_install.lua'",
         "'distribution_licenses.lua'",
         "'reproducible_artifacts.lua'",
     }) do
@@ -5322,12 +5324,16 @@ test("remote scripts are pinned and non-destructive", function()
         "POSIX matrix cannot safely target one pinned release for diagnosis")
     assert(posix_matrix:find("LUAI_LUA_RELEASE", 1, true),
         "POSIX matrix does not publish the exact Lua patch release to tests")
-    assert(posix_matrix:find("find src test tools -type f -name '*.lua'", 1, true),
+    assert(posix_matrix:find("find src test tools bin -type f -name '*.lua'", 1, true),
         "POSIX matrix does not parse every shipped Lua source with exact luac")
+    assert(posix_matrix:find('"$luac" -p luainstaller.lua', 1, true),
+        "POSIX matrix does not parse the root source loader with exact luac")
     assert(windows_matrix:find("LUAI_LUA_RELEASE", 1, true),
         "Windows matrix does not publish the exact Lua patch release to tests")
-    assert(windows_matrix:find("@('src','test','tools')", 1, true),
+    assert(windows_matrix:find("@('src','test','tools','bin')", 1, true),
         "Windows matrix does not parse every shipped Lua source with exact luac")
+    assert(windows_matrix:find("Invoke-Native $luac @('-p','luainstaller.lua')", 1, true),
+        "Windows matrix does not parse the root source loader with exact luac")
     assert(posix_matrix:find(
         "245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37",
         1,
