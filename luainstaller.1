@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "August 2026" "luainstaller 1.3.0" "User Commands"
+.TH LUAINSTALLER 1 "September 2026" "luainstaller 1.4.0" "User Commands"
 .SH NAME
 luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
@@ -290,7 +290,16 @@ application failure returns nonzero.
 luarocks install luainstaller
 .fi
 .PP
-LuaRocks is the supported installation path. Package metadata requires Lua
+LuaRocks is optional. From an extracted source tree, install offline into a
+new dedicated directory with an existing parent:
+.nf
+lua tools/install.lua --prefix /path/to/luainstaller
+.fi
+.PP
+Add its bin directory to PATH; Windows uses luai.cmd and luainstaller.cmd.
+Source use also supports lua bin/luai.lua and lua bin/luainstaller.lua.
+See docs/INSTALL.adoc for library use, relocation and removal.
+Package metadata requires Lua
 versions at least 5.1 and below 5.6; luainstaller rejects LuaJIT when used.
 Lua 5.5 requires LuaRocks 3.13.0 or newer.
 .SH LUA API

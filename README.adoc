@@ -21,7 +21,9 @@ toc::[]
 [#install]
 == Install
 
-A complete official Lua environment and `luarocks` are required:
+A complete official Lua environment is required. LuaRocks is optional.
+
+With LuaRocks:
 
 [source,bash]
 ----
@@ -37,6 +39,27 @@ luai -v
 
 NOTE: Lua 5.5 requires LuaRocks 3.13.0 or newer. Older LuaRocks releases do not
 recognize the 5.5 install ABI.
+
+Without LuaRocks, run directly from an extracted source tree:
+
+[source,bash]
+----
+lua bin/luai.lua -v
+lua bin/luainstaller.lua analyze test/runtime_bundle/main.lua
+----
+
+Or install offline into a new dedicated directory (its parent must exist):
+
+[source,bash]
+----
+lua tools/install.lua --prefix "$HOME/luainstaller"
+"$HOME/luainstaller/bin/luai" -v
+----
+
+Windows uses the same Lua installer and generates `.cmd` launchers. Source
+library use, shell setup, relocation and prerequisites are documented in
+xref:docs/INSTALL.adoc[Installation without LuaRocks]. Building applications
+still requires a native C compiler and matching Lua headers/library.
 
 [#usage]
 == Usage
@@ -226,6 +249,8 @@ xref:docs/TESTING.adoc[Testing].
 == Documentation
 
 * xref:CHANGELOG.adoc[Changelog] — release changes and upgrade notes
+* xref:docs/INSTALL.adoc[Installation without LuaRocks]
+* xref:docs/NEXT-RELEASE.adoc[1.4.0 release scope and follow-up] (maintainers)
 * xref:docs/USAGE.adoc[Usage] — options, discovery, API
 * xref:docs/BUNDLING.adoc[Bundle format] — layout and runtime
 * xref:docs/RELINKING.adoc[Licenses and relinking]

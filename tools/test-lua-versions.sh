@@ -576,15 +576,17 @@ run_version() {
     export LUA_PATH="$DEPS_LUA_PATH"
     export LUA_CPATH="$DEPS_LUA_CPATH"
     cd "$PROJECT_ROOT"
-    find src test tools -type f -name '*.lua' -print | while IFS= read -r file; do
+    "$luac" -p luainstaller.lua
+    find src test tools bin -type f -name '*.lua' -print | while IFS= read -r file; do
         "$luac" -p "$file"
     done
     "$lua" test/lua_abi.lua
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.3.0-1.rockspec
+    "$luarocks" lint luainstaller-1.4.0-1.rockspec
     "$lua" test/luarocks_install.lua
+    "$lua" test/standalone_install.lua
     "$lua" test/toolchain_native.lua
     "$lua" test/native_bundle.lua
     "$lua" test/onefile_compile_native.lua

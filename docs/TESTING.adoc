@@ -28,13 +28,14 @@ LUA=${LUA:-lua}
 "$LUA" test/version_contract.lua
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/contract_docs.lua
+"$LUA" test/standalone_install.lua
 "$LUA" test/production_edges.lua
 "$LUA" test/build_interruption.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.3.0-1.rockspec
+luarocks lint luainstaller-1.4.0-1.rockspec
 ----
 
 [cols="2,3",options="header"]
@@ -52,6 +53,10 @@ luarocks lint luainstaller-1.3.0-1.rockspec
 
 |`test/contract_docs.lua`
 |Public documentation contracts
+
+|`test/standalone_install.lua`
+|Offline install without LuaRocks, relocation, both CLI names, library use,
+repeat-install refusal, onedir/onefile and execution with an empty runtime PATH
 
 |`test/production_edges.lua`
 |Boundary and safety-related behavior, static/shared Lua fallback, optional
@@ -89,7 +94,10 @@ luai -v
 
 Lua 5.5 needs LuaRocks `>= 3.13.0`. Release practice includes isolated tree
 install, invoking commands outside the checkout, and running artifacts with
-`LUA_PATH` / `LUA_CPATH` cleared. Missing `luarocks` is a failure.
+`LUA_PATH` / `LUA_CPATH` cleared. Missing `luarocks` is a failure for the
+LuaRocks-specific installation gate. The independent
+`lua test/standalone_install.lua` gate requires no LuaRocks; see
+xref:INSTALL.adoc[Installation without LuaRocks].
 
 [#testing-version-matrix]
 == Official Lua matrix

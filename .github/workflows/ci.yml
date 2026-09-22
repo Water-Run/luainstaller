@@ -48,8 +48,9 @@ jobs:
 
       - name: Syntax and shell checks
         run: |
-          find src -type f -name '*.lua' -print0 \
+          find src bin -type f -name '*.lua' -print0 \
             | xargs -0 -n1 "$HOME/luai-lua/bin/luac" -p
+          "$HOME/luai-lua/bin/luac" -p luainstaller.lua tools/install.lua
           for script in tools/*.sh; do
             if head -1 "$script" | grep -q bash; then
               bash -n "$script"
@@ -66,6 +67,7 @@ jobs:
           lua test/version_contract.lua
           lua test/cli_split_smoke.lua
           lua test/contract_docs.lua
+          lua test/standalone_install.lua
 
       - name: Edge and safety suites
         run: |

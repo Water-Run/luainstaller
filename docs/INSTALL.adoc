@@ -1,0 +1,117 @@
+= Installation without LuaRocks
+:sectanchors:
+:sectlinks:
+
+xref:../README.adoc#documentation-index[Back to documentation index]
+
+== Requirements
+
+Use official Lua 5.1 through 5.5. LuaJIT is unsupported. Installation is
+offline: it neither downloads dependencies nor calls LuaRocks. POSIX uses the
+usual shell/filesystem utilities; native Windows uses PowerShell 2 or newer.
+
+Analysis and the library need Lua. Building an executable additionally needs
+a native C compiler and headers/library matching the interpreter's Lua ABI
+and architecture. Application dependencies must already be available through
+the application's paths, `LUA_PATH` or `LUA_CPATH`; install them using your OS
+package manager, vendor them, build them yourself, or use LuaRocks as desired.
+The installer does not install Lua, a compiler, or application dependencies.
+Generated onedir/onefile applications do not need a system Lua command.
+
+== Use the source tree directly
+
+Run these commands from the extracted repository root:
+
+[source,bash]
+----
+lua bin/luai.lua -v
+lua bin/luainstaller.lua analyze test/runtime_bundle/main.lua
+lua bin/luainstaller.lua build --dir test/runtime_bundle/main.lua -o build/demo
+----
+
+Both entry points also accept absolute paths, so the working directory can be
+outside the checkout. The existing `lua src/cli.lua` compact interface remains
+available. The source tree must stay intact.
+
+For the library, prepend the checkout's root to the Lua search path before
+the first `require("luainstaller")`:
+
+[source,lua]
+----
+package.path = "/absolute/path/to/luainstaller/?.lua;" .. package.path
+local luainstaller = require("luainstaller")
+assert(luainstaller.analyze({ entry = "app/main.lua" }).ok)
+----
+
+The root loader resolves only the `luainstaller` module namespace. It preserves
+application dependency search paths. Select one installation per Lua process;
+do not preload modules from a different luainstaller installation first.
+
+== Install a dedicated tree
+
+From the repository root, choose a new directory under an existing parent:
+
+[source,bash]
+----
+lua tools/install.lua --prefix "$HOME/luainstaller"
+"$HOME/luainstaller/bin/luai" -v
+----
+
+The layout includes `bin/`, the Lua implementation under `src/`, the public
+`luainstaller.lua` loader, documentation, the manual, and license notices.
+No administrator access is needed when the parent directory belongs to you.
+Existing destinations and symlink ancestors are refused; root-owned system
+`/tmp` and `/var` aliases on macOS are accepted. Files are prepared in a sibling staging directory,
+checked, then renamed into place. A failed install cleans its staging tree.
+
+The `--lua <interpreter>` option selects the interpreter used by generated
+commands. It must have the same official Lua ABI as the installing process.
+The default is the interpreter that runs the installer. Use an absolute path
+to pin it; a bare name such as `lua` is resolved through `PATH` on each run.
+`LUAI_LUA` can override it later. This variable selects the executable only,
+and cannot contain interpreter flags. Keep the selected ABI consistent with
+your headers, libraries and native application modules.
+
+Add the installation's `bin` directory to the current shell session:
+
+[source,bash]
+----
+# sh, bash, zsh
+export PATH="$HOME/luainstaller/bin:$PATH"
+----
+
+[source,fish]
+----
+set -gx PATH "$HOME/luainstaller/bin" $PATH
+----
+
+Windows, from the repository root in PowerShell:
+
+[source,powershell]
+----
+lua .\tools\install.lua --prefix "$HOME\luainstaller"
+& "$HOME\luainstaller\bin\luai.cmd" -v
+$env:PATH = "$HOME\luainstaller\bin;$env:PATH"
+luainstaller.cmd analyze .\test\runtime_bundle\main.lua
+----
+
+Use a native Windows Lua/compiler pair when connected through Cygwin. Pass
+native Windows paths to native Lua; a `/cygdrive/...` path is not a native
+Windows filename. The SSH shell itself does not determine the build target.
+
+The library example above works with the installation root in place of the
+checkout root. CLI wrappers need no `LUA_PATH` setup. The `.lua` entry points
+can also be invoked with an explicit Lua interpreter on either platform.
+
+== Move, upgrade or remove
+
+Move the entire installation directory, then update its entry in `PATH` and
+any library search path. Command wrappers locate the implementation relative
+to themselves. A configured absolute Lua executable must still exist at its
+original location, or be overridden with `LUAI_LUA`.
+
+Upgrade by installing into a new directory, testing it, then updating `PATH`.
+To uninstall, remove that dedicated installation directory and its path entry.
+No shell profile, registry or system Lua directory is modified. Do not use
+symlinks to individual command wrappers; add the actual `bin` directory to
+`PATH` instead.

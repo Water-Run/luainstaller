@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-08-22
+    2026-09-22
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -477,7 +477,10 @@ local function check_documentation_contract()
     local expected_docs = {
         "docs/BUNDLING.adoc",
         "docs/IMPLEMENTATION.adoc",
+        "docs/INSTALL.adoc",
+        "docs/NEXT-RELEASE.adoc",
         "docs/PLATFORMS-NATIVE-LIMITS.adoc",
+        "docs/REAL-WORLD-2026-09-22.adoc",
         "docs/RELINKING.adoc",
         "docs/TESTING.adoc",
         "docs/TROUBLESHOOTING.adoc",
@@ -577,11 +580,19 @@ local function check_documentation_contract()
     assert_contains(readme, "documentation-index")
     assert_contains(readme, "CHANGELOG.adoc")
     assert_contains(readme, "docs/RELINKING.adoc")
+    assert_contains(readme, "LuaRocks is optional")
+    assert_contains(readme, "docs/INSTALL.adoc")
+    assert_contains(harness.run_lua({ "bin/luai.lua", "-v" }), "luai " .. luainstaller.VERSION)
+    assert_contains(harness.run_lua({ "bin/luainstaller.lua", "version" }),
+        "luainstaller " .. luainstaller.VERSION)
+    assert_contains(harness.run_lua({ "-e",
+        'package.path = "./?.lua"; print(require("luainstaller").VERSION)',
+    }), luainstaller.VERSION)
 
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
     assert_contains(changelog, "== 1.1.1")
-    assert_contains(changelog, "== 1.3.0")
+    assert_contains(changelog, "== 1.4.0")
     assert_contains(changelog, "== 1.1.0")
     assert_contains(changelog, "=== Upgrade notes")
 
@@ -600,7 +611,7 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.3.0-1.rockspec")
+    local rockspec = read_file("luainstaller-1.4.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -613,7 +624,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.3.0-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.4.0-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-08-24
+    2026-09-22
 ]]
 
 local function localFileExists(path)
@@ -146,7 +146,7 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.3.0"
+local VERSION = "1.4.0"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 

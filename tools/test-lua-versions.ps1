@@ -323,18 +323,19 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
     $env:LUA_CPATH = ''
     $env:PATH = "$(Split-Path -Parent $LuaRocks);$luaPrefix;$luaPrefix\bin;$env:PATH"
     Set-Location $ProjectRoot
-    foreach ($tree in @('src','test','tools')) {
+    Invoke-Native $luac @('-p','luainstaller.lua')
+    foreach ($tree in @('src','test','tools','bin')) {
         foreach ($file in Get-ChildItem -LiteralPath $tree -Recurse -Filter '*.lua' -File) {
             Invoke-Native $luac @('-p',$file.FullName)
         }
     }
     foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','release_docs_contract.lua',
         'windows_native.lua','toolchain_native.lua',
-        'luarocks_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
+        'luarocks_install.lua','standalone_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
         'onefile_lifecycle.lua','distribution_licenses.lua','reproducible_artifacts.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
-    Invoke-Native $LuaRocks @('lint','luainstaller-1.3.0-1.rockspec')
+    Invoke-Native $LuaRocks @('lint','luainstaller-1.4.0-1.rockspec')
     "PASS host=$HostLabel lua=$version abi=Lua $abi"
 }
 

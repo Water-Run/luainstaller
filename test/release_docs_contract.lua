@@ -9,7 +9,7 @@ File:
 Date:
     2026-08-22
 Updated:
-    2026-07-17
+    2026-09-22
 ]]
 
 local function read_file(path)
@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.3.0-1.rockspec",
+    "luainstaller-1.4.0-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(

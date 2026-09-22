@@ -7,6 +7,18 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+== 1.4.0 - 2026-09-22
+
+=== Added
+
+* Offline, LuaRocks-free installation with `lua tools/install.lua --prefix
+  <new-directory>` on POSIX and native Windows. Dedicated installations are
+  relocatable and include both command wrappers, the Lua API, docs and notices.
+* Source entry points `bin/luai.lua`, `bin/luainstaller.lua` and the root
+  `luainstaller.lua` library loader, plus installation and next-release guides.
+* Standalone installation coverage for relocation, API use, directory/single
+  file builds, clean-target execution and refusal to overwrite an existing tree.
+
 == 1.3.0 - 2026-08-24
 
 === Added
