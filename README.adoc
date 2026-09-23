@@ -1,268 +1,255 @@
 = luainstaller
 :toc: macro
-:toclevels: 2
+:toc-title: Contents
+:toclevels: 1
 :sectanchors:
 :sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
 
-`luainstaller` packages a Lua script into a standalone executable.
-The executable does not need a system `lua` command at run time.
-The target must belong to the same platform family as the build host.
+Turn a Lua script into a program you can hand to someone else.
 
-The tool supports official Lua 5.1 through 5.5. LuaJIT is rejected.
-It is released under `LGPL-3.0-or-later` at
-https://github.com/Water-Run/luainstaller[GitHub].
+`luainstaller` collects your script, the modules it loads with `require`, and the Lua
+runtime, and builds a native executable from them. The person running it
+doesn't need Lua installed.
 
-The packaging interpreter, the headers, the linked runtime, and every
-bundled Lua C module must share the same major.minor Lua ABI.
+[source,bash]
+----
+luai -b app/main.lua -o build/app   # <1>
+build/app/app                       # <2>
+----
+<1> Build a directory bundle from your entry script.
+<2> Run it. No `lua` on the machine is required.
+
+It works with official Lua 5.1 through 5.5 on Linux, Windows (back to XP),
+macOS, FreeBSD and Android/Termux.
 
 toc::[]
 
 [#install]
 == Install
 
-A complete official Lua environment is required. LuaRocks is optional.
-
-With LuaRocks:
-
 [source,bash]
 ----
 luarocks install luainstaller
-----
-
-Confirm the installation:
-
-[source,bash]
-----
 luai -v
 ----
 
-NOTE: Lua 5.5 requires LuaRocks 3.13.0 or newer. Older LuaRocks releases
-do not recognize the 5.5 install ABI.
-
-Without LuaRocks, run from an extracted source tree:
-
-[source,bash]
-----
-lua bin/luai.lua -v
-lua bin/luainstaller.lua analyze test/runtime_bundle/main.lua
-----
-
-Or install offline into a new dedicated directory. The parent of that
-directory must already exist:
+LuaRocks is optional. Without it, install from a source checkout into a
+directory of your choice:
 
 [source,bash]
 ----
 lua tools/install.lua --prefix "$HOME/luainstaller"
-"$HOME/luainstaller/bin/luai" -v
+export PATH="$HOME/luainstaller/bin:$PATH"
 ----
 
-Windows uses the same installer and generates `.cmd` launchers.
-Source use, shell setup, relocation, and removal are described in
-xref:docs/INSTALL.adoc[Installation without LuaRocks].
-Building an executable still requires a native C compiler and Lua
-headers and library that match the interpreter ABI.
+Details, including Windows and moving or removing an install, are in
+xref:docs/INSTALL.adoc[Installing without LuaRocks].
+
+.What you need to build executables
+****
+* An official Lua interpreter, 5.1 to 5.5. LuaJIT isn't supported.
+* A C compiler for the machine you're on.
+* Lua headers and a Lua library that match that interpreter's version.
+
+Analysis works with just Lua. Only building needs the compiler.
+****
+
+TIP: On most Linux systems the headers come from a package such as
+`liblua5.4-dev` or `lua-devel`.
 
 [#usage]
-== Usage
+== Build your first executable
 
-`luainstaller` may be used as a command-line tool or as a library.
+The safe path is: check the dependencies, build a folder, test the folder,
+and only then make a single file.
 
-The command line has two names with separate grammars. The features are
-the same; the input syntax and terminal output are not. The two grammars
-must not be mixed. `luainstaller` uses subcommands. `luai` uses short
-options in the manner of traditional Lua tools.
-
-[cols="1,2,2",options="header"]
-|===
-|Action |`luai` |`luainstaller`
-
-|Help
-|`luai -h`
-|`luainstaller help`
-
-|Version
-|`luai -v`
-|`luainstaller version`
-
-|Analyze
-|`luai -a <entry>`
-|`luainstaller analyze <entry>`
-
-|Trace
-|`luai -t <entry>`
-|`luainstaller trace <entry>`
-
-|Build
-|`luai -b <entry>`
-|`luainstaller build <entry>`
-
-|Logs
-|—
-|`luainstaller logs`
-|===
-
-Unless stated otherwise, the examples below use `luai`. Full option
-reference: xref:docs/USAGE.adoc[Usage].
-
-[#usage-cli]
-=== Command line
-
-Work in this order:
-
-. Run the source program.
-. Analyze or trace the dependencies.
-. Build a directory bundle (`--dir`).
-. Run the bundle with `LUA_PATH` and `LUA_CPATH` cleared.
-. Build a single-file executable (`--file`) only after the directory
-  bundle works.
-
-The directory bundle keeps the manifest, generated C, and native
-libraries visible. The single-file form is self-extracting. When it
-fails, verify the matching directory bundle first.
-
+. *See what will be packaged.*
++
 [source,bash]
 ----
-lua test/runtime_bundle/main.lua direct
-luai -a test/runtime_bundle/main.lua --max-deps 120
-luai -t test/runtime_bundle/main.lua --max-deps 120
-luai -b --dir test/runtime_bundle/main.lua \
-  -o build/runtime-demo --max-deps 120
-build/runtime-demo/runtime-demo Ada
+luai -a app/main.lua
 ----
++
+This lists every module `luainstaller` found for your script. If something is
+missing here, it will be missing from the executable too.
 
-After the directory bundle succeeds:
-
+. *Build a directory bundle.*
++
 [source,bash]
 ----
-luai -b --file test/runtime_bundle/main.lua \
-  -o build/runtime-demo-onefile --max-deps 120
-build/runtime-demo-onefile Ada
+luai -b app/main.lua -o build/app
 ----
++
+You get `build/app/app` (or `app.exe` on Windows) plus a hidden `.luai/`
+folder with native modules and license files.
 
-The output begins with `hello Ada`.
+. *Test it the way your users will run it.*
++
+[source,bash]
+----
+env -u LUA_PATH -u LUA_CPATH build/app/app
+----
++
+Clearing the Lua search paths makes sure the program isn't quietly loading
+modules from your own machine.
 
-Common `luai` options:
+. *Make a single file, if you want one.*
++
+[source,bash]
+----
+luai -b --file app/main.lua -o build/app-onefile
+----
++
+The single file unpacks itself to a temporary folder on first run and starts
+from there.
 
-* `--dir` — directory bundle (default)
-* `--file` — single-file executable
-* `-o` — output path
-* `--max-deps` — limit on auto-discovered Lua dependencies
-  (default is small; raise it for large applications)
-* `-d static|runtime|manual` — discovery mode (default `static`)
+IMPORTANT: If the single file misbehaves, go back to the directory bundle.
+It shows exactly what was packaged, so problems are much easier to find.
 
-Before release, run the artifact at least once without a system `lua`
-and with `LUA_PATH` and `LUA_CPATH` cleared. Otherwise the host may
-hide a missing dependency.
+=== Two command styles
 
-Platform limits are stated in
-xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
-Diagnosis: xref:docs/TROUBLESHOOTING.adoc[Troubleshooting].
+The same tool answers to two names. Pick whichever you like, but don't mix
+them in one command.
 
-Every generated distribution contains the Lua MIT notice, the
-luainstaller LGPL/GPL texts, third-party notices, generated C source,
-and relinking instructions. Preserve them when redistributing an
-artifact, and add the notices and source required by application
-dependencies. Details: xref:docs/RELINKING.adoc[Relinking generated
-bundles].
+[cols="1,2m,2m",options="header"]
+|===
+|Task |luai (short options) |luainstaller (subcommands)
+
+|Analyze    |luai -a main.lua |luainstaller analyze main.lua
+|Trace      |luai -t main.lua |luainstaller trace main.lua
+|Build      |luai -b main.lua |luainstaller build main.lua
+|Version    |luai -v          |luainstaller version
+|Help       |luai -h          |luainstaller help
+|View logs  |—                |luainstaller logs
+|===
+
+=== Options you'll actually use
+
+[horizontal]
+`--dir` / `--file`:: folder bundle (default) or single executable
+`-o PATH`:: where to write the result
+`--max-deps N`:: raise this for large programs; the default is 36
+`--include FILE`:: add a module the scan couldn't see
+`-d runtime`:: find dependencies by actually running the script
+
+Everything else is in xref:docs/USAGE.adoc[the usage guide].
 
 [#usage-api]
-=== Library use
+== Use it from Lua
 
-After installation, `require("luainstaller")` uses the same
-implementation as the command line.
-The structured result contract applies to `analyze`, `trace`, `compatibility`, and `bundle` only.
-Success sets `ok = true`. Failure sets `ok = false` and an `error` table
-with `type`, `message`, and related fields.
-`getLogs` returns a list of log records; `clearLogs` returns a boolean.
-The version string is `require("luainstaller").VERSION`.
+The same features are available as a library:
 
 [source,lua]
 ----
 local luainstaller = require("luainstaller")
 
-local analysis = luainstaller.analyze({
+local result = luainstaller.bundle({
     entry = "app/main.lua",
-    discovery_mode = "static",
-    max_deps = 120,
-})
-if not analysis.ok then
-    io.stderr:write(analysis.error.type, ": ", analysis.error.message, "\n")
-    os.exit(1)
-end
-
-local built = luainstaller.bundle({
-    entry = "app/main.lua",
-    mode = "onedir",
     out = "build/app",
-    max_deps = 120,
 })
-if not built.ok then
-    io.stderr:write(built.error.type, ": ", built.error.message, "\n")
-    os.exit(1)
+
+if result.ok then
+    print("built " .. result.executable)
+else
+    print(result.error.type .. ": " .. result.error.message)
 end
-print(built.executable)
 ----
 
-Option names and meanings match the command line. Further API notes:
-xref:docs/USAGE.adoc[Usage].
+Every call returns a table with `ok`. On failure, `error.type` names the
+problem. Options match the command line; see
+xref:docs/USAGE.adoc#usage-api[Library API].
 
 [#platforms]
-== Platform coverage
+== Where it runs
 
-Builds are native. The compiler, Lua headers and library, native
-modules, architecture, and target operating system must agree.
-Implementation is selected by native capability rather than by a short
-operating-system allowlist.
+`luainstaller` builds for the machine it runs on. To get a Windows
+executable, build on Windows; for macOS, build on a Mac.
 
-[cols="2,1,2",options="header"]
+[cols="2,2,3",options="header"]
 |===
-|System |Architecture |Compatibility path
+|System |CPU |Notes
 
-|Windows XP SP3 / XP x64 SP2 or newer
-|x86 / x86_64
-|XP API baseline and onefile watchdog fallback; XP-capable CRT and Lua DLL
+|Windows XP SP3 and later
+|x86, x86_64
+|Needs an XP-capable compiler and runtime.footnote:[A modern Visual Studio or UCRT build won't start on XP. See xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms].]
 
-|Modern Windows
+|Windows 7 and later
 |x86, x86_64, ARM, ARM64
-|Native MSVC/MinGW linker-machine selection
+|MSVC or MinGW
 
 |Linux
-|x86 and x86_64
-|32/64-bit userland detection; shared or static Lua
-
-|Linux
-|ARM and ARM64
+|x86, x86_64, ARM, ARM64
 |Shared or static Lua
 
-|Android / Termux
-|native Termux architecture
-|App-private prefix, Bionic ABI and Termux temporary root
+|macOS
+|x86_64, ARM64
+|Static Lua preferred
 
 |FreeBSD
-|native architecture
-|libc `dlopen`, `sysctl` executable path, shared or static Lua
+|native
+|
 
-|macOS
-|x86_64 and ARM64
-|Static Lua preferred; verified dylib fallback
+|Android (Termux)
+|native
+|Runs inside the Termux app
 |===
 
-Windows XP builds require PowerShell 2 or newer and a compiler runtime
-that targets XP. Installing a modern compiler on a new host does not by
-itself make its CRT XP-compatible. Full requirements:
-xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
-Evidence tiers: xref:docs/TESTING.adoc[Testing].
+Other Unix-like systems often work too, as long as the compiler and Lua
+library match.
+
+[CAUTION]
+====
+Native C modules (anything built as `.so` or `.dll`) are copied as-is. They
+must already be built for the target system and your Lua version.
+====
 
 [#documentation-index]
 == Documentation
 
-* xref:CHANGELOG.adoc[Changelog] — release changes and upgrade notes
-* xref:docs/INSTALL.adoc[Installation without LuaRocks]
-* xref:docs/USAGE.adoc[Usage] — options, discovery, API
-* xref:docs/BUNDLING.adoc[Bundle format] — layout and runtime
-* xref:docs/RELINKING.adoc[Licenses and relinking]
-* xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules]
-* xref:docs/TROUBLESHOOTING.adoc[Troubleshooting]
-* xref:docs/IMPLEMENTATION.adoc[Implementation] (maintainers)
-* xref:docs/TESTING.adoc[Testing] (maintainers)
-* xref:docs/NEXT-RELEASE.adoc[1.4.0 release scope and follow-up] (maintainers)
+[cols="1,3",frame=none,grid=none]
+|===
+|xref:docs/INSTALL.adoc[Install]
+|Installing without LuaRocks, on Linux, macOS and Windows
+
+|xref:docs/USAGE.adoc[Usage]
+|All options, dependency discovery, native modules, the library API
+
+|xref:docs/TROUBLESHOOTING.adoc[Troubleshooting]
+|Common errors and how to fix them
+
+|xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms]
+|Compilers per system, Windows XP, native modules, what's out of scope
+
+|xref:docs/BUNDLING.adoc[Bundle format]
+|What's inside a bundle and how it starts
+
+|xref:docs/RELINKING.adoc[Licenses and relinking]
+|What to keep when you redistribute an executable
+
+|xref:CHANGELOG.adoc[Changelog]
+|Changes between releases
+|===
+
+.For contributors
+[%collapsible]
+====
+* xref:docs/IMPLEMENTATION.adoc[Implementation notes] — how the code is laid out
+* xref:docs/TESTING.adoc[Testing] — test suites and CI
+====
+
+[#license]
+== License
+
+`luainstaller` is released under the
+link:LICENSE[GNU LGPL, version 3 or later].
+
+Every bundle includes the Lua license, the luainstaller license, and the
+generated C source, so you can pass it on as-is. Keep the `.luai/` folder
+when you redistribute. xref:docs/RELINKING.adoc[Relinking] explains why.

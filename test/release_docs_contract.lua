@@ -9,7 +9,7 @@ File:
 Date:
     2026-08-22
 Updated:
-    2026-09-22
+    2026-09-23
 ]]
 
 local function read_file(path)
@@ -61,13 +61,10 @@ local structured_contract = "The structured result contract applies to `analyze`
     .. "`compatibility`, and `bundle` only."
 local logging_contract = "`getLogs` returns a list of log records; `clearLogs` returns a boolean."
 
-for _, path in ipairs({
-    "README.adoc",
-    "docs/IMPLEMENTATION.adoc",
-    "docs/USAGE.adoc",
-}) do
-    expect_contains(path, structured_contract)
-    expect_contains(path, logging_contract)
+expect_contains("docs/IMPLEMENTATION.adoc", structured_contract)
+expect_contains("docs/IMPLEMENTATION.adoc", logging_contract)
+for _, needle in ipairs({ "getLogs", "clearLogs", "compatibility" }) do
+    expect_contains("docs/USAGE.adoc", needle)
 end
 
 expect_contains(

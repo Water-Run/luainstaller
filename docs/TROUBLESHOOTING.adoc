@@ -1,248 +1,191 @@
 = Troubleshooting
 :toc: macro
-:toclevels: 2
+:toc-title: Contents
+:toclevels: 1
 :sectanchors:
 :sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Diagnose the earliest failing step. Confirm the directory bundle before
-the single-file form.
+Work through the steps in order and stop at the first one that fails. That
+step is where the problem is.
 
-Command-line examples use `luai`. Logs use `luainstaller logs`.
+[source,bash]
+----
+lua app/main.lua                                   # 1. does the script run?
+luai -a app/main.lua                               # 2. are the modules found?
+luai -b app/main.lua -o build/app                  # 3. does it build?
+env -u LUA_PATH -u LUA_CPATH build/app/app         # 4. does the bundle run alone?
+luai -b --file app/main.lua -o build/app-onefile   # 5. does the single file work?
+----
 
 toc::[]
 
-[#troubleshooting-first]
-== First five steps
-
-[source,bash]
-----
-lua app/main.lua --help
-luai -a app/main.lua --max-deps 120
-luai -t app/main.lua --max-deps 120 --verbose
-luai -b --dir app/main.lua -o build/app --max-deps 120
-EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
-env -i PATH="$EMPTY_PATH" build/app/app
-rmdir "$EMPTY_PATH"
-----
-
-Record the first failure.
-
 [#troubleshooting-cli]
-== Command rejected immediately
+== "unknown option" or "unknown command"
 
-Messages such as `unknown luai command` or `unknown option` mean:
+`luai` and `luainstaller` have different syntax:
 
-* `luai` uses `-a`, `-t`, and `-b`. It does not accept `luai build`.
-* options that take values must be followed by a value
-* runtime arguments for the entry go after `--`
-
-[source,bash]
-----
-luai -b app/main.lua -- --profile staging
-----
-
-[#troubleshooting-errors]
-== Error types
-
-[cols="2,3",options="header"]
+[cols="1,1",options="header"]
 |===
-|Type |Meaning
-
-|`ScriptNotFoundError`
-|Entry or include cannot be opened
-
-|`LuaSyntaxError`
-|Source fails the text compiler
-
-|`SourceChangedError`
-|Source bytes changed after discovery
-
-|`DynamicRequireError`
-|Static mode cannot prove a computed `require`
-
-|`ModuleNotFoundError`
-|No candidate under search templates
-
-|`DependencyLimitExceededError`
-|Exceeded `--max-deps`
-
-|`DuplicateModuleError`
-|Module name or bundle path collision
-
-|`InvalidOptionsError`
-|Illegal options
-
-|`InvalidOutputError`
-|Output cannot be safely replaced (only v2 auto-rebuild)
-
-|`UnsupportedPlatformError`
-|`--target-os` disagrees with the host
-
-|`UnsupportedLuaVersionError`
-|Not a supported official 5.x (including LuaJIT)
-
-|`ToolchainError`
-|Compiler, prefix, `pkg-config`, or ABI mismatch; a bad explicit prefix
-is not auto-replaced
-
-|`CompilationFailedError`
-|Compiler ran and failed
-
-|`LuaRuntimeNotFoundError`
-|The selected shared liblua cannot be identified or staged
-
-|`DiscoveryError`
-|Runtime discovery failed or incomplete
-
-|`FilesystemError`
-|Write, rename, cache, or similar failure
+|Right |Wrong
+|`luai -b main.lua`      |`luai build main.lua`
+|`luainstaller build main.lua` |`luainstaller -b main.lua`
 |===
+
+Arguments meant for your script go after `--`:
+`luai -a main.lua -d runtime -- --verbose`.
 
 [#troubleshooting-static]
-== Analysis disagrees with runtime
+== A module is missing
 
-[source,bash]
-----
-lua -e 'print(package.path); print(package.cpath)'
-----
+The script runs with `lua`, but `luai -a` can't find a module, or the
+bundle fails with `module 'x' not found`.
 
-Analyze with the same environment. Do not run the source under one Lua
-and `luai` under another.
+* *Same environment?* Run `luai` with the same `LUA_PATH` and `LUA_CPATH`
+  as your script, and with the same Lua version.
+* *Computed name?* `require("plugins." .. name)` can't be seen by the
+  scanner. Add the files with `--include`, or use `-d runtime`.
+* *Hidden `require`?* Only `require` and `local require = require` are
+  followed. Other aliases aren't.
+* *Too many modules?* Raise `--max-deps`.
 
-Resolution is entry-rooted before `package.path`. Bare
-`lua app/main.lua` does not add the entry directory by itself.
-
-For static mode, watch concatenated names, require aliases, path setup
-before the entry, and non-standard optional loads.
-`luai -t --verbose` shows candidates.
-
-[#troubleshooting-runtime]
-== Runtime discovery
-
-[source,bash]
-----
-lua app/main.lua profile_a input.json
-luai -a app/main.lua -d runtime -- profile_a input.json
-----
-
-Only this run's branch is observed. Missing modules swallowed by
-`pcall` are not dependencies. Do not use a side-effecting entry as a
-build-time tracer.
+`luai -t app/main.lua --verbose` shows where each module was searched for.
 
 [#troubleshooting-compile]
-== Compile and link
+== The build fails to compile or link
 
-Linux:
+Almost always, the compiler, the Lua headers and the Lua library don't
+match each other or the `lua` you're running. Check them together:
 
 [source,bash]
 ----
-pkg-config --cflags --libs lua
-cc --version
 lua -v
+cc --version
+pkg-config --cflags --libs lua
 ----
 
-For a 32-bit build, all three must describe the same ABI. Check the
-running interpreter and every selected native object. Setting
-`CC='cc -m32'` alone does not turn 64-bit headers and libraries into a
-32-bit toolchain.
+If `pkg-config` finds the wrong Lua or none at all, point `luainstaller` at
+the right installation:
 
 [source,bash]
 ----
-file "$(command -v lua)"
-file /your/lua/prefix/lib/liblua.*
+luai -b app/main.lua --lua-prefix /opt/lua-5.4
 ----
 
-When no usable `pkg-config` entry exists, pass the native installation
-root with `--lua-prefix`. The root may contain either a shared library
-or `liblua.a`. A bad explicit prefix is reported instead of silently
-replaced.
+The prefix folder should contain `include/lua.h` and a Lua library under
+`lib/`.
 
-Android and Termux::
-Install the compiler and the matching official Lua development files
-inside the same Termux environment. Confirm that `TERMUX__PREFIX` (or
-legacy `PREFIX`) and `TMPDIR` point into the app-private filesystem. Do
-not create `/bin/sh` or `/tmp` compatibility links.
-
-FreeBSD::
-Use the native compiler and Lua headers and library. `-ldl` is a Linux
-dependency and should not be added manually on FreeBSD. An absent
-GNU-style `timeout` or non-Linux `ldd` output is not itself a toolchain
-failure.
+.Notes per system
+[%collapsible]
+====
+Linux, 32-bit::
+The interpreter, compiler, headers, library and every C module must all
+be 32-bit. Adding `-m32` to the compiler alone isn't enough.
 
 macOS::
-Check `include/lua.h`, `lib/liblua.a`, and architecture under
-`--lua-prefix`.
+Check that `include/lua.h` and `lib/liblua.a` exist under the prefix and
+match your Mac's architecture.
 
 Windows::
-In an MSVC and Windows SDK environment, check `cl.exe`, the import
-library, and `lua*.dll` under the prefix. For Windows XP, run from the
-prepared prompt of an XP-capable compiler, use PowerShell 2 or newer,
-and inspect the final PE subsystem (5.01 for x86, 5.02 for x86_64). A
-modern UCRT build does not become XP-compatible merely because
-`_WIN32_WINNT` is 0x0501.
+Build from a Visual Studio developer prompt (or a MinGW shell) so the
+compiler is on `PATH`. The prefix needs the headers, the import library
+and the `lua5x.dll`.
+
+Windows XP::
+Use a compiler and C runtime that support XP. A modern Visual Studio
+build won't start there even though it compiles fine. Run from the
+compiler's own prompt, and use PowerShell 2 or later.
+
+FreeBSD::
+Don't add `-ldl`; it's Linux-only.
+
+Android (Termux)::
+Install `clang` and the Lua development package inside Termux. Leave
+`$PREFIX` and `$TMPDIR` alone and don't create `/tmp` or `/bin/sh`.
+====
 
 [#troubleshooting-native]
-== Native module fails after start
+== A C module fails after the program starts
 
-Confirm `.luai/native`, manifest trace, architecture, and system
-libraries. Clear Lua environment variables. Test on the real target OS.
+* Check the file is there: `ls build/app/.luai/native/`.
+* Check it's built for this system: `file build/app/.luai/native/*`.
+* Check its own libraries are present: `ldd build/app/.luai/native/*.so`.
 
-[source,bash]
-----
-file build/app/.luai/native/*
-ldd build/app/.luai/native/*.so  # where the host provides compatible ldd output
-EMPTY_PATH=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
-env -i PATH="$EMPTY_PATH" build/app/app
-rmdir "$EMPTY_PATH"
-----
-
-If it only works without a clean environment, the process is using host
-modules. That does not prove packaging.
+If the program only works when `LUA_CPATH` is set, it's loading modules
+from your machine rather than from the bundle.
 
 [#troubleshooting-output]
-== Rebuild refused
+== The rebuild is refused
 
-[source,bash]
-----
-find build/app -print | sort
-sed -n '1,160p' build/app/.luai/generated-output.txt
-----
+`luainstaller` only replaces a folder it created and that nobody changed
+since. It checks this with `.luai/generated-output.txt`, whose first line
+must be `luainstaller-generated-output-v2`.
 
-The first line must be `luainstaller-generated-output-v2`, and the tree
-must match the recorded SHA-256 digests. v1 requires manual delete or a
-new `-o`.
+If you edited the folder by hand, or it came from an older version,
+delete it or build to a new `-o` path.
 
-Lock directory: `build/.luai-lock-<hash>`. After confirming that no
-builder is running, remove the lock indicated by `owner.*`.
+A leftover lock looks like `build/.luai-lock-<hash>`. Remove it once
+you're sure no build is running.
 
 [#troubleshooting-onefile]
-== Single-file extraction fails
+== The single file doesn't start
 
-Confirm the directory bundle first. Check `TMPDIR` and
-`luainstaller-onefile-<uid>` ownership and mode. On Termux, use the
-app-private prefix `tmp` directory. `/tmp` normally does not exist.
-Cache hits compare full bytes, not size alone.
+First confirm the directory bundle works. If it does, the problem is
+unpacking. Check that the temporary folder (`$TMPDIR`, or `%TEMP%` on
+Windows) is writable and belongs to you. On Termux, `/tmp` doesn't
+exist; `$TMPDIR` is used instead.
+
+To clear the unpacked copies (after closing all running copies):
 
 [source,bash]
 ----
 rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 ----
 
+[#troubleshooting-errors]
+== Error types
+
+[cols="2m,3",options="header"]
+|===
+|Type |Meaning
+
+|ScriptNotFoundError         |The entry script or an `--include` file doesn't exist
+|LuaSyntaxError              |A source file doesn't compile
+|SourceChangedError          |A file changed while the build was running
+|DynamicRequireError         |A `require` with a computed name (static mode)
+|ModuleNotFoundError         |A module wasn't found on any search path
+|DependencyLimitExceededError |More modules than `--max-deps`
+|DuplicateModuleError        |Two files would end up under the same name
+|InvalidOptionsError         |A bad option or value
+|InvalidOutputError          |The output folder can't be safely replaced
+|UnsupportedPlatformError    |`--target-os` doesn't match this machine
+|UnsupportedLuaVersionError  |Not official Lua 5.1–5.5 (LuaJIT included)
+|ToolchainError              |Compiler, headers or library missing or mismatched
+|CompilationFailedError      |The compiler ran and reported errors
+|LuaRuntimeNotFoundError     |The Lua shared library couldn't be located
+|DiscoveryError              |Runtime discovery didn't finish
+|FilesystemError             |A file couldn't be read, written or renamed
+|===
+
 [#troubleshooting-logs]
-== When reporting issues
+== Reporting a problem
 
-[source,bash]
-----
-luai -v
-luainstaller logs --level error --limit 20
-lua -v
-----
+Please include:
 
-Include the full command and exit status, error type and compiler
-output, operating system and architecture, Lua version, discovery mode,
-redacted trace, and whether a clean environment still fails. Strip
-secrets and private paths.
+* the full command and what it printed, including compiler output
+* `luai -v` and `lua -v`
+* your operating system and CPU architecture
+* whether step 4 (the clean run) also fails
+
+`luainstaller logs --level error --limit 20` shows recent errors. Remove
+private paths and secrets before posting.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

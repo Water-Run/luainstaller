@@ -478,9 +478,7 @@ local function check_documentation_contract()
         "docs/BUNDLING.adoc",
         "docs/IMPLEMENTATION.adoc",
         "docs/INSTALL.adoc",
-        "docs/NEXT-RELEASE.adoc",
         "docs/PLATFORMS-NATIVE-LIMITS.adoc",
-        "docs/REAL-WORLD-2026-09-22.adoc",
         "docs/RELINKING.adoc",
         "docs/TESTING.adoc",
         "docs/TROUBLESHOOTING.adoc",
@@ -517,10 +515,10 @@ local function check_documentation_contract()
     assert_not_contains(bundling, "32-bit FNV-1a")
 
     local usage = read_file("docs/USAGE.adoc")
-    assert_contains(usage, "official Lua `>= 5.1` and `< 5.6`")
-    assert_contains(usage, "LuaJIT is rejected")
-    assert_contains(usage, "entry-rooted")
-    assert_contains(usage, "same environment")
+    assert_contains(usage, "DynamicRequireError")
+    assert_contains(usage, "--max-deps")
+    assert_contains(usage, "LUA_CPATH")
+    assert_contains(usage, "luainstaller.VERSION")
 
     local testing = read_file("docs/TESTING.adoc")
     assert_contains(testing, "test/production_edges.lua")
@@ -597,9 +595,9 @@ local function check_documentation_contract()
     assert_contains(changelog, "=== Upgrade notes")
 
     local platform_limits = read_file("docs/PLATFORMS-NATIVE-LIMITS.adoc")
-    assert_contains(platform_limits, "official Lua `>= 5.1` and `< 5.6`")
+    assert_contains(platform_limits, "LuaJIT")
     assert_contains(platform_limits, "evidence, not a platform allowlist")
-    assert_contains(platform_limits, "There is no cross-build mode")
+    assert_contains(platform_limits, "doesn't cross-compile")
 
     local troubleshooting = read_file("docs/TROUBLESHOOTING.adoc")
     assert_contains(troubleshooting, "LuaSyntaxError")

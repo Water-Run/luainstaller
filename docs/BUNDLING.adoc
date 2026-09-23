@@ -1,205 +1,145 @@
-= Bundle format and runtime
+= Bundle format
 :toc: macro
-:toclevels: 2
+:toc-title: Contents
+:toclevels: 1
 :sectanchors:
 :sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-This guide describes generated layout and run-time rules. Commands:
-xref:USAGE.adoc[Using luainstaller].
+What `luainstaller` puts in a bundle, and what happens when it starts. You
+don't need this to use the tool; it's here for when you want to look
+inside.
 
 toc::[]
 
 [#bundling-onedir]
-== Directory layout
-
-Linux and macOS:
+== What's in the folder
 
 [source,text]
 ----
 app/
-├── app
+├── app                          <1>
 ├── THIRD_PARTY_NOTICES.md
 └── .luai/
-    ├── build/
-    │   ├── generate-onefile-payload.lua
-    │   ├── launcher.c
-    │   └── RELINKING.adoc
-    ├── generated-output.txt
+    ├── manifest.lua             <2>
+    ├── generated-output.txt     <3>
+    ├── native/                  <4>
+    │   ├── liblua-5.4.so
+    │   └── lfs.so
     ├── licenses/
-    │   ├── GPL-3.0-or-later.txt
+    │   ├── Lua-MIT.txt
     │   ├── LGPL-3.0-or-later.txt
-    │   └── Lua-MIT.txt
-    ├── manifest.lua
-    └── native/
-        ├── liblua-5.x.so    # shared-Lua profiles; name follows ABI
-        └── module.so
+    │   └── GPL-3.0-or-later.txt
+    └── build/                   <5>
+        ├── launcher.c
+        ├── generate-onefile-payload.lua
+        └── RELINKING.adoc
 ----
-
-Windows places the Lua DLL beside the executable and keeps a second
-copy under `.luai/native/` for dependent modules.
-
-The entry and pure-Lua modules are compiled into the C launcher and
-listed in the manifest. They are not left as loose `.lua` files.
-
-[#bundling-build]
-== Build placement
-
-Generation, copy, compile, and manifest write happen in a private
-staging directory. The result is then renamed into the final path. When
-replacing a generated bundle, the old tree is backed up and
-revalidated. On failure the previous bundle is restored when possible.
-
-The output lock coordinates `luainstaller` processes only. On POSIX,
-another process that holds a writable descriptor opened before rename
-may still mutate that inode after verification. Use a new output path
-when that cannot be ruled out.
-
-Each lock binds a cryptographic token, owner PID, output hash, and exact
-staging name. Normal failures and SIGINT-visible interruptions finalize
-owned state. The CLI reports such an interruption with status `130`.
-After an uncatchable crash or SIGKILL, the next build reclaims only an
-unchanged lock whose owner PID is proven dead. Live, malformed, or
-replaced locks are left untouched.
+<1> The executable. Your script and all pure-Lua modules are inside it, as
+    source text.
+<2> What was packaged, with a SHA-256 for every file.
+<3> Proof that `luainstaller` made this folder (see <<bundling-ownership>>).
+<4> C modules, and the Lua library when it's linked as a shared library.
+    On Windows the Lua DLL also sits next to the executable.
+<5> The generated C source, so the executable can be rebuilt.
 
 [#bundling-launcher]
-== Startup
+== How it starts
 
-. Create a Lua state and open standard libraries.
-. Set `arg`.
-. Load the embedded bootstrap as text-only Lua.
-. Run the entry with a traceback handler.
+. The executable creates a Lua state and opens the standard libraries.
+. It sets up `arg` exactly as `lua` would. `arg[0]` is whatever name the
+  program was started with.
+. It adds the bundled modules and `.luai/native/` to the module search.
+. It runs your script, printing a traceback if it fails.
 
-The process image path comes from the operating system, not from the
-spelling of `arg[0]`. Launch through `PATH` or a symlink still locates
-`.luai/native`.
-
-Application code sees the invoked executable spelling in `arg[0]`. It
-is never replaced with the build-time entry-script path. The
-OS-resolved process image used for native lookup is private bootstrap
-state and is cleared before the entry runs.
+The executable finds its own `.luai/` folder by asking the operating
+system, so starting it through a symlink or from `PATH` works.
 
 [#bundling-lua]
-== Pure-Lua lookup order
+== Where modules are looked up
+
+In this order:
 
 . `package.preload`
-. Modules embedded in the bundle
-. Filesystem Lua searchers
-. Native searchers
+. modules inside the executable
+. the usual Lua file search
+. the usual C module search, with `.luai/native/` in front
 
-Packaged modules take precedence. There is no hermetic sandbox:
-undeclared names may fall through to the host. Embedded code uses
-`load(..., "t")` and carries no bytecode payload. Name collisions
-raise `DuplicateModuleError`.
+The bundle comes first, but it isn't sealed: a module that wasn't packaged
+can still be found on the host. Test with `LUA_PATH` and `LUA_CPATH`
+cleared to catch that.
 
-[#bundling-native]
-== Native modules
-
-Modules are copied by basename and, when known, dotted path. For
-example `socket.core` becomes:
-
-[source,text]
-----
-.luai/native/core.so
-.luai/native/socket/core.so
-----
-
-`package.cpath` is prepended with `.luai/native` patterns for `?.so`,
-`?.dylib`, `?.dll`, and `?/init.*`. RPATH covers the copied Lua
-runtime. Further system libraries of a C module are not auto-packaged.
-Before publish, a native linked probe requires `_VERSION` to match the
-build interpreter.
+A C module like `socket.core` is stored both as `.luai/native/core.so` and
+`.luai/native/socket/core.so`, so either lookup style finds it.
 
 [#bundling-manifest]
-== Manifest and ownership
+== The manifest
 
-`.luai/manifest.lua` records entry, hashes, mode, Lua ABI, platform,
-module groups, include and exclude lists, and trace data. Format
-`version = 2` with `hash_algorithm = "sha256"`.
+`.luai/manifest.lua` is a plain Lua table. It records the entry script,
+Lua version, platform, every module, and a SHA-256 of each file.
 
-Artifact manifests identify sources with stable `source_id` values.
-Paths below the entry directory are relative. An external source uses
-`external/<sha256>/<basename>`. Build-host absolute paths, the output
-path, and manual include paths remain only in the in-memory build
-result and diagnostics. They are not serialized into the bundle.
-Sources are re-read before embed or copy. A mismatch raises
-`SourceChangedError`.
+Files are identified by a `source_id` relative to the entry script. A file
+from outside that folder becomes `external/<sha256>/<name>`.
+Build-host absolute paths aren't written into the bundle, so two
+people building the same code with the same toolchain get identical
+files.
 
-Pure-Lua destinations under `.luai/lua/` are logical identifiers for
-sources embedded in the launcher. No such directory exists in the tree.
-Native module destinations in `.luai/native/` are the real staged
-files, including nested alias copies such as
-`.luai/native/socket/core.so`.
+[#bundling-ownership]
+== Rebuilding in place
 
-With identical inputs and toolchain, builds made under different
-checkout roots produce byte-identical onefile artifacts. Generated
-bootstrap chunk names and manifest trace references use the same
-logical source IDs. Checkout directories and build usernames are not
-embedded as metadata.
+When you build to a folder that already exists, `luainstaller` checks
+`.luai/generated-output.txt` first. It starts with
+`luainstaller-generated-output-v2` and lists every file and folder in the
+bundle, recursive, with its SHA-256.
 
-[#bundling-licenses]
-== Licenses and corresponding source
+The old bundle is replaced only if it still matches that exact file set.
+If anything was added, removed or edited, the build stops rather than
+overwrite your work. Bundles from before this format (v1) need a
+one-time removal: delete the folder once, or build to a new path.
 
-Every onedir and onefile payload contains the Lua MIT license,
-luainstaller's LGPL-3.0-or-later text, the GPLv3 text incorporated by
-the LGPL, and `THIRD_PARTY_NOTICES.md`. The manifest records each
-material's destination and SHA-256. Canonical material is installed
-with the Lua module, so building from another working directory does
-not depend on repository-relative files.
-
-`.luai/build/launcher.c` is the exact generated inner-launcher source
-and contains bundled Lua sources as text. Onefile payloads additionally
-contain `.luai/build/extractor.c`, the exact outer extractor translation
-unit, with a documented generated `payload.inc` interface,
-`payload-files.lua`, and a standalone `generate-onefile-payload.lua`
-re-generator. Preserve `.luai/build/RELINKING.adoc` and the complete
-application and module sources when redistributing. Extra dependencies
-may require additional notices or source.
-
-`.luai/generated-output.txt` is the v2 ownership marker
-(`luainstaller-generated-output-v2`). It records the final directory,
-every generated directory, and every generated regular file with
-SHA-256. Replacement is allowed only when the recursive inventory still
-describes the exact file set, hashes included. Tree edits, symlinks, or
-record mismatch refuse automatic overwrite. Markers from
-`luainstaller-generated-output-v1` are never auto-upgraded. Migration
-is a one-time removal after backup, or a new output path.
+Replacement happens in a private staging folder and is swapped in at the
+end. If the build fails, the previous bundle is put back.
 
 [#bundling-onefile]
-== Single-file
+== The single file
 
-A onefile build first builds a full directory bundle, adds the
-extractor corresponding source, then embeds runtime files into the
-extractor (path, size, executable bit, bytes). The onedir ownership
-marker is omitted. `.luai/build/` is retained for license and relinking
-purposes. An existing output path is not overwritten.
+A single-file build makes a normal directory bundle first, then wraps it
+in a small extractor program (`extractor.c`).
 
-POSIX cache: `luainstaller-onefile-<effective-uid>` under the canonical
-temporary root. Permission and sticky-ancestor rules are in
-xref:TROUBLESHOOTING.adoc[Troubleshooting]. Windows uses the user
-temporary directory with reparse and DACL constraints.
+On first run the extractor unpacks the bundle into a per-user folder under
+the system temporary directory, then hands over to it. Later runs reuse
+that copy if it's byte-for-byte identical.
 
-After extraction, POSIX replaces the outer process with the inner
-launcher, preserving PID, signal, and exit semantics. Windows starts
-the inner launcher suspended, assigns it to a kill-on-close Job Object,
-and resumes it only after containment succeeds. Forcefully terminating
-the outer process therefore also terminates the inner process tree.
+* On Linux and macOS, the extractor replaces itself with the real program,
+  so process ID, signals and exit code behave normally.
+* On Windows, the extractor waits for the program. Closing or killing one
+  ends the other.
 
-Cache hits require full-byte equality. The embedded payload ID is a
-cache deduplication key, not an integrity or authenticity boundary. An
-unsigned single-file executable can be tampered with, and extraction
-reproduces whatever bytes the binary embeds. Sign or otherwise verify
-the executable itself when the distribution channel requires it.
+[CAUTION]
+====
+The payload check exists to avoid unpacking twice. It doesn't protect
+against someone modifying the executable. Sign the file yourself if you
+need that.
+====
 
-After confirming that no process uses the cache:
+[#bundling-licenses]
+== Licenses inside the bundle
 
-[source,bash]
-----
-rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
-----
+Every bundle carries the Lua license (`Lua-MIT.txt`), the luainstaller
+license (LGPL, plus the GPL text it builds on), `THIRD_PARTY_NOTICES.md`,
+and the generated C source in `.luai/build/`. A single file also includes
+`extractor.c` and the script that rebuilds its payload.
 
-If single-file fails, verify the matching directory bundle for the same
-entry first.
+Keep all of it when you pass the program on. Your own dependencies may
+need additional notices. xref:RELINKING.adoc[Relinking] explains what the
+files are for.
 
 xref:../README.adoc#documentation-index[Back to documentation index]
