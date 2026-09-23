@@ -1,15 +1,15 @@
 = Troubleshooting
 :toc: macro
-:toclevels: 3
+:toclevels: 2
 :sectanchors:
 :sectlinks:
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Diagnose the earliest failing step. Confirm the directory bundle before the
-single-file form.
+Diagnose the earliest failing step. Confirm the directory bundle before
+the single-file form.
 
-CLI examples use `luai`. Logs use `luainstaller logs`.
+Command-line examples use `luai`. Logs use `luainstaller logs`.
 
 toc::[]
 
@@ -32,9 +32,9 @@ Record the first failure.
 [#troubleshooting-cli]
 == Command rejected immediately
 
-Messages such as `unknown luai command` / `unknown option`:
+Messages such as `unknown luai command` or `unknown option` mean:
 
-* `luai` uses `-a` / `-t` / `-b` — not `luai build`
+* `luai` uses `-a`, `-t`, and `-b`. It does not accept `luai build`.
 * options that take values must be followed by a value
 * runtime arguments for the entry go after `--`
 
@@ -84,8 +84,8 @@ luai -b app/main.lua -- --profile staging
 |Not a supported official 5.x (including LuaJIT)
 
 |`ToolchainError`
-|Compiler / prefix / `pkg-config` / ABI mismatch; bad explicit prefix is not
-auto-replaced
+|Compiler, prefix, `pkg-config`, or ABI mismatch; a bad explicit prefix
+is not auto-replaced
 
 |`CompilationFailedError`
 |Compiler ran and failed
@@ -108,15 +108,15 @@ auto-replaced
 lua -e 'print(package.path); print(package.cpath)'
 ----
 
-Analyze with the same environment. Do not run the source under one Lua and
-`luai` under another.
+Analyze with the same environment. Do not run the source under one Lua
+and `luai` under another.
 
-Resolution is entry-rooted before `package.path`. Bare `lua app/main.lua` does
-not add the entry directory by itself.
+Resolution is entry-rooted before `package.path`. Bare
+`lua app/main.lua` does not add the entry directory by itself.
 
-For static mode, watch concatenated names, require aliases, path setup before
-the entry, and non-standard optional loads. `luai -t --verbose` shows
-candidates.
+For static mode, watch concatenated names, require aliases, path setup
+before the entry, and non-standard optional loads.
+`luai -t --verbose` shows candidates.
 
 [#troubleshooting-runtime]
 == Runtime discovery
@@ -127,13 +127,14 @@ lua app/main.lua profile_a input.json
 luai -a app/main.lua -d runtime -- profile_a input.json
 ----
 
-Only this run's branch is observed. Missing modules swallowed by `pcall` are
-not dependencies. Do not use a side-effecting entry as a build-time tracer.
+Only this run's branch is observed. Missing modules swallowed by
+`pcall` are not dependencies. Do not use a side-effecting entry as a
+build-time tracer.
 
 [#troubleshooting-compile]
-== Compile / link
+== Compile and link
 
-**Linux**
+Linux:
 
 [source,bash]
 ----
@@ -142,9 +143,10 @@ cc --version
 lua -v
 ----
 
-For a 32-bit build, all three must describe the same ABI. Check the running
-interpreter and every selected native object; setting `CC='cc -m32'` alone
-does not turn 64-bit headers/libraries into a 32-bit toolchain.
+For a 32-bit build, all three must describe the same ABI. Check the
+running interpreter and every selected native object. Setting
+`CC='cc -m32'` alone does not turn 64-bit headers and libraries into a
+32-bit toolchain.
 
 [source,bash]
 ----
@@ -152,33 +154,40 @@ file "$(command -v lua)"
 file /your/lua/prefix/lib/liblua.*
 ----
 
-When no usable `pkg-config` entry exists, pass the native installation root
-with `--lua-prefix`. The root may contain either a shared library or
-`liblua.a`; a bad explicit prefix is reported instead of silently replaced.
+When no usable `pkg-config` entry exists, pass the native installation
+root with `--lua-prefix`. The root may contain either a shared library
+or `liblua.a`. A bad explicit prefix is reported instead of silently
+replaced.
 
-**Android/Termux**: install the compiler and the matching official Lua
-development files inside the same Termux environment. Confirm that
-`TERMUX__PREFIX` (or legacy `PREFIX`) and `TMPDIR` point into the app-private
-filesystem. Do not create `/bin/sh` or `/tmp` compatibility links.
+Android and Termux::
+Install the compiler and the matching official Lua development files
+inside the same Termux environment. Confirm that `TERMUX__PREFIX` (or
+legacy `PREFIX`) and `TMPDIR` point into the app-private filesystem. Do
+not create `/bin/sh` or `/tmp` compatibility links.
 
-**FreeBSD**: use the native compiler and Lua headers/library. `-ldl` is a Linux
-dependency and should not be added manually on FreeBSD. An absent GNU-style
-`timeout` or non-Linux `ldd` output is not itself a toolchain failure.
+FreeBSD::
+Use the native compiler and Lua headers and library. `-ldl` is a Linux
+dependency and should not be added manually on FreeBSD. An absent
+GNU-style `timeout` or non-Linux `ldd` output is not itself a toolchain
+failure.
 
-**macOS**: check `include/lua.h`, `lib/liblua.a`, and architecture under
+macOS::
+Check `include/lua.h`, `lib/liblua.a`, and architecture under
 `--lua-prefix`.
 
-**Windows**: in an MSVC + Windows SDK environment, check `cl.exe`, the import
-library, and `lua*.dll` under the prefix. For Windows XP, run from the prepared
-prompt of an XP-capable compiler, use PowerShell 2 or newer, and inspect the
-final PE subsystem (5.01 for x86, 5.02 for x86_64). A modern UCRT build does
-not become XP-compatible merely because `_WIN32_WINNT` is 0x0501.
+Windows::
+In an MSVC and Windows SDK environment, check `cl.exe`, the import
+library, and `lua*.dll` under the prefix. For Windows XP, run from the
+prepared prompt of an XP-capable compiler, use PowerShell 2 or newer,
+and inspect the final PE subsystem (5.01 for x86, 5.02 for x86_64). A
+modern UCRT build does not become XP-compatible merely because
+`_WIN32_WINNT` is 0x0501.
 
 [#troubleshooting-native]
 == Native module fails after start
 
-Confirm `.luai/native`, manifest trace, architecture and system libraries;
-clear Lua environment variables; test on the real target OS.
+Confirm `.luai/native`, manifest trace, architecture, and system
+libraries. Clear Lua environment variables. Test on the real target OS.
 
 [source,bash]
 ----
@@ -190,7 +199,7 @@ rmdir "$EMPTY_PATH"
 ----
 
 If it only works without a clean environment, the process is using host
-modules—that does not prove packaging.
+modules. That does not prove packaging.
 
 [#troubleshooting-output]
 == Rebuild refused
@@ -201,19 +210,20 @@ find build/app -print | sort
 sed -n '1,160p' build/app/.luai/generated-output.txt
 ----
 
-The first line must be `luainstaller-generated-output-v2`, and the tree must
-match recorded SHA-256 digests. v1 requires manual delete or a new `-o`.
+The first line must be `luainstaller-generated-output-v2`, and the tree
+must match the recorded SHA-256 digests. v1 requires manual delete or a
+new `-o`.
 
-Lock directory: `build/.luai-lock-<hash>`. After confirming no builder is
-running, remove the lock indicated by `owner.*`.
+Lock directory: `build/.luai-lock-<hash>`. After confirming that no
+builder is running, remove the lock indicated by `owner.*`.
 
 [#troubleshooting-onefile]
 == Single-file extraction fails
 
 Confirm the directory bundle first. Check `TMPDIR` and
-`luainstaller-onefile-<uid>` ownership/mode. On Termux, use the app-private
-prefix's `tmp` directory; `/tmp` normally does not exist. Cache hits compare
-full bytes, not size alone.
+`luainstaller-onefile-<uid>` ownership and mode. On Termux, use the
+app-private prefix `tmp` directory. `/tmp` normally does not exist.
+Cache hits compare full bytes, not size alone.
 
 [source,bash]
 ----
@@ -230,8 +240,9 @@ luainstaller logs --level error --limit 20
 lua -v
 ----
 
-Include: full command and exit status, error type / compiler output, OS and
-architecture, Lua version, discovery mode, redacted trace, and whether a clean
-environment still fails. Strip secrets and private paths.
+Include the full command and exit status, error type and compiler
+output, operating system and architecture, Lua version, discovery mode,
+redacted trace, and whether a clean environment still fails. Strip
+secrets and private paths.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

@@ -1,18 +1,21 @@
 = Testing and release gate
 :toc: macro
-:toclevels: 3
+:toclevels: 2
 :sectanchors:
 :sectlinks:
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Required release evidence comes from the GitHub Actions workflow: native Linux
-x86_64, a native 32-bit Lua/compiler/library/artifact path on Linux, and native
-Windows x86_64 with MSVC and the Windows SDK. GitHub-hosted runners are accepted.
-Strict i686/x86_64 MinGW compilation, PE dependency/API inspection and the
-legacy Job Object watchdog contract check the generated Windows XP surface,
-but these checks do not substitute for the Windows MSVC job. Native FreeBSD,
-Android/Termux, Linux ARM64 and macOS runs broaden physical-host evidence.
+Required release evidence comes from the GitHub Actions workflow: native
+Linux x86_64, a native 32-bit Lua, compiler, library, and artifact path
+on Linux, and native Windows x86_64 with MSVC and the Windows SDK.
+GitHub-hosted runners are accepted.
+
+Strict i686 and x86_64 MinGW compilation, PE dependency and API
+inspection, and the legacy Job Object watchdog contract check the
+generated Windows XP surface. These checks do not substitute for the Windows MSVC job.
+Native FreeBSD, Android and Termux, Linux ARM64, and
+macOS runs broaden physical-host evidence.
 
 toc::[]
 
@@ -46,42 +49,48 @@ luarocks lint luainstaller-1.4.0-1.rockspec
 |Exact official-Lua ABI and builtin-module capability table
 
 |`test/version_contract.lua`
-|Exact pinned patch/source identity, compatibility helpers, and source parsing
+|Exact pinned patch and source identity, compatibility helpers, and
+source parsing
 
 |`test/cli_split_smoke.lua`
-|`luai` vs `luainstaller` grammar split
+|`luai` versus `luainstaller` grammar split
 
 |`test/contract_docs.lua`
 |Public documentation contracts
 
 |`test/standalone_install.lua`
-|Offline install without LuaRocks, relocation, both CLI names, library use,
-repeat-install refusal, onedir/onefile and execution with an empty runtime PATH
+|Offline install without LuaRocks, relocation, both CLI names, library
+use, repeat-install refusal, onedir and onefile, and execution with an
+empty runtime PATH
 
 |`test/production_edges.lua`
-|Boundary and safety-related behavior, static/shared Lua fallback, optional
-FreeBSD cross-compilation, executable Termux fallback probes, and x86/x86_64
-XP-targeted generated-C/PE audits
+|Boundary and safety-related behavior, static and shared Lua fallback,
+optional FreeBSD cross-compilation, executable Termux fallback probes,
+and x86 and x86_64 XP-targeted generated-C and PE audits
 
 |`test/build_interruption.lua`
-|Relayed SIGINT compiler shutdown, bounded SIGKILL descendants, dead-owner
-recovery, and clean retry
+|Relayed SIGINT compiler shutdown, bounded SIGKILL descendants,
+dead-owner recovery, and clean retry
 
 |`test/onefile_lifecycle.lua`
-|POSIX process identity/signals and Windows child containment
+|POSIX process identity and signals, and Windows child containment
 
 |`test/distribution_licenses.lua`
-|Notices, corresponding source, no-Lua extraction, tamper repair, and relinking
+|Notices, corresponding source, no-Lua extraction, tamper repair, and
+relinking
 
 |`test/reproducible_artifacts.lua`
-|Byte-identical cross-root artifacts, path privacy, and executable `arg[0]`
+|Byte-identical cross-root artifacts, path privacy, and executable
+`arg[0]`
 
 |`test/smoke_all.lua`
-|Samples, discovery, generated C, directory/single-file, and more
+|Samples, discovery, generated C, directory and single-file, and more
 |===
 
-Everything under `src/` must parse on every supported major/minor. Shared test
-helpers live under `test/support/`.
+Everything under `src/` must parse on every supported major and minor
+version. Shared test helpers live under `test/support/`.
+`test/contract_docs.lua` is the executable form of the public
+documentation promises.
 
 [#testing-install]
 == Install
@@ -92,12 +101,13 @@ luarocks install luainstaller
 luai -v
 ----
 
-Lua 5.5 needs LuaRocks `>= 3.13.0`. Release practice includes isolated tree
-install, invoking commands outside the checkout, and running artifacts with
-`LUA_PATH` / `LUA_CPATH` cleared. Missing `luarocks` is a failure for the
-LuaRocks-specific installation gate. The independent
-`lua test/standalone_install.lua` gate requires no LuaRocks; see
-xref:INSTALL.adoc[Installation without LuaRocks].
+Lua 5.5 needs LuaRocks `>= 3.13.0`. Release practice includes isolated
+tree install, invoking commands outside the checkout, and running
+artifacts with `LUA_PATH` and `LUA_CPATH` cleared.
+
+Missing `luarocks` is a failure for the LuaRocks-specific installation
+gate. The independent `lua test/standalone_install.lua` gate requires
+no LuaRocks. See xref:INSTALL.adoc[Installation without LuaRocks].
 
 [#testing-version-matrix]
 == Official Lua matrix
@@ -122,17 +132,19 @@ xref:INSTALL.adoc[Installation without LuaRocks].
 |5.5.1
 |===
 
-Archives are verified with SHA-256 before extract. The POSIX runner accepts
-`sha256sum`, the macOS-provided `shasum`, or FreeBSD `sha256`; a missing
-verifier is a hard failure. Built Lua and LuaRocks prefixes carry exact cache-schema markers that
-bind the pinned patch archive, build recipe, host class, and compiler. A cache
-with a missing or different marker is rebuilt rather than accepted by ABI name
-alone.
+Archives are verified with SHA-256 before extract. The POSIX runner
+accepts `sha256sum`, the macOS-provided `shasum`, or FreeBSD `sha256`.
+A missing verifier is a hard failure.
 
-The POSIX matrix also builds the real sample dependency set separately for
-each Lua ABI. It installs only the following SHA-256-pinned source inputs with
-LuaRocks dependency resolution disabled, then load-tests every Lua and native
-module from that ABI's isolated tree:
+Built Lua and LuaRocks prefixes carry exact cache-schema markers that
+bind the pinned patch archive, build recipe, host class, and compiler.
+A cache with a missing or different marker is rebuilt rather than
+accepted by ABI name alone.
+
+The POSIX matrix also builds the real sample dependency set separately
+for each Lua ABI. It installs only the following SHA-256-pinned source
+inputs with LuaRocks dependency resolution disabled, then load-tests
+every Lua and native module from that ABI's isolated tree:
 
 [cols="3,4",options="header"]
 |===
@@ -164,33 +176,40 @@ module from that ABI's isolated tree:
 |===
 
 The lsqlite3 C source is fetched from immutable mirror commit
-`72cf3d38f6df7ac995f6db05d8ffeb78c25c9179`; its hash matches the source in
-the upstream `v0.9.6` Fossil snapshot without relying on Fossil's
-server-generated ZIP bytes. The native-dependency cache identity binds both
-this source list and its exact installation order. The runner stages lsqlite3
-and extracts the pinned SQLite amalgamation into distinct roots, rejects any
-selected source outside its expected root, and records each input name,
-SHA-256, internal archive member where applicable, cache identity, and cache
-hit/rebuild result in every evidence log. A cold compile additionally records
-the exact staged/extraction paths; a cache hit never pretends that its
-already-removed build directory still exists.
-Direct Linux matrix runs default to the strict `full` edge-coverage mode and
-set `LUAI_REQUIRE_FULL_EDGE_COVERAGE=1`, so missing sanitizer, alternate
-compiler, LuaJIT, PE cross-inspection, `/dev/full`, or permission probes fail
-the local gate instead of appearing as a pass. CI and supplemental runners use
-`LUAI_MATRIX_EDGE_COVERAGE_MODE=available`: they still run the complete
-production edge suite and every probe supported by that runner, while each
-evidence log explicitly lists unavailable strict prerequisites. A runner with
-every prerequisite automatically runs the same strict gate.
+`72cf3d38f6df7ac995f6db05d8ffeb78c25c9179`. Its hash matches the
+source in the upstream `v0.9.6` Fossil snapshot without relying on
+Fossil's server-generated ZIP bytes.
 
-Each source-built Lua prefix publishes its own `lua.pc`, and the runner pins
-`PKG_CONFIG_PATH` to that file. Native fixtures therefore compile against the
-headers and libraries for the ABI currently under test, never against a host
-`pkg-config lua` entry. The C probe calls a distinct API introduced or specific
-to each of Lua 5.1 through 5.5 and is then loaded by the produced executable.
-Linux requires `pkg-config` for the full metadata-fallback gate. A clean macOS
-host does not: the runner validates the generated `lua.pc` directly and builds
-through the explicit source-built Lua prefix, so Homebrew is not a prerequisite.
+The native-dependency cache identity binds both this source list and
+its exact installation order. The runner stages lsqlite3 and extracts
+the pinned SQLite amalgamation into distinct roots, rejects any selected
+source outside its expected root, and records each input name, SHA-256,
+internal archive member where applicable, cache identity, and cache hit
+or rebuild result in every evidence log. A cold compile additionally
+records the exact staged and extraction paths. A cache hit never
+pretends that its already-removed build directory still exists.
+
+Direct Linux matrix runs default to the strict `full` edge-coverage
+mode and set `LUAI_REQUIRE_FULL_EDGE_COVERAGE=1`. Missing sanitizer,
+alternate compiler, LuaJIT, PE cross-inspection, `/dev/full`, or
+permission probes then fail the local gate instead of appearing as a
+pass. CI and supplemental runners use
+`LUAI_MATRIX_EDGE_COVERAGE_MODE=available`. They still run the complete
+production edge suite and every probe supported by that runner, and each
+evidence log explicitly lists unavailable strict prerequisites. A runner
+with every prerequisite automatically runs the same strict gate.
+
+Each source-built Lua prefix publishes its own `lua.pc`, and the runner
+pins `PKG_CONFIG_PATH` to that file. Native fixtures therefore compile
+against the headers and libraries for the ABI currently under test,
+never against a host `pkg-config lua` entry. The C probe calls a
+distinct API introduced or specific to each of Lua 5.1 through 5.5 and
+is then loaded by the produced executable.
+
+Linux requires `pkg-config` for the full metadata-fallback gate. A clean
+macOS host does not. The runner validates the generated `lua.pc`
+directly and builds through the explicit source-built Lua prefix, so
+Homebrew is not a prerequisite.
 
 [source,bash]
 ----
@@ -206,15 +225,19 @@ powershell.exe -NoLogo -NoProfile -NonInteractive `
   -HostLabel <label>
 ----
 
-A release requires all five versions in both full-matrix GitHub Actions jobs:
-Linux x86_64 and Windows x86_64 with MSVC, plus the native Linux x86 Lua 5.4
-job. Every full-matrix POSIX version runs the
-complete local, native, interruption, onefile, license/relinking,
-reproducibility, production-edge, and smoke gates. Every Windows version runs
-all applicable native Windows gates, including lifecycle, license/relinking,
-and reproducibility. Each per-version evidence log must contain both `lua ABI
-capabilities ok` and the final `PASS` record; `version_contract.lua` also
-matches the interpreter's exact patch banner to the pinned source digest.
+A release requires all five versions in both full-matrix GitHub Actions
+jobs: Linux x86_64 and Windows x86_64 with MSVC, plus the native Linux
+x86 Lua 5.4 job.
+
+Every full-matrix POSIX version runs the complete local, native,
+interruption, onefile, license and relinking, reproducibility,
+production-edge, and smoke gates. Every Windows version runs all
+applicable native Windows gates, including lifecycle, license and
+relinking, and reproducibility.
+
+Each per-version evidence log must contain both `lua ABI capabilities
+ok` and the final `PASS` record. `version_contract.lua` also matches the
+interpreter's exact patch banner to the pinned source digest.
 
 [#testing-systems]
 == Required CI runner classes
@@ -236,10 +259,10 @@ matches the interpreter's exact patch banner to the pinned source digest.
 |`ubuntu-latest` with the `linux-x86-native` job
 |===
 
-Supplemental compatibility targets include Debian and Rocky Linux x86_64,
-Ubuntu ARM64, macOS ARM64, FreeBSD x86_64, physical Windows XP, and
-Android/Termux. Their retained logs are useful additional evidence but do not
-replace the required CI jobs and are not release prerequisites.
+Supplemental compatibility targets include Debian and Rocky Linux
+x86_64, Ubuntu ARM64, macOS ARM64, FreeBSD x86_64, physical Windows XP,
+and Android and Termux. Their retained logs are useful additional
+evidence but do not replace the required CI jobs and are not release prerequisites.
 
 [#testing-orchestration]
 == Orchestration (maintainers)
@@ -253,10 +276,11 @@ LUAI_TEST_LUA=lua sh tools/test-portable-host.sh    # Termux
 ----
 
 On Windows, CI and local native environments run
-`tools/test-lua-versions.ps1`. Transfers used by supplemental lab scripts use
-`git archive`; temporary paths are constrained under patterns such as
-`/tmp/luainstaller-*`. Default SSH targets in scripts are lab-local and are not
-part of the user-facing contract or required release infrastructure.
+`tools/test-lua-versions.ps1`. Transfers used by supplemental lab
+scripts use `git archive`. Temporary paths are constrained under
+patterns such as `/tmp/luainstaller-*`. Default SSH targets in scripts
+are lab-local and are not part of the user-facing contract or required
+release infrastructure.
 
 [#testing-real-world-benchmarks]
 == Real-world benchmark matrix (manual)
@@ -281,14 +305,15 @@ The matrix covers:
 
 Useful options:
 
-* `--skip-external` to skip GitHub network projects (`luacheck`, `neovim`)
-* `--skip-native` to skip native module install/cases
+* `--skip-external` to skip GitHub network projects (`luacheck`,
+  `neovim`)
+* `--skip-native` to skip native module install and cases
 * `--fake-scales "100 1000 10000"` to adjust pressure sets
 * `--keep-workspace` to preserve fixtures and logs
 * `--neovim-timeout 30` to cap each neovim command
 
-Default behavior cleans `/tmp/luainstaller-*` workspace after completion.
-Summary and logs are written to:
+Default behavior cleans the `/tmp/luainstaller-*` workspace after
+completion. Summary and logs are written to:
 
 [source,bash]
 ----
@@ -299,25 +324,27 @@ Summary and logs are written to:
 == Release checklist
 
 . rockspec lint and isolated install
-. Green `local-suites`, five-entry Linux matrix, five-entry Windows/MSVC
-  matrix, and native Linux x86 job in GitHub Actions
+. Green `local-suites`, five-entry Linux matrix, five-entry Windows and
+  MSVC matrix, and native Linux x86 job in GitHub Actions
 . Production sources parse on all five pinned versions
-. Every required local suite above without required skips
+. Every required local suite above, without required skips
 . Directory and single-file runs with `PATH` set to a private empty directory,
-  without system `lua`, and without `LUA_PATH` / `LUA_CPATH`
+  without system `lua`, and without `LUA_PATH` and
+  `LUA_CPATH`
 . Repeated single-file build and extract checks
-. Byte-identical cross-checkout artifacts and bundled-license relinking checks
-. Native modules and system libraries inspected on both required CI runner
-  classes
-. i686 and x86_64 MinGW strict compilation of the exact generated onefile
-  extractor, XP PE subsystem/import closure, and legacy watchdog source
-  contract
-. Supplemental FreeBSD and Termux portable-host logs, when available, clearly
-  identified as non-blocking evidence
+. Byte-identical cross-checkout artifacts and bundled-license relinking
+  checks
+. Native modules and system libraries inspected on both required CI
+  runner classes
+. i686 and x86_64 MinGW strict compilation of the exact generated
+  onefile extractor, XP PE subsystem and import closure, and legacy
+  watchdog source contract
+. Supplemental FreeBSD and Termux portable-host logs, when available,
+  clearly identified as non-blocking evidence
 . Documentation does not prescribe cross-build or a device allowlist
 . `git diff --check` and clean-checkout review
 
-The candidate is the tip of `main`. Save the command output used for the
-decision.
+The candidate is the tip of `main`. Save the command output used for
+the decision.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

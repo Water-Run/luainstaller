@@ -4,17 +4,16 @@
 :sectanchors:
 :sectlinks:
 
-`luainstaller` packages a Lua script into a standalone executable that does not
-require a system `lua` command at runtime (similar to PyInstaller). The binary
-runs on the same platform family as the build host.
+`luainstaller` packages a Lua script into a standalone executable.
+The executable does not need a system `lua` command at run time.
+The target must belong to the same platform family as the build host.
 
-It supports official Lua 5.1 through 5.5 (LuaJIT is rejected) and is released
-under `LGPL-3.0-or-later` at
+The tool supports official Lua 5.1 through 5.5. LuaJIT is rejected.
+It is released under `LGPL-3.0-or-later` at
 https://github.com/Water-Run/luainstaller[GitHub].
 
-The interpreter used for packaging, the headers, the linked runtime, and any
-Lua C modules copied into the bundle must share the **same major.minor** Lua
-ABI.
+The packaging interpreter, the headers, the linked runtime, and every
+bundled Lua C module must share the same major.minor Lua ABI.
 
 toc::[]
 
@@ -30,17 +29,17 @@ With LuaRocks:
 luarocks install luainstaller
 ----
 
-Confirm with:
+Confirm the installation:
 
 [source,bash]
 ----
 luai -v
 ----
 
-NOTE: Lua 5.5 requires LuaRocks 3.13.0 or newer. Older LuaRocks releases do not
-recognize the 5.5 install ABI.
+NOTE: Lua 5.5 requires LuaRocks 3.13.0 or newer. Older LuaRocks releases
+do not recognize the 5.5 install ABI.
 
-Without LuaRocks, run directly from an extracted source tree:
+Without LuaRocks, run from an extracted source tree:
 
 [source,bash]
 ----
@@ -48,7 +47,8 @@ lua bin/luai.lua -v
 lua bin/luainstaller.lua analyze test/runtime_bundle/main.lua
 ----
 
-Or install offline into a new dedicated directory (its parent must exist):
+Or install offline into a new dedicated directory. The parent of that
+directory must already exist:
 
 [source,bash]
 ----
@@ -56,22 +56,21 @@ lua tools/install.lua --prefix "$HOME/luainstaller"
 "$HOME/luainstaller/bin/luai" -v
 ----
 
-Windows uses the same Lua installer and generates `.cmd` launchers. Source
-library use, shell setup, relocation and prerequisites are documented in
-xref:docs/INSTALL.adoc[Installation without LuaRocks]. Building applications
-still requires a native C compiler and matching Lua headers/library.
+Windows uses the same installer and generates `.cmd` launchers.
+Source use, shell setup, relocation, and removal are described in
+xref:docs/INSTALL.adoc[Installation without LuaRocks].
+Building an executable still requires a native C compiler and Lua
+headers and library that match the interpreter ABI.
 
 [#usage]
 == Usage
 
-`luainstaller` can be used in two ways: as a **command-line tool**, or as a
-**library** from a `.lua` script.
+`luainstaller` may be used as a command-line tool or as a library.
 
-The CLI has two names: `luainstaller` and `luai`. They share the same features
-(analyze, trace, build, and so on) but use **different input syntax and
-different terminal output**. `luainstaller` is the modern subcommand-style
-interface; `luai` is the short-option style closer to traditional Lua tooling.
-The grammars must not be mixed. Mapping:
+The command line has two names with separate grammars. The features are
+the same; the input syntax and terminal output are not. The two grammars
+must not be mixed. `luainstaller` uses subcommands. `luai` uses short
+options in the manner of traditional Lua tools.
 
 [cols="1,2,2",options="header"]
 |===
@@ -102,19 +101,24 @@ The grammars must not be mixed. Mapping:
 |`luainstaller logs`
 |===
 
-Unless noted otherwise, command-line examples use `luai`. Details:
-xref:docs/USAGE.adoc[Usage].
+Unless stated otherwise, the examples below use `luai`. Full option
+reference: xref:docs/USAGE.adoc[Usage].
 
 [#usage-cli]
 === Command line
 
-Suggested order: confirm the source program runs → analyze/trace dependencies →
-build a **directory bundle** (onedir) → run with `LUA_PATH` and `LUA_CPATH`
-cleared → then build a **single-file** (onefile) if needed. The directory form
-exposes the manifest, generated C, and native libraries; onefile is
-self-extracting—if it fails, verify the matching directory bundle first.
+Work in this order:
 
-Example:
+. Run the source program.
+. Analyze or trace the dependencies.
+. Build a directory bundle (`--dir`).
+. Run the bundle with `LUA_PATH` and `LUA_CPATH` cleared.
+. Build a single-file executable (`--file`) only after the directory
+  bundle works.
+
+The directory bundle keeps the manifest, generated C, and native
+libraries visible. The single-file form is self-extracting. When it
+fails, verify the matching directory bundle first.
 
 [source,bash]
 ----
@@ -126,7 +130,7 @@ luai -b --dir test/runtime_bundle/main.lua \
 build/runtime-demo/runtime-demo Ada
 ----
 
-After the directory bundle works:
+After the directory bundle succeeds:
 
 [source,bash]
 ----
@@ -135,38 +139,42 @@ luai -b --file test/runtime_bundle/main.lua \
 build/runtime-demo-onefile Ada
 ----
 
-Expected output begins with `hello Ada`.
+The output begins with `hello Ada`.
 
 Common `luai` options:
 
 * `--dir` — directory bundle (default)
 * `--file` — single-file executable
 * `-o` — output path
-* `--max-deps` — limit on auto-discovered Lua dependencies (default is small;
-  raise it for large apps)
+* `--max-deps` — limit on auto-discovered Lua dependencies
+  (default is small; raise it for large applications)
 * `-d static|runtime|manual` — discovery mode (default `static`)
 
-Before release, run the artifact at least once without a system `lua` and
-without `LUA_PATH` / `LUA_CPATH`, so missing dependencies are not hidden by the
-host. Platform limits:
+Before release, run the artifact at least once without a system `lua`
+and with `LUA_PATH` and `LUA_CPATH` cleared. Otherwise the host may
+hide a missing dependency.
+
+Platform limits are stated in
 xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
 Diagnosis: xref:docs/TROUBLESHOOTING.adoc[Troubleshooting].
 
-Every generated distribution contains the Lua MIT notice, the luainstaller
-LGPL/GPL texts, third-party notices, generated C source, and relinking
-instructions. Preserve them when redistributing an artifact and add the
-notices/source required by application dependencies. Details:
-xref:docs/RELINKING.adoc[Relinking generated bundles].
+Every generated distribution contains the Lua MIT notice, the
+luainstaller LGPL/GPL texts, third-party notices, generated C source,
+and relinking instructions. Preserve them when redistributing an
+artifact, and add the notices and source required by application
+dependencies. Details: xref:docs/RELINKING.adoc[Relinking generated
+bundles].
 
 [#usage-api]
-=== Library use from `.lua`
+=== Library use
 
-After install, `require("luainstaller")` uses the same implementation as the
-CLI. The structured result contract applies to `analyze`, `trace`,
-`compatibility`, and `bundle` only. Success sets `ok = true`; failure sets
-`ok = false` and `error` (with `type`, `message`, and related fields).
-`getLogs` returns a list of log records; `clearLogs` returns a boolean. Version
-string: `require("luainstaller").VERSION`.
+After installation, `require("luainstaller")` uses the same
+implementation as the command line.
+The structured result contract applies to `analyze`, `trace`, `compatibility`, and `bundle` only.
+Success sets `ok = true`. Failure sets `ok = false` and an `error` table
+with `type`, `message`, and related fields.
+`getLogs` returns a list of log records; `clearLogs` returns a boolean.
+The version string is `require("luainstaller").VERSION`.
 
 [source,lua]
 ----
@@ -195,16 +203,16 @@ end
 print(built.executable)
 ----
 
-Option meaning matches the CLI. Full API notes are in
+Option names and meanings match the command line. Further API notes:
 xref:docs/USAGE.adoc[Usage].
 
-[#test-environments]
+[#platforms]
 == Platform coverage
 
-v1.3 selects implementations by native capability rather than by a short OS
-allowlist. Builds remain native: the compiler, Lua headers/library, native
-modules, architecture and target OS must agree. The release gates and
-platform-specific contract cover:
+Builds are native. The compiler, Lua headers and library, native
+modules, architecture, and target operating system must agree.
+Implementation is selected by native capability rather than by a short
+operating-system allowlist.
 
 [cols="2,1,2",options="header"]
 |===
@@ -239,18 +247,17 @@ platform-specific contract cover:
 |Static Lua preferred; verified dylib fallback
 |===
 
-Windows XP builds require PowerShell 2 or newer and an XP-targeting compiler
-runtime; installing a modern compiler on a new host does not by itself make
-its CRT XP-compatible. Full requirements and evidence tiers:
-xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules] and
-xref:docs/TESTING.adoc[Testing].
+Windows XP builds require PowerShell 2 or newer and a compiler runtime
+that targets XP. Installing a modern compiler on a new host does not by
+itself make its CRT XP-compatible. Full requirements:
+xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[Platforms and native modules].
+Evidence tiers: xref:docs/TESTING.adoc[Testing].
 
 [#documentation-index]
 == Documentation
 
 * xref:CHANGELOG.adoc[Changelog] — release changes and upgrade notes
 * xref:docs/INSTALL.adoc[Installation without LuaRocks]
-* xref:docs/NEXT-RELEASE.adoc[1.4.0 release scope and follow-up] (maintainers)
 * xref:docs/USAGE.adoc[Usage] — options, discovery, API
 * xref:docs/BUNDLING.adoc[Bundle format] — layout and runtime
 * xref:docs/RELINKING.adoc[Licenses and relinking]
@@ -258,3 +265,4 @@ xref:docs/TESTING.adoc[Testing].
 * xref:docs/TROUBLESHOOTING.adoc[Troubleshooting]
 * xref:docs/IMPLEMENTATION.adoc[Implementation] (maintainers)
 * xref:docs/TESTING.adoc[Testing] (maintainers)
+* xref:docs/NEXT-RELEASE.adoc[1.4.0 release scope and follow-up] (maintainers)

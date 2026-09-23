@@ -1,12 +1,13 @@
 = Implementation notes
 :toc: macro
-:toclevels: 3
+:toclevels: 2
 :sectanchors:
 :sectlinks:
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-Maintainer notes. Public behavior: xref:USAGE.adoc[Using luainstaller].
+Maintainer notes. Public behavior:
+xref:USAGE.adoc[Using luainstaller].
 
 toc::[]
 
@@ -23,16 +24,17 @@ CLI / Lua API
   -> directory or single-file bundle
 ----
 
-Orchestration is `src/init.lua`. The CLI only parses and renders.
+Orchestration lives in `src/init.lua`. The CLI only parses and renders.
 
 [#implementation-api]
 == API
 
 Exports: `analyze`, `trace`, `compatibility`, `bundle`, `getLogs`,
-`clearLogs`. The structured result contract applies to `analyze`, `trace`,
-`compatibility`, and `bundle` only. Success: `ok = true`. Failure: `ok = false`
-and `error`. `getLogs` returns a list of log records; `clearLogs` returns a
-boolean. Unknown options for the structured operations are rejected before
+`clearLogs`.
+The structured result contract applies to `analyze`, `trace`, `compatibility`, and `bundle` only.
+Success sets `ok = true`. Failure sets `ok = false` and `error`.
+`getLogs` returns a list of log records; `clearLogs` returns a boolean.
+Unknown options for the structured operations are rejected before
 discovery.
 
 [#implementation-modules]
@@ -82,22 +84,26 @@ discovery.
 [#implementation-discovery]
 == Discovery
 
-**static**: lex literal require / optional pcall; entry directory first;
-computed names → `DynamicRequireError`.
+static::
+Lex literal require and optional pcall. The entry directory is searched
+first. Computed names raise `DynamicRequireError`.
 
-**runtime**: private directory + tracer; official Lua 5.1+; reject LuaJIT,
-native loader paths, and modules already cached before the trace. When the
-runtime returns **loader data** naming a readable `.lua`, that path is
-recorded. A single complete completion marker is required.
+runtime::
+Private directory plus tracer. Official Lua 5.1 and newer. Reject
+LuaJIT, native loader paths, and modules already cached before the
+trace. When the runtime returns loader data naming a readable `.lua`,
+that path is recorded. A single complete completion marker is required.
 
 [#implementation-manifest]
 == Manifest and ABI
 
-Pure-Lua paths stay relative to the entry; outside the tree uses the stable
-logical ID `external/<sha256>/<basename>`. The serialized manifest contains
-`source_id` values and no build-host absolute paths; the in-memory build
-manifest retains physical paths for verification and diagnostics. Manifest v2
-uses SHA-256; mismatch → `SourceChangedError`.
+Pure-Lua paths stay relative to the entry. Sources outside the tree use
+the stable logical ID `external/<sha256>/<basename>`. The serialized
+manifest contains `source_id` values and no build-host absolute paths.
+The in-memory build manifest retains physical paths for verification
+and diagnostics. Manifest v2 uses SHA-256. A mismatch raises
+`SourceChangedError`.
+
 Launcher compile-time guards and `_VERSION` probes use the build
 interpreter's major/minor ABI and run on the native host.
 
@@ -107,16 +113,17 @@ SHA-256 inventories.
 [#implementation-onedir]
 == Directory transaction
 
-Private `0700` staging → backup previous output → rename → revalidate →
-quarantine delete. The marker records the final path. Overwrite decisions use
-the full v2 tree hashes.
+Private `0700` staging, then backup previous output, rename,
+revalidate, and quarantine delete. The marker records the final path.
+Overwrite decisions use the full v2 tree hashes.
 
 [#implementation-onefile]
 == Single-file
 
-Only safe relative paths. POSIX: `openat` / `O_NOFOLLOW` and UID cache.
-Windows: no reparse follow; handles held until the child exits. Payload ID:
-sorted path + mode + size + content SHA-256.
+Only safe relative paths are accepted. POSIX uses `openat` /
+`O_NOFOLLOW` and a UID cache. Windows does not follow reparse points
+and holds handles until the child exits. The payload ID is sorted path
+plus mode plus size plus content SHA-256.
 
 [#implementation-errors]
 == Errors
@@ -127,19 +134,19 @@ Prefer actionable types: `ScriptNotFoundError`, `LuaSyntaxError`,
 `CompilationFailedError`, `FilesystemError`, `DiscoveryError`,
 `UnsupportedPlatformError`, `UnsupportedLuaVersionError`, and related.
 
-Quote every path in shell commands; reject dangerous compiler-flag
+Quote every path in shell commands. Reject dangerous compiler-flag
 metacharacters.
 
 [#implementation-change-checklist]
 == Before changing code
 
-. Add a test that fails on the old behavior
-. Four local suites plus syntax checks
-. Review generated C when launcher/extractor changes
-. Run affected multi-version / multi-platform gates
-. Update docs when public behavior changes
-. Failed rebuild must not damage prior output
-. Clean environment must not rely on host modules
+. Add a test that fails on the old behavior.
+. Run the four local suites and the syntax checks.
+. Review generated C when launcher or extractor changes.
+. Run affected multi-version and multi-platform gates.
+. Update docs when public behavior changes.
+. Confirm that a failed rebuild leaves prior output intact.
+. Confirm that a clean environment does not rely on host modules.
 
 Commands: xref:TESTING.adoc[Testing].
 
