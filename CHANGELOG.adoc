@@ -9,10 +9,11 @@ truth for the exact contents of a published version.
 
 === Added
 
-* Simplified Chinese translation of the README (`README.zh-CN.adoc`), with
-  language switch links in both files.
-* Introduction video links in the READMEs: Chinese on bilibili, English on
-  YouTube.
+* Complete Simplified Chinese documentation: `README.zh-CN.adoc` plus
+  `docs/zh-CN/` translations of every guide, with language switch links in
+  both READMEs.
+* Introduction video link in the READMEs: bilibili in the Chinese README,
+  YouTube in the English one.
 
 == 1.4.0 - 2026-09-22
 

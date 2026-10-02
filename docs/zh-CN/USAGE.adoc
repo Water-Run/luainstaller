@@ -1,0 +1,231 @@
+= 使用 luainstaller
+:toc: macro
+:toc-title: 目录
+:toclevels: 2
+:sectanchors:
+:sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+本指南介绍日常打包：工作流程、各选项、依赖的发现方式以及 Lua API。
+示例使用短命令 `luai`；`luainstaller build` 等长命令做的是同样的事。
+
+toc::[]
+
+[#usage-workflow]
+== 工作流程
+
+. 先确认脚本能直接用 `lua` 运行。
+. 用 `luai -a` 检查它的依赖。
+. 构建一个目录打包。
+. 清空 Lua 搜索路径后运行打包结果。
+. 需要的话，再构建单文件。
+
+下面使用仓库自带的示例程序：
+
+[source,bash]
+----
+lua test/runtime_bundle/main.lua Ada                       # <1>
+luai -a test/runtime_bundle/main.lua                       # <2>
+luai -b test/runtime_bundle/main.lua -o build/demo         # <3>
+env -u LUA_PATH -u LUA_CPATH build/demo/demo Ada            # <4>
+luai -b --file test/runtime_bundle/main.lua -o build/demo1 # <5>
+----
+<1> 正常运行，打印 `hello Ada`。
+<2> 列出将要打包的模块。
+<3> 构建出 `build/demo/` 目录。
+<4> 在不依赖本机已安装 Lua 模块的情况下运行打包结果。
+<5> 构建一个单独的可执行文件。
+
+TIP: 可执行文件以输出目录命名。用 `-o build/myapp` 会得到
+`build/myapp/myapp`。
+
+[#usage-onedir]
+== 目录打包还是单文件
+
+[cols="1h,3,3",options="header"]
+|===
+| |目录打包（`--dir`，默认） |单文件（`--file`）
+
+|你会得到
+|一个目录，里面是可执行文件和一个隐藏的 `.luai/`
+|一个可执行文件
+
+|启动方式
+|直接运行
+|先解包到临时目录再运行；之后的启动会复用它
+
+|适合
+|调试、安装程序、任何你要解压的东西
+|把一个文件交给别人
+|===
+
+你的脚本和纯 Lua 模块会被编译进可执行文件。原生 C 模块以及某些系统
+上的 Lua 库放在 `.luai/native/` 中。
+
+打包结果中的模块始终优先于宿主机上的同名模块。不过打包结果并不是
+沙箱：忘记打包的模块如果恰好安装在宿主机上，仍然可能从宿主机加载。
+这就是上面第 4 步要清空 `LUA_PATH` 和 `LUA_CPATH` 的原因。
+
+想从头开始，就删除输出目录。`luainstaller` 会原地重建自己生成的
+输出，但不会覆盖你手工修改过的目录，也不会覆盖不是它创建的目录。
+
+[#usage-discovery]
+== 依赖是如何被发现的
+
+有三种模式，用 `-d` 选择。
+
+static（默认）::
+读取你的源码，跟踪字面形式的 `require` 调用，例如
+`require("json")` 或 `pcall(require, "socket")`。它先从入口脚本所在
+目录开始，再使用 `package.path` 和 `package.cpath`。
++
+`require("drivers." .. name)` 这样计算出来的名称无法跟踪，构建会以
+`DynamicRequireError` 中止。用 `--include` 补上这些模块，或者改用
+其他模式。
+
+runtime::
+把脚本真正运行一次，记录它实际加载的内容。`--` 之后的参数会传给
+脚本：
++
+[source,bash]
+----
+luai -a app/main.lua -d runtime -- --profile demo input.json
+----
++
+WARNING: 脚本会真正运行。如果代码在加载时会写文件、访问网络或启动
+服务，不要使用这种模式。记录下来的只有本次运行走过的代码路径。
+
+manual::
+不扫描任何内容，由你自己列出每个模块：
++
+[source,bash]
+----
+luai -b app/main.lua -d manual \
+  --include app/core.lua \
+  --include app/db/sqlite.lua
+----
+
+传给 `--include` 的路径保持其相对于入口脚本的位置，因此
+`require("db.sqlite")` 仍能找到 `app/db/sqlite.lua`。
+
+[#usage-native]
+== 原生 C 模块
+
+C 模块通过 `package.cpath` 查找，与 Lua 自己查找的方式相同。把环境
+变量指向程序使用的那些目录：
+
+[source,bash]
+----
+LUA_PATH='/opt/app/share/lua/5.4/?.lua;;' \
+LUA_CPATH='/opt/app/lib/lua/5.4/?.so;;' \
+luai -b app/main.lua -o build/app --max-deps 250
+----
+
+之后，检查复制了哪些内容：
+
+[source,bash]
+----
+ls build/app/.luai/native/
+ldd build/app/app        # macOS 上用 otool -L
+----
+
+`luainstaller` 只复制模块文件本身，不复制它可能依赖的系统库。如果
+某个模块需要比如 `libssl`，目标机器上就必须有这个库。
+
+[#usage-options]
+== 全部选项
+
+.输出
+[horizontal]
+`--dir`:: 目录打包（默认）
+`--file`:: 单个可执行文件
+`-o PATH`:: 输出路径
+
+.依赖
+[horizontal]
+`-d MODE`:: `static`（默认）、`runtime` 或 `manual`
+`--no-depscan`:: 等同于 `-d manual`
+`--include PATH`:: 补上扫描遗漏的 `.lua` 文件
+`--exclude NAME`:: 排除某个依赖（路径、文件名或路径后缀）
+`--max-deps N`:: 找到的 Lua 模块超过 N 个就停止（默认 36）
+
+.工具链
+[horizontal]
+`--lua PATH`:: 运行时发现使用的解释器；必须与运行 `luainstaller` 的
+Lua 是同一个版本
+`--lua-prefix PATH`:: 指定 Lua 头文件和库的位置，在自动检测选错时使用
+`--target-os OS`:: 构建机器不是该操作系统即失败；不支持交叉编译
+
+.其他
+[horizontal]
+`--verbose`:: 工作时输出更多细节
+`-- ARGS`:: 运行时发现期间传给脚本的参数
+
+[#usage-logs]
+== 日志
+
+每条命令都会向 `~/.luainstaller/` 写入一条简短记录。只有长命令名能
+读取它们：
+
+[source,bash]
+----
+luainstaller logs
+luainstaller logs --level error --limit 20
+----
+
+终端输出和编译器消息提供的信息通常比日志多。
+
+[#usage-api]
+== 库 API
+
+[source,lua]
+----
+local luainstaller = require("luainstaller")
+
+local analysis = luainstaller.analyze({
+    entry = "app/main.lua",
+    max_deps = 120,
+})
+if not analysis.ok then
+    io.stderr:write(analysis.error.type, ": ", analysis.error.message, "\n")
+    os.exit(1)
+end
+
+local built = luainstaller.bundle({
+    entry = "app/main.lua",
+    mode = "onefile",          -- or "onedir" (default)
+    out = "build/app",
+})
+print(built.ok and built.executable or built.error.message)
+----
+
+[cols="1m,3",options="header"]
+|===
+|函数 |作用
+
+|analyze(opts)     |列出依赖，类似 `luai -a`
+|trace(opts)       |解释每个依赖是如何解析的，类似 `luai -t`
+|compatibility(opts) |不构建，只检查工具链和平台
+|bundle(opts)      |构建，类似 `luai -b`
+|getLogs(opts)     |返回日志记录（一个列表）
+|clearLogs()       |删除日志；成功时返回 `true`
+|===
+
+前四个函数返回一个带 `ok` 的表。当 `ok` 为 `false` 时，`error.type`
+和 `error.message` 会说明原因；错误类型列表见
+xref:TROUBLESHOOTING.adoc#troubleshooting-errors[故障排查]。
+
+选项名与命令行一致，改用下划线：`max_deps`、`discovery_mode`、
+`include`、`exclude`、`lua_prefix` 等。未知选项会报错，而不是被忽略。
+
+版本号是 `luainstaller.VERSION`。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

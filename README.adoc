@@ -20,8 +20,7 @@ Turn a Lua script into a program you can hand to someone else.
 runtime, and builds a native executable from them. The person running it
 doesn't need Lua installed.
 
-Video introduction: link:https://www.youtube.com/watch?v=ctYfIRZeuYc[English (YouTube)] ·
-link:https://www.bilibili.com/video/BV1x6a16sEZx[中文 (bilibili)].
+Video introduction: link:https://www.youtube.com/watch?v=ctYfIRZeuYc[YouTube].
 
 [source,bash]
 ----
@@ -240,6 +239,9 @@ must already be built for the target system and your Lua version.
 
 |xref:CHANGELOG.adoc[Changelog]
 |Changes between releases
+
+|link:README.zh-CN.adoc[Simplified Chinese]
+|This README and every guide, translated
 |===
 
 .For contributors

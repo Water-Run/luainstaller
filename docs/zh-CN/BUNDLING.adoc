@@ -1,0 +1,112 @@
+= 打包格式
+:toc: macro
+:toc-title: 目录
+:toclevels: 1
+:sectanchors:
+:sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+`luainstaller` 在打包里放了什么，它启动时又发生了什么。使用这个工具并不需要了解这些；这部分内容是写给想了解内部实现的读者的。
+
+toc::[]
+
+[#bundling-onedir]
+== 文件夹里有什么
+
+[source,text]
+----
+app/
+├── app                          <1>
+├── THIRD_PARTY_NOTICES.md
+└── .luai/
+    ├── manifest.lua             <2>
+    ├── generated-output.txt     <3>
+    ├── native/                  <4>
+    │   ├── liblua-5.4.so
+    │   └── lfs.so
+    ├── licenses/
+    │   ├── Lua-MIT.txt
+    │   ├── LGPL-3.0-or-later.txt
+    │   └── GPL-3.0-or-later.txt
+    └── build/                   <5>
+        ├── launcher.c
+        ├── generate-onefile-payload.lua
+        └── RELINKING.adoc
+----
+<1> 可执行文件。你的脚本和所有纯 Lua 模块都以源码文本的形式放在它里面。
+<2> 打包了哪些内容，每个文件都带有 SHA-256。
+<3> `luainstaller` 创建此文件夹的凭证（见 <<bundling-ownership>>）。
+<4> C 模块，以及以共享库方式链接时的 Lua 库。在 Windows 上，Lua DLL 也放在可执行文件旁边。
+<5> 生成的 C 源码，用于重新构建可执行文件。
+
+[#bundling-launcher]
+== 它如何启动
+
+. 可执行文件创建一个 Lua state 并打开标准库。
+. 它按照 `lua` 的做法设置 `arg`。`arg[0]` 是程序启动时所用的名字。
+. 它把打包的模块和 `.luai/native/` 加入模块搜索。
+. 它运行你的脚本，失败时打印 traceback。
+
+可执行文件通过向操作系统询问来定位自己的 `.luai/` 文件夹，因此通过符号链接或从 `PATH` 启动它都能正常工作。
+
+[#bundling-lua]
+== 模块的查找位置
+
+按以下顺序：
+
+. `package.preload`
+. 可执行文件内的模块
+. 通常的 Lua 文件搜索
+. 通常的 C 模块搜索，`.luai/native/` 排在最前
+
+打包排在最前，但它不是封闭的：没有被打包的模块仍然可以在宿主机上找到。清空 `LUA_PATH` 和 `LUA_CPATH` 再测试，就能暴露这种情况。
+
+像 `socket.core` 这样的 C 模块会同时存储为 `.luai/native/core.so` 和 `.luai/native/socket/core.so`，因此两种查找方式都能找到它。
+
+[#bundling-manifest]
+== 清单
+
+`.luai/manifest.lua` 是一个普通的 Lua table。它记录入口脚本、Lua 版本、平台、每个模块，以及每个文件的 SHA-256。
+
+文件由相对于入口脚本的 `source_id` 标识。来自该文件夹之外的文件会记为 `external/<sha256>/<name>`。构建宿主机上的绝对路径不会写进打包，因此两个人用同一工具链构建同一份代码会得到完全相同的文件。
+
+[#bundling-ownership]
+== 原地重建
+
+当你构建到一个已存在的文件夹时，`luainstaller` 会先检查 `.luai/generated-output.txt`。它以 `luainstaller-generated-output-v2` 开头，递归列出打包中的每个文件和文件夹，并附上各自的 SHA-256。
+
+只有当旧打包仍然与那份确切的文件集合一致时，它才会被替换。如果有任何文件被添加、删除或修改，构建会停止，而不是覆盖你的工作成果。此格式之前（v1）的打包需要一次性删除：把这个文件夹删掉一次，或者构建到一个新路径。
+
+替换在一个私有的暂存目录中进行，最后才整体换入。如果构建失败，会恢复之前的打包。
+
+[#bundling-onefile]
+== 单文件
+
+单文件构建先制作一个普通的目录打包，然后把它封装进一个小型解包器程序（`extractor.c`）。
+
+首次运行时，解包器把打包解压到系统临时目录下一个按用户区分的文件夹里，然后移交给它。之后的运行在副本逐字节一致时会复用它。
+
+* 在 Linux 和 macOS 上，解包器会用真正的程序替换自身，因此进程 ID、信号和退出码都表现正常。
+* 在 Windows 上，解包器会等待程序。关闭或杀死其中一个，另一个也会跟着结束。
+
+[CAUTION]
+====
+载荷校验是为了避免解包两次。它不能防止有人修改可执行文件。如果你需要这种保护，请自行对文件签名。
+====
+
+[#bundling-licenses]
+== 打包内的许可证
+
+每个打包都带有 Lua 许可证（`Lua-MIT.txt`）、luainstaller 的许可证（LGPL，以及它所基于的 GPL 文本）、`THIRD_PARTY_NOTICES.md`，以及 `.luai/build/` 里生成的 C 源码。单文件还会包含 `extractor.c` 和重建其载荷的脚本。
+
+把程序传给别人时请保留所有这些内容。你自己的依赖可能需要额外的声明。xref:RELINKING.adoc[重链接] 说明了这些文件的用途。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

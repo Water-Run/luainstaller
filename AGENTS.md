@@ -28,6 +28,14 @@ User docs (`README.adoc`, `docs/*.adoc` except `IMPLEMENTATION` and
 - Every file in `docs/` keeps the
   `xref:../README.adoc#documentation-index[Back to documentation index]`
   line at top and bottom.
+- `docs/zh-CN/` mirrors `docs/` with Simplified Chinese translations, one
+  file per English guide, and `README.zh-CN.adoc` is the Chinese entry
+  point. Keep the translated set, anchors and code blocks in step with the
+  English files; each translation keeps the
+  `xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]` line at
+  top and bottom. The Chinese README links the bilibili intro video and
+  the English README the YouTube one. The bundle-embedded RELINKING copy
+  is the English `docs/RELINKING.adoc`; the translation is repo-only.
 
 # Release checklist
 

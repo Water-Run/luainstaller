@@ -20,8 +20,7 @@ endif::[]
 运行时，用它们构建出一个原生可执行文件。运行它的人不需要安装
 Lua。
 
-介绍视频：link:https://www.bilibili.com/video/BV1x6a16sEZx[中文（bilibili）] ·
-link:https://www.youtube.com/watch?v=ctYfIRZeuYc[English (YouTube)]。
+介绍视频：link:https://www.bilibili.com/video/BV1x6a16sEZx[bilibili]。
 
 [source,bash]
 ----
@@ -54,7 +53,7 @@ export PATH="$HOME/luainstaller/bin:$PATH"
 ----
 
 更多细节（包括 Windows 上的安装，以及迁移或删除一个安装）见
-xref:docs/INSTALL.adoc[免 LuaRocks 安装指南]（英文）。
+xref:docs/zh-CN/INSTALL.adoc[免 LuaRocks 安装指南]。
 
 .构建可执行文件需要什么
 ****
@@ -142,7 +141,7 @@ IMPORTANT: 如果单文件表现异常，回到目录打包。它展示的就是
 `--include FILE`:: 补上扫描看不到的模块
 `-d runtime`:: 通过实际运行脚本来发现依赖
 
-其余内容见 xref:docs/USAGE.adoc[使用指南]（英文）。
+其余内容见 xref:docs/zh-CN/USAGE.adoc[使用指南]。
 
 [#usage-api]
 == 在 Lua 中使用
@@ -166,7 +165,7 @@ end
 ----
 
 每次调用都返回一个带 `ok` 的表。失败时，`error.type` 指出问题所在。
-选项与命令行一致；见 xref:docs/USAGE.adoc#usage-api[库 API]（英文）。
+选项与命令行一致；见 xref:docs/zh-CN/USAGE.adoc#usage-api[库 API]。
 
 [#platforms]
 == 支持的平台
@@ -180,7 +179,7 @@ end
 
 |Windows XP SP3 及以上
 |x86、x86_64
-|需要支持 XP 的编译器和运行时。footnote:[新版的 Visual Studio 或 UCRT 构建无法在 XP 上启动。见 xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[平台说明]（英文）。]
+|需要支持 XP 的编译器和运行时。footnote:[新版的 Visual Studio 或 UCRT 构建无法在 XP 上启动。见 xref:docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc[平台说明]。]
 
 |Windows 7 及以上
 |x86、x86_64、ARM、ARM64
@@ -214,37 +213,37 @@ end
 [#documentation-index]
 == 文档
 
-NOTE: 以下指南为英文。
-
 [cols="1,3",frame=none,grid=none]
 |===
-|xref:docs/INSTALL.adoc[安装]
+|xref:docs/zh-CN/INSTALL.adoc[安装]
 |免 LuaRocks 安装，覆盖 Linux、macOS 和 Windows
 
-|xref:docs/USAGE.adoc[使用]
+|xref:docs/zh-CN/USAGE.adoc[使用]
 |全部选项、依赖发现、原生模块、库 API
 
-|xref:docs/TROUBLESHOOTING.adoc[故障排查]
+|xref:docs/zh-CN/TROUBLESHOOTING.adoc[故障排查]
 |常见错误及解决方法
 
-|xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[平台]
+|xref:docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc[平台]
 |各系统的编译器、Windows XP、原生模块、范围之外的内容
 
-|xref:docs/BUNDLING.adoc[打包格式]
+|xref:docs/zh-CN/BUNDLING.adoc[打包格式]
 |打包结果里有什么、它如何启动
 
-|xref:docs/RELINKING.adoc[许可证与重链接]
+|xref:docs/zh-CN/RELINKING.adoc[许可证与重链接]
 |再分发可执行文件时要保留什么
 
 |xref:CHANGELOG.adoc[更新日志]
 |各版本之间的变化
 |===
 
+NOTE: 英文原版位于仓库的 link:docs[docs/] 目录。
+
 .面向贡献者
 [%collapsible]
 ====
-* xref:docs/IMPLEMENTATION.adoc[实现说明] — 代码如何组织
-* xref:docs/TESTING.adoc[测试] — 测试套件与 CI
+* xref:docs/zh-CN/IMPLEMENTATION.adoc[实现说明] — 代码如何组织
+* xref:docs/zh-CN/TESTING.adoc[测试与发布门禁] — 测试套件与 CI
 ====
 
 [#license]
@@ -254,4 +253,4 @@ NOTE: 以下指南为英文。
 
 每个打包结果都包含 Lua 许可证、luainstaller 许可证和生成的 C
 源码，因此可以原样转发。再分发时保留 `.luai/` 目录。原因见
-xref:docs/RELINKING.adoc[重链接]（英文）。
+xref:docs/zh-CN/RELINKING.adoc[重链接]。

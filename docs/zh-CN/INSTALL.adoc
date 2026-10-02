@@ -1,0 +1,80 @@
+= 免 LuaRocks 安装
+:sectanchors:
+:sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+`luainstaller` 是纯 Lua 编写的，因此不需要 LuaRocks。你可以直接从源码目录运行它，也可以把一份副本安装到自己的目录。两种方式都不需要管理员权限，也不需要网络连接。
+
+NOTE: 安装器只复制 `luainstaller` 本身，不会安装 Lua、C 编译器或你的应用依赖。
+
+== 从源码目录运行
+
+下载并解压源码，然后：
+
+[source,bash]
+----
+lua bin/luai.lua -v
+lua bin/luai.lua -b path/to/app/main.lua -o build/app
+----
+
+`bin/luainstaller.lua` 提供子命令风格。只要给出完整路径，两者都能在任意目录下运行。
+
+要使用这个库，先把源码目录加入 `package.path`：
+
+[source,lua]
+----
+package.path = "/path/to/luainstaller/?.lua;" .. package.path
+local luainstaller = require("luainstaller")
+----
+
+== 安装一份副本
+
+选一个尚不存在的目录，其父目录必须已经存在。
+
+Linux 和 macOS::
++
+[source,bash]
+----
+lua tools/install.lua --prefix "$HOME/luainstaller"
+export PATH="$HOME/luainstaller/bin:$PATH"   # 加入你的 shell 配置文件
+luai -v
+----
++
+如果使用 fish：`fish_add_path $HOME/luainstaller/bin`
+
+Windows（PowerShell）::
++
+[source,powershell]
+----
+lua .\tools\install.lua --prefix "$HOME\luainstaller"
+$env:PATH = "$HOME\luainstaller\bin;$env:PATH"
+luai -v
+----
++
+安装出的命令是 `luai.cmd` 和 `luainstaller.cmd`。Windows XP 需要 PowerShell 2 或更高版本。
+
+安装出的命令会记住是哪个 `lua` 运行了安装器。要固定使用另一个解释器，可以在安装时传入 `--lua /full/path/to/lua`，或者之后再设置 `LUAI_LUA`。
+
+[IMPORTANT]
+====
+该解释器必须与你构建时所用的头文件和库属于同一个 Lua 版本。5.4 解释器配上 5.3 头文件无法工作。
+====
+
+== 移动、升级或移除
+
+[horizontal]
+移动:: 移动整个目录并更新 `PATH`。这些命令会相对于自身位置查找自己的文件。
+升级:: 将新版本安装到一个新目录，试用后再切换 `PATH`。
+移除:: 删除该目录并将其从 `PATH` 中移除。系统的其他内容不会有任何改动。
+
+TIP: 建议把安装目录的 `bin` 目录加入 `PATH`，而不是把其中的单个命令符号链接出去。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

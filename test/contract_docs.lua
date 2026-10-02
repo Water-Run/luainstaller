@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-09-22
+    2026-10-02
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -484,17 +484,38 @@ local function check_documentation_contract()
         "docs/TROUBLESHOOTING.adoc",
         "docs/USAGE.adoc",
     }
-    local docs = {}
+    local expected_zh_docs = {
+        "docs/zh-CN/BUNDLING.adoc",
+        "docs/zh-CN/IMPLEMENTATION.adoc",
+        "docs/zh-CN/INSTALL.adoc",
+        "docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc",
+        "docs/zh-CN/RELINKING.adoc",
+        "docs/zh-CN/TESTING.adoc",
+        "docs/zh-CN/TROUBLESHOOTING.adoc",
+        "docs/zh-CN/USAGE.adoc",
+    }
+    local docs, zh_docs = {}, {}
     local listing = run("find docs -type f -name '*.adoc' -print")
     for path in listing:gmatch("[^\r\n]+") do
-        docs[#docs + 1] = path
+        if path:match("^docs/zh%-CN/") then
+            zh_docs[#zh_docs + 1] = path
+        else
+            docs[#docs + 1] = path
+        end
     end
     table.sort(docs)
+    table.sort(zh_docs)
     assert(#docs == #expected_docs, "docs/ must contain exactly the documented guides")
     for index, path in ipairs(expected_docs) do
         assert(docs[index] == path, "unexpected documentation path: " .. tostring(docs[index]))
         local text = read_file(path)
         assert_contains(text, "xref:../README.adoc#documentation-index[Back to documentation index]")
+    end
+    assert(#zh_docs == #expected_zh_docs, "docs/zh-CN/ must mirror the documented guides")
+    for index, path in ipairs(expected_zh_docs) do
+        assert(zh_docs[index] == path, "unexpected translation path: " .. tostring(zh_docs[index]))
+        local text = read_file(path)
+        assert_contains(text, "xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]")
     end
 
     local implementation = read_file("docs/IMPLEMENTATION.adoc")
@@ -580,6 +601,12 @@ local function check_documentation_contract()
     assert_contains(readme, "docs/RELINKING.adoc")
     assert_contains(readme, "LuaRocks is optional")
     assert_contains(readme, "docs/INSTALL.adoc")
+    assert_contains(readme, "README.zh-CN.adoc")
+    assert_contains(readme, "https://www.youtube.com/watch?v=ctYfIRZeuYc")
+    local readme_zh = read_file("README.zh-CN.adoc")
+    assert_contains(readme_zh, "documentation-index")
+    assert_contains(readme_zh, "docs/zh-CN/USAGE.adoc")
+    assert_contains(readme_zh, "https://www.bilibili.com/video/BV1x6a16sEZx")
     assert_contains(harness.run_lua({ "bin/luai.lua", "-v" }), "luai " .. luainstaller.VERSION)
     assert_contains(harness.run_lua({ "bin/luainstaller.lua", "version" }),
         "luainstaller " .. luainstaller.VERSION)

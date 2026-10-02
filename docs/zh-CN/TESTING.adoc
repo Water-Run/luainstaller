@@ -1,0 +1,322 @@
+= 测试与发布门禁
+:toc: macro
+:toclevels: 2
+:sectanchors:
+:sectlinks:
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+必需的发布证据来自 GitHub Actions 工作流：原生 Linux x86_64、Linux
+上原生的 32 位 Lua、编译器、库与产物路径，以及带 MSVC 和 Windows
+SDK 的原生 Windows x86_64。GitHub 托管的运行器即可接受。
+
+严格的 i686 与 x86_64 MinGW 编译、PE 依赖与 API 检查，以及旧版 Job
+Object 看门狗契约会检查生成的 Windows XP 兼容面。这些检查不能替代
+Windows MSVC 作业。原生 FreeBSD、Android 和 Termux、Linux ARM64 以及
+macOS 的运行会扩展物理主机证据。
+
+toc::[]
+
+[#testing-local]
+== 本地测试
+
+在仓库根目录下，使用受测的官方解释器：
+
+[source,bash]
+----
+LUA=${LUA:-lua}
+"$LUA" test/lua_abi.lua
+"$LUA" test/version_contract.lua
+"$LUA" test/cli_split_smoke.lua
+"$LUA" test/contract_docs.lua
+"$LUA" test/standalone_install.lua
+"$LUA" test/production_edges.lua
+"$LUA" test/build_interruption.lua
+"$LUA" test/onefile_lifecycle.lua
+"$LUA" test/distribution_licenses.lua
+"$LUA" test/reproducible_artifacts.lua
+"$LUA" test/smoke_all.lua
+luarocks lint luainstaller-1.4.0-1.rockspec
+----
+
+[cols="2,3",options="header"]
+|===
+|套件 |覆盖内容
+
+|`test/lua_abi.lua`
+|精确的官方 Lua ABI 与内建模块能力表
+
+|`test/version_contract.lua`
+|精确锁定的补丁与源码身份、兼容性辅助函数，以及源码解析
+
+|`test/cli_split_smoke.lua`
+|`luai` 与 `luainstaller` 的语法划分
+
+|`test/contract_docs.lua`
+|公开文档契约
+
+|`test/standalone_install.lua`
+|免 LuaRocks 的离线安装、重定位、两个 CLI 名称、库使用、拒绝重复
+安装、onedir 与 onefile，以及运行时 PATH 为空时的执行
+
+|`test/production_edges.lua`
+|边界情况与安全相关行为、静态与共享 Lua 回退、可选的 FreeBSD 交叉
+编译、可执行文件的 Termux 回退探针，以及面向 XP 目标的 x86 与
+x86_64 生成 C 代码和 PE 审计
+
+|`test/build_interruption.lua`
+|转发 SIGINT 后的编译器关闭、有界的 SIGKILL 子进程、属主死亡后的
+恢复，以及干净重试
+
+|`test/onefile_lifecycle.lua`
+|POSIX 进程身份与信号，以及 Windows 子进程遏制
+
+|`test/distribution_licenses.lua`
+|声明、对应源码、无 Lua 提取、篡改修复，以及重链接
+
+|`test/reproducible_artifacts.lua`
+|跨根字节级一致的产物、路径隐私，以及可执行文件的 `arg[0]`
+
+|`test/smoke_all.lua`
+|示例、发现、生成 C、目录与单文件等更多内容
+|===
+
+`src/` 下的所有内容都必须在每个受支持的大版本和小版本上能够解析。
+共享的测试辅助代码位于 `test/support/` 下。`test/contract_docs.lua`
+是公开文档承诺的可执行形式。
+
+[#testing-install]
+== 安装
+
+[source,bash]
+----
+luarocks install luainstaller
+luai -v
+----
+
+Lua 5.5 需要 LuaRocks `>= 3.13.0`。发布实践包括隔离树安装、在检出
+目录之外调用命令，以及清空 `LUA_PATH` 和 `LUA_CPATH` 后运行产物。
+
+缺少 `luarocks` 对于特定于 LuaRocks 的安装门禁而言即为失败。独立的
+`lua test/standalone_install.lua` 门禁不需要 LuaRocks。见
+xref:INSTALL.adoc[免 LuaRocks 安装]。
+
+[#testing-version-matrix]
+== 官方 Lua 矩阵
+
+[cols="1,2",options="header"]
+|===
+|ABI |锁定的补丁
+
+|5.1
+|5.1.5
+
+|5.2
+|5.2.4
+
+|5.3
+|5.3.6
+
+|5.4
+|5.4.8
+
+|5.5
+|5.5.1
+|===
+
+归档在解压前会用 SHA-256 校验。POSIX 运行器接受 `sha256sum`、macOS
+自带的 `shasum`，或 FreeBSD 的 `sha256`。缺少校验工具即为硬失败。
+
+构建出的 Lua 与 LuaRocks 前缀带有精确的缓存结构标记，这些标记绑定
+锁定的补丁归档、构建配方、主机类别和编译器。标记缺失或不一致的缓存
+会被重建，而不是仅凭 ABI 名称就被接受。
+
+POSIX 矩阵还会为每个 Lua ABI 分别构建真实的示例依赖集。它在禁用
+LuaRocks 依赖解析的情况下只安装以下 SHA-256 锁定的源码输入，然后对
+该 ABI 隔离树中的每个 Lua 模块和原生模块做加载测试：
+
+[cols="3,4",options="header"]
+|===
+|输入 |SHA-256
+
+|`lua-cjson-2.1.0.10-1.src.rock`
+|`02dea368d07753647c75bd9e6660dd4d06ff7d09956d90d5afc4c3f5b78ed187`
+
+|`luafilesystem-1.9.0-1.src.rock`
+|`3de68d619f6ad95a27f4728814375447d921305194b7050dee6199057c31282f`
+
+|`luasocket-3.1.0-1.src.rock`
+|`f4a207f50a3f99ad65def8e29c54ac9aac668b216476f7fae3fae92413398ed2`
+
+|`mimetypes-1.1.0-2.src.rock`
+|`2cf77e0b6575caa6aecb43c9a06f705b1e7d92c19c5da6bb2f07a10feeee9e2f`
+
+|`lzlib-0.4.1.53-4.src.rock`
+|`860c893fc53d0a7830a54fa64f22a2b89260ca39c9a7dcb0890f6d3029f00ca5`
+
+|`pegasus-1.1.0-0.src.rock`
+|`0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746`
+
+|`lsqlite3-0.9.6.c`
+|`a3de0d56dcdd7df85e334174cd46e70451f996bc843e735ab1d8a8e8804f9486`
+
+|`sqlite-amalgamation-3530200.zip`
+|`8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32`
+|===
+
+lsqlite3 的 C 源码取自不可变的镜像提交
+`72cf3d38f6df7ac995f6db05d8ffeb78c25c9179`。其哈希与上游 `v0.9.6`
+Fossil 快照中的源码一致，不依赖 Fossil 服务器生成的 ZIP 字节。
+
+原生依赖的缓存身份同时绑定这份源码清单及其精确的安装顺序。运行器把
+lsqlite3 暂存、把锁定的 SQLite amalgamation 解压到各自独立的根目录，
+拒绝任何位于预期根之外的所选源码，并在每份证据日志中记录每个输入的
+名称、SHA-256、适用时的内部归档成员、缓存身份，以及缓存命中或重建
+结果。冷编译还会额外记录确切的暂存路径和解压路径。缓存命中绝不会
+假装其已被移除的构建目录仍然存在。
+
+直接的 Linux 矩阵运行默认采用严格的 `full` 边界覆盖模式，并设置
+`LUAI_REQUIRE_FULL_EDGE_COVERAGE=1`。此时，如果缺少 sanitizer、备用
+编译器、LuaJIT、PE 交叉检查、`/dev/full` 或权限探针，本地门禁会
+失败，而不是显示为通过。CI 与补充运行器使用
+`LUAI_MATRIX_EDGE_COVERAGE_MODE=available`。它们仍会运行完整的生产
+边界套件以及该运行器支持的每一个探针，并且每份证据日志都会显式列出
+不可用的严格前置条件。具备全部前置条件的运行器会自动运行同样的严格
+门禁。
+
+每个从源码构建的 Lua 前缀都会发布自己的 `lua.pc`，运行器将
+`PKG_CONFIG_PATH` 锁定为该文件。因此，原生夹具总是针对当前受测 ABI
+的头文件和库进行编译，绝不针对宿主的 `pkg-config lua` 条目。C 探针
+会调用 Lua 5.1 到 5.5 中每个版本引入或特有的一种不同 API，然后由
+生成的可执行文件加载。
+
+在 Linux 上，完整的元数据回退门禁需要 `pkg-config`。干净的 macOS
+主机不需要。运行器直接校验生成的 `lua.pc`，并通过显式的源码构建
+Lua 前缀进行构建，因此 Homebrew 不是前置条件。
+
+[source,bash]
+----
+HOST_LABEL=<label> sh tools/test-lua-versions.sh
+----
+
+Windows：
+
+[source,powershell]
+----
+powershell.exe -NoLogo -NoProfile -NonInteractive `
+  -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1 `
+  -HostLabel <label>
+----
+
+发布要求全部五个版本在两个全矩阵 GitHub Actions 作业中都通过：Linux
+x86_64 与带 MSVC 的 Windows x86_64，外加原生 Linux x86 Lua 5.4 作业。
+
+每个全矩阵 POSIX 版本都会运行完整的本地、原生、中断、单文件、许可证
+与重链接、可复现性、生产边界以及冒烟门禁。每个 Windows 版本都会运行
+所有适用的原生 Windows 门禁，包括生命周期、许可证与重链接，以及
+可复现性。
+
+每份按版本的证据日志都必须同时包含 `lua ABI capabilities ok` 和最终
+的 `PASS` 记录。`version_contract.lua` 还会将解释器确切的补丁横幅与
+锁定的源码摘要进行匹配。
+
+[#testing-systems]
+== 必需的 CI 运行器类别
+
+[cols="2,1,2",options="header"]
+|===
+|运行器 |架构 |工作流标签
+
+|带 MSVC 和 Windows SDK 的 Windows
+|x86_64
+|`windows-2022`
+
+|Linux
+|x86_64
+|`ubuntu-latest`
+
+|Linux 32 位 Lua、工具链与产物
+|x86
+|`ubuntu-latest` 带 `linux-x86-native` 作业
+|===
+
+补充的兼容性目标包括 Debian 与 Rocky Linux x86_64、Ubuntu ARM64、
+macOS ARM64、FreeBSD x86_64、物理 Windows XP，以及 Android 与
+Termux。它们保留的日志是有用的额外证据，但不能替代必需的 CI 作业，
+也不是发布前置条件。
+
+[#testing-orchestration]
+== 编排（维护者）
+
+[source,bash]
+----
+sh tools/remote-test-linux.sh
+MAC_HOST=<host alias from local lab config> sh tools/remote-test-macos.sh
+LUAI_TEST_LUA=lua54 sh tools/test-portable-host.sh  # FreeBSD
+LUAI_TEST_LUA=lua sh tools/test-portable-host.sh    # Termux
+----
+
+在 Windows 上，CI 与本地原生环境运行 `tools/test-lua-versions.ps1`。
+补充实验脚本所用的传输采用 `git archive`。临时路径被限制在诸如
+`/tmp/luainstaller-*` 的模式之下。脚本中的默认 SSH 目标是实验室本地
+的，不属于面向用户的契约，也不属于必需的发布基础设施。
+
+[#testing-real-world-benchmarks]
+== 真实场景基准矩阵（手动）
+
+对于契约套件之外的真实发布场景，可运行：
+
+[source,bash]
+----
+bash tools/benchmark-real-world.sh
+----
+
+该矩阵覆盖：
+
+* 基线（hello world）
+* 纯 Lua 多模块
+* 动态 require（`-d runtime`）
+* 原生 C 模块（`lua-cjson`、`LuaSocket`）
+* luafilesystem（`luafilesystem`）
+* Luacheck 解析器依赖图
+* `neovim` `runtime/lua` 规模压力测试
+* 合成的大型目录树（`100`、`1000`、`10000` 个模块）
+
+有用的选项：
+
+* `--skip-external` 跳过 GitHub 网络项目（`luacheck`、`neovim`）
+* `--skip-native` 跳过原生模块安装及相关用例
+* `--fake-scales "100 1000 10000"` 调整压力集
+* `--keep-workspace` 保留夹具和日志
+* `--neovim-timeout 30` 限制每条 neovim 命令的时间上限
+
+默认行为会在完成后清理 `/tmp/luainstaller-*` 工作区。摘要和日志写入：
+
+[source,bash]
+----
+/tmp/luainstaller-benchmark-*/results/summary.txt
+----
+
+[#testing-release]
+== 发布检查清单
+
+. rockspec lint 与隔离安装
+. GitHub Actions 中 `local-suites`、五条目 Linux 矩阵、五条目
+  Windows 与 MSVC 矩阵，以及原生 Linux x86 作业全部变绿
+. 生产源码在全部五个锁定版本上都能解析
+. 上述每一个必需的本地套件，没有任何必需的跳过
+. 在 `PATH` 设为私有空目录、没有系统 `lua`、也没有 `LUA_PATH` 和
+  `LUA_CPATH` 的条件下进行目录形式与单文件运行
+. 重复的单文件构建与提取检查
+. 跨检出字节级一致的产物检查与捆绑许可证重链接检查
+. 在两类必需 CI 运行器上都检查原生模块与系统库
+. 用 i686 与 x86_64 MinGW 对确切生成的单文件提取器进行严格编译，
+  检查 XP PE 子系统与导入闭包，以及旧版看门狗源码契约
+. 补充的 FreeBSD 与 Termux 便携主机日志（如有），并明确标注为非阻塞
+  证据
+. 文档不规定交叉构建或设备允许列表
+. `git diff --check` 与干净检出的复查
+
+候选提交是 `main` 的顶端。请保存用于决策的命令输出。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

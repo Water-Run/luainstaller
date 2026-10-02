@@ -1,0 +1,54 @@
+= 重链接生成的打包结果
+:sectanchors:
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+本文件随 luainstaller 生成的可执行文件一同提供，记录了依据 LGPL-3.0-or-later 替换或重链接生成的启动器所需的源码和实际输入。它不能替代 `../licenses/` 中的许可证文本。
+
+== 包含的材料
+
+* `launcher.c` 是内部可执行文件所用的、精确生成的启动器源码。它以文本形式包含入口脚本和打包的纯 Lua 源码。
+* `extractor.c` 在单文件 payload 中出现时，即外层自解包器对应的源码。其中生成的 payload 定义可按其头部说明，由其余解包出的文件重建。
+* `generate-onefile-payload.lua` 和 `payload-files.lua` 在出现时，可根据精确解包出的文件及其记录的可执行模式，重新生成被省略的自引用 `payload.inc`。
+* `../manifest.lua` 记录 Lua ABI、目标操作系统与体系结构、链接模式、逻辑源 ID 以及 SHA-256 内容哈希。
+* `../licenses/LGPL-3.0-or-later.txt` 和
+  `../licenses/GPL-3.0-or-later.txt` 包含适用的许可证文本。
+
+== 重链接启动器
+
+. 使用官方 Lua 解释器、头文件和库，其 ABI 主版本与次版本需与 `../manifest.lua` 中所示一致。
+. 使用面向目标操作系统和体系结构的原生编译器。交叉编译不在受支持的原生重链接配置之内。
+. 将 `launcher.c` 按可移植 C99 编译，链接选定的 Lua 库及其平台依赖，并保留目标配置使用的加载器搜索路径。
+. 替换 onedir 目录树中的内部可执行文件，或用匹配的 luainstaller 源码修订版本从该目录树重建单文件 payload。
+. 在清空 `LUA_PATH`、`LUA_CPATH` 和所有 `LUA_INIT*` 变量的情况下运行应用，然后重复其原生模块测试。
+
+典型的 POSIX 形式。请替换为清单中的路径和 Lua 库：
+
+[source,bash]
+----
+cc -std=c99 -Wall -Wextra \
+  launcher.c -o application $(pkg-config --cflags --libs lua)
+----
+
+如果没有 `pkg-config`，请改用显式的、相互匹配的头文件路径和库路径来完成该替换。对于静态 POSIX Lua 归档，还需链接该 Lua 构建所用的平台库，并导出主可执行文件的 Lua 符号。Linux 通常需要 `liblua.a -lm -ldl -Wl,-E`。FreeBSD 不得带上 Linux 的 `-ldl`。
+
+要重建解包出的单文件包装器，先重新生成它的 payload include，然后编译这份精确的解包器翻译单元：
+
+[source,bash]
+----
+lua .luai/build/generate-onefile-payload.lua . .luai/build/payload.inc
+cc -std=c99 -Wall -Wextra \
+  .luai/build/extractor.c -o application-onefile
+----
+
+在 Windows 上，使用与原打包相同的 MSVC 或 MinGW-w64 CRT 配置，并把匹配的 Lua DLL 放在可执行文件旁边。以 XP 为目标的可执行链接在 x86 上必须保留子系统版本 5.01，在 x86_64 上必须保留 5.02，同时还需使用与 XP 兼容的 API、CRT 和 Lua DLL。在 macOS 上，发布配置链接经过验证的静态 Lua 归档以及该 Lua 构建报告的平台库。
+
+== 完整的项目源码
+
+生成器、构建脚本和解包器模板的首选来源，是与生成该打包的版本对应的 luainstaller 源码树：
+
+https://github.com/Water-Run/luainstaller
+
+发布任何版本时，都应随附该源码修订版本、应用源码、手动包含的模块、原生模块源码，以及确切的 Lua 与工具链来源信息。第三方模块可能附加额外的源码和声明要求。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

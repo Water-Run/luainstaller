@@ -101,7 +101,8 @@ local function install()
     for _, relative in ipairs({
         "luainstaller.lua", "bin/luai.lua", "bin/luainstaller.lua",
         "LICENSE", "LICENSES/GPL-3.0-or-later.txt", "LICENSES/Lua-MIT.txt",
-        "THIRD_PARTY_NOTICES.md", "README.adoc", "CHANGELOG.adoc", "luainstaller.1",
+        "THIRD_PARTY_NOTICES.md", "README.adoc", "README.zh-CN.adoc",
+        "CHANGELOG.adoc", "luainstaller.1",
     }) do copy(relative) end
     for _, entry in ipairs(assert(fs.listTree(path.join(source_root, "docs")))) do
         if entry.type == "file" and entry.path:match("%.adoc$") then copy("docs/" .. entry.path) end

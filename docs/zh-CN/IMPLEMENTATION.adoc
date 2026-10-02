@@ -1,0 +1,135 @@
+= 实现说明
+:toc: macro
+:toclevels: 2
+:sectanchors:
+:sectlinks:
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+维护者说明。公开行为见
+xref:USAGE.adoc[使用 luainstaller]。
+
+toc::[]
+
+[#implementation-flow]
+== 请求路径
+
+[source,text]
+----
+CLI / Lua API
+  -> validate options
+  -> discover dependencies
+  -> compatibility diagnostics
+  -> manifest
+  -> directory or single-file bundle
+----
+
+编排逻辑位于 `src/init.lua`。CLI 只负责解析和渲染。
+
+[#implementation-api]
+== API
+
+导出项：`analyze`、`trace`、`compatibility`、`bundle`、`getLogs`、
+`clearLogs`。
+结构化结果契约仅适用于 `analyze`、`trace`、`compatibility` 和 `bundle`。
+成功时设置 `ok = true`。失败时设置 `ok = false` 和 `error`。
+`getLogs` 返回日志记录列表；`clearLogs` 返回布尔值。
+结构化操作的未知选项会在发现之前被拒绝。
+
+[#implementation-modules]
+== 模块
+
+[cols="2,3",options="header"]
+|===
+|文件 |职责
+
+|`cli.lua`
+|两套 CLI 语法
+
+|`init.lua`
+|选项、计划、清单、分发
+
+|`analyzer.lua`
+|字面 require、解析、循环、限制
+
+|`discovery.lua`
+|静态 / 运行时 / 手动
+
+|`manifest.lua`
+|路径映射、哈希、冲突
+
+|`cgen.lua` / `runtime.lua`
+|内嵌 payload（保持同步）
+
+|`launcher.lua`
+|C 启动器模板
+
+|`bundler.lua`
+|目录事务与编译
+
+|`onefile.lua`
+|解包器与缓存启动
+
+|`fs` / `hash` / `path` / `process` / `result`
+|I/O、SHA-256、路径、命令、错误
+
+|`platform` / `compat` / `toolchain`
+|宿主机、兼容性、工具链
+
+|`logger.lua`
+|在 `~/.luainstaller` 下记录日志
+|===
+
+[#implementation-discovery]
+== 发现
+
+静态::
+对字面 require 和可选的 pcall 做词法分析。先搜索入口目录。计算得出的名称会引发 `DynamicRequireError`。
+
+运行时::
+私有目录加 tracer。仅支持官方 Lua 5.1 及以上版本。拒绝 LuaJIT、原生加载器路径，以及在追踪开始前已缓存的模块。当运行时返回的加载器数据指明一个可读的 `.lua` 时，会记录该路径。需要恰好一个完整的完成标记。
+
+[#implementation-manifest]
+== 清单与 ABI
+
+纯 Lua 路径保持相对于入口。树外的源码使用稳定的逻辑 ID `external/<sha256>/<basename>`。序列化后的清单包含 `source_id` 值，不含构建宿主机的绝对路径。内存中的构建清单保留物理路径，用于校验和诊断。清单 v2 使用 SHA-256。不匹配会引发 `SourceChangedError`。
+
+启动器的编译期防护和 `_VERSION` 探测使用构建解释器的主/次 ABI，并在原生宿主机上运行。
+
+所有权标记使用 `luainstaller-generated-output-v2` 和递归 SHA-256 盘点。
+
+[#implementation-onedir]
+== 目录事务
+
+先使用私有的 `0700` 暂存目录，然后备份旧输出、重命名、重新校验，再做隔离删除。标记记录最终路径。覆盖决策使用完整的 v2 树哈希。
+
+[#implementation-onefile]
+== 单文件
+
+只接受安全的相对路径。POSIX 使用 `openat` / `O_NOFOLLOW` 和 UID 缓存。Windows 不跟随重解析点，并持有句柄直到子进程退出。payload ID 由排序后的路径、模式、大小和内容 SHA-256 组合而成。
+
+[#implementation-errors]
+== 错误
+
+优先使用可操作的错误类型：`ScriptNotFoundError`、
+`LuaSyntaxError`、`SourceChangedError`、`DynamicRequireError`、
+`ModuleNotFoundError`、`DuplicateModuleError`、`InvalidOutputError`、
+`ToolchainError`、`CompilationFailedError`、`FilesystemError`、
+`DiscoveryError`、`UnsupportedPlatformError`、`UnsupportedLuaVersionError` 及相关类型。
+
+shell 命令中的每个路径都要加引号。拒绝编译器标志中的危险元字符。
+
+[#implementation-change-checklist]
+== 改动代码之前
+
+. 添加一个在旧行为下会失败的测试。
+. 运行四个本地套件和语法检查。
+. 启动器或解包器变更时审查生成的 C 代码。
+. 运行受影响的多版本和多平台门禁。
+. 公开行为变更时更新文档。
+. 确认重建失败时原有输出保持完好。
+. 确认干净环境不依赖宿主机模块。
+
+命令：xref:TESTING.adoc[测试与发布门禁]。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

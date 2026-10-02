@@ -1,0 +1,136 @@
+= 平台与原生模块
+:toc: macro
+:toc-title: 目录
+:toclevels: 1
+:sectanchors:
+:sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+toc::[]
+
+[#platforms-contract]
+== 在哪里运行，就在哪里构建
+
+`luainstaller` 生成原生可执行文件，不做交叉编译。可执行文件与构建它的机器相匹配：相同的操作系统、相同的 CPU 架构、相同的 Lua 版本。
+
+要发布 Linux、Windows 和 macOS 版本，就构建三次，每个平台上各一次。
+
+`--target-os` 改变不了这一点。它只是让构建在错误的机器类型上运行时失败，这在脚本里很有用。
+
+[#platforms-lua]
+== Lua 版本
+
+官方的 Lua 5.1、5.2、5.3、5.4 和 5.5 都可以。LuaJIT 不行。
+
+运行 `luainstaller` 的解释器决定版本。头文件、Lua 库以及你打包的每个 C 模块都必须是同一个版本。构建结束前，新的可执行文件会被启动一次，以确认各版本一致。
+
+[#platforms-toolchains]
+== 各系统需要什么
+
+[cols="1,2,2",options="header"]
+|===
+|系统 |编译器 |打包中的 Lua 运行时
+
+|Linux、FreeBSD、其他 Unix
+|`cc`、`gcc` 或 `clang`
+|把共享的 `liblua` 复制进打包，或使用静态的 `liblua.a`
+
+|macOS
+|Xcode Command Line Tools
+|首选静态的 `liblua.a`；dylib 也可以
+
+|Windows
+|MSVC 或 MinGW-w64
+|可执行文件旁边的 `lua5x.dll`
+
+|Android（Termux）
+|Termux 的 `clang`
+|共享或静态，与 Linux 相同
+|===
+
+如果没有自动找到头文件或库，请传入 `--lua-prefix /path/to/lua`（或设置 `LUAI_LUA_PREFIX`）。显式给出的前缀会按原样使用；`luainstaller` 不会悄悄回退到它找到的另一个 Lua。
+
+[#platforms-windows]
+== Windows（包括 XP）
+
+MSVC 构建静态链接 C 运行时，因此产物不需要 Visual C++ Redistributable。
+
+x86 和 x86_64 可执行文件默认针对 Windows XP API 构建。但只有工具链的其余部分也支持 XP 时才有意义：
+
+[%interactive]
+* [ ] 面向 XP 的编译器和 C 运行时（支持 XP 的 MSVC 工具集，或能在 XP 上运行的 MinGW 运行时）
+* [ ] 用同一工具链构建的 `lua5x.dll`
+* [ ] 构建机上有 PowerShell 2 或更高版本
+
+WARNING: 用当前的 Visual Studio 或 UCRT 构建可以顺利编译，但在 XP 上仍然无法启动。
+
+要在 XP *上*构建，请从编译器自带的命令提示符启动；如果编译器没有被检测到，就设置 `LUAI_CC`；通常还需要传入 `--lua-prefix`。
+
+其他注意事项：
+
+* ARM 和 ARM64 面向 Windows 8 及更高版本，因为在那之前还不存在 Windows on ARM。
+* 文件路径使用系统代码页。在 XP 上，纯 ASCII 路径是最安全的选择。
+* 单文件形式把程序和它的启动器绑在一起，杀死其中一个，另一个也会结束。在 XP 上，这里使用一个小型辅助进程，而不是 XP 所缺少的 Job Object 功能。
+
+[#platforms-unix]
+== Linux、macOS 及其他
+
+32 位 Linux::
+所有东西都必须是 32 位的：解释器、编译器、头文件、库和 C 模块。`luainstaller` 能识别 64 位内核上的 32 位用户环境。
+
+macOS::
+为 Mac 自身的架构构建。通用二进制、代码签名和公证不会替你完成。
+
+FreeBSD::
+使用基本系统自带的编译器即可工作。不需要 `-ldl`。
+
+Android（Termux）::
+在 Termux 内运行，使用它的私有前缀和临时文件夹。那里没有 `/bin/sh` 和 `/tmp`，也不需要。
+
+[#platforms-native]
+== 原生 C 模块
+
+C 模块按 `package.cpath` 找到它的样子原样复制。`luainstaller` 不会重新构建它，也不会复制它链接的系统库。
+
+因此，使用 `luasocket` 或 `lsqlite3` 的打包可以在这些模块自身的库存在的地方运行。如果目标机器缺少这些库，就把它们随程序一起分发，或者把模块静态链接。
+
+[#platforms-matrix]
+== 测试情况
+
+上面的表格描述代码支持的范围；下面的列表是实际测试过的组合。它是证据，不是平台白名单：没有列出的系统也可能正常工作。
+
+[cols="2,1,3",options="header"]
+|===
+|系统 |CPU |测试情况
+
+|Linux |x86_64 |每次改动，全部五个 Lua 版本
+|Linux |x86 |每次改动
+|Windows（MSVC） |x86_64 |每次改动，全部五个 Lua 版本
+|Windows XP API |x86、x86_64 |每次改动，通过编译并检查可执行文件
+|Linux |ARM64 |发布前在真实硬件上
+|macOS |ARM64 |发布前在真实硬件上
+|FreeBSD |x86_64 |偶尔在真实硬件上
+|Android（Termux） |ARM64 |偶尔在真机上
+|===
+
+[#platforms-limits]
+== 不在范围内
+
+* 交叉编译，或用一个可执行文件支持多个系统
+* 收集 C 模块需要的每一个系统库
+* 仅字节码的构建、加密或混淆
+* 对可执行文件签名，或检查它是否被篡改
+* macOS 通用二进制、签名和公证
+* MSI、PKG、DEB、RPM 之类的安装包
+
+单文件只是一个会自行解包的可执行文件。它不是安装程序。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
