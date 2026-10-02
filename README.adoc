@@ -12,11 +12,16 @@ ifdef::env-github[]
 :warning-caption: :warning:
 endif::[]
 
+English | link:README.zh-CN.adoc[简体中文]
+
 Turn a Lua script into a program you can hand to someone else.
 
 `luainstaller` collects your script, the modules it loads with `require`, and the Lua
 runtime, and builds a native executable from them. The person running it
 doesn't need Lua installed.
+
+Video introduction: link:https://www.youtube.com/watch?v=ctYfIRZeuYc[English (YouTube)] ·
+link:https://www.bilibili.com/video/BV1x6a16sEZx[中文 (bilibili)].
 
 [source,bash]
 ----

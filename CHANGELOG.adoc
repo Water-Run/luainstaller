@@ -7,6 +7,13 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+=== Added
+
+* Simplified Chinese translation of the README (`README.zh-CN.adoc`), with
+  language switch links in both files.
+* Introduction video links in the READMEs: Chinese on bilibili, English on
+  YouTube.
+
 == 1.4.0 - 2026-09-22
 
 === Added

@@ -1,0 +1,257 @@
+= luainstaller
+:toc: macro
+:toc-title: 目录
+:toclevels: 1
+:sectanchors:
+:sectlinks:
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+简体中文 | link:README.adoc[English]
+
+把一个 Lua 脚本变成可以直接交给别人运行的程序。
+
+`luainstaller` 会收集你的脚本、它通过 `require` 加载的模块以及 Lua
+运行时，用它们构建出一个原生可执行文件。运行它的人不需要安装
+Lua。
+
+介绍视频：link:https://www.bilibili.com/video/BV1x6a16sEZx[中文（bilibili）] ·
+link:https://www.youtube.com/watch?v=ctYfIRZeuYc[English (YouTube)]。
+
+[source,bash]
+----
+luai -b app/main.lua -o build/app   # <1>
+build/app/app                       # <2>
+----
+<1> 从入口脚本构建一个目录形式的打包结果。
+<2> 直接运行。机器上不需要 `lua`。
+
+它支持官方 Lua 5.1 到 5.5，可运行于 Linux、Windows（可追溯到
+XP）、macOS、FreeBSD 和 Android/Termux。
+
+toc::[]
+
+[#install]
+== 安装
+
+[source,bash]
+----
+luarocks install luainstaller
+luai -v
+----
+
+LuaRocks 不是必需的。不用它时，可以从源码检出安装到你选择的目录：
+
+[source,bash]
+----
+lua tools/install.lua --prefix "$HOME/luainstaller"
+export PATH="$HOME/luainstaller/bin:$PATH"
+----
+
+更多细节（包括 Windows 上的安装，以及迁移或删除一个安装）见
+xref:docs/INSTALL.adoc[免 LuaRocks 安装指南]（英文）。
+
+.构建可执行文件需要什么
+****
+* 官方 Lua 解释器，5.1 到 5.5。不支持 LuaJIT。
+* 一台用于当前机器的 C 编译器。
+* 与该解释器版本匹配的 Lua 头文件和 Lua 库。
+
+分析功能只需要 Lua。只有构建才需要编译器。
+****
+
+TIP: 在大多数 Linux 系统上，头文件来自 `liblua5.4-dev` 或
+`lua-devel` 这样的软件包。
+
+[#usage]
+== 构建你的第一个可执行文件
+
+稳妥的流程是：先检查依赖，构建一个目录，测试这个目录，最后再
+制作单文件。
+
+. *看看会打包哪些内容。*
++
+[source,bash]
+----
+luai -a app/main.lua
+----
++
+它会列出 `luainstaller` 为你的脚本找到的每一个模块。如果这里缺了
+什么，可执行文件里同样会缺。
+
+. *构建目录打包。*
++
+[source,bash]
+----
+luai -b app/main.lua -o build/app
+----
++
+你会得到 `build/app/app`（Windows 上是 `app.exe`），外加一个包含
+原生模块和许可证文件的隐藏 `.luai/` 目录。
+
+. *按用户的方式测试它。*
++
+[source,bash]
+----
+env -u LUA_PATH -u LUA_CPATH build/app/app
+----
++
+清空 Lua 搜索路径，可以确认程序没有悄悄从你自己的机器上加载
+模块。
+
+. *需要的话，再制作单文件。*
++
+[source,bash]
+----
+luai -b --file app/main.lua -o build/app-onefile
+----
++
+单文件在第一次运行时把自己解包到一个临时目录，然后从那里启动。
+
+IMPORTANT: 如果单文件表现异常，回到目录打包。它展示的就是实际打包的
+内容，问题会更容易定位。
+
+=== 两种命令风格
+
+同一个工具响应两个名字。选你喜欢的即可，但不要在同一条命令里
+混用。
+
+[cols="1,2m,2m",options="header"]
+|===
+|任务 |luai（短选项） |luainstaller（子命令）
+
+|分析    |luai -a main.lua |luainstaller analyze main.lua
+|跟踪    |luai -t main.lua |luainstaller trace main.lua
+|构建    |luai -b main.lua |luainstaller build main.lua
+|版本    |luai -v          |luainstaller version
+|帮助    |luai -h          |luainstaller help
+|查看日志 |—               |luainstaller logs
+|===
+
+=== 常用选项
+
+[horizontal]
+`--dir` / `--file`:: 目录打包（默认）或单文件可执行程序
+`-o PATH`:: 结果写到哪里
+`--max-deps N`:: 程序较大时调高它；默认是 36
+`--include FILE`:: 补上扫描看不到的模块
+`-d runtime`:: 通过实际运行脚本来发现依赖
+
+其余内容见 xref:docs/USAGE.adoc[使用指南]（英文）。
+
+[#usage-api]
+== 在 Lua 中使用
+
+同样的功能也可以作为库使用：
+
+[source,lua]
+----
+local luainstaller = require("luainstaller")
+
+local result = luainstaller.bundle({
+    entry = "app/main.lua",
+    out = "build/app",
+})
+
+if result.ok then
+    print("built " .. result.executable)
+else
+    print(result.error.type .. ": " .. result.error.message)
+end
+----
+
+每次调用都返回一个带 `ok` 的表。失败时，`error.type` 指出问题所在。
+选项与命令行一致；见 xref:docs/USAGE.adoc#usage-api[库 API]（英文）。
+
+[#platforms]
+== 支持的平台
+
+`luainstaller` 为它所在的机器构建程序。想要 Windows 可执行文件，
+就在 Windows 上构建；想要 macOS 的，就在 Mac 上构建。
+
+[cols="2,2,3",options="header"]
+|===
+|系统 |CPU |说明
+
+|Windows XP SP3 及以上
+|x86、x86_64
+|需要支持 XP 的编译器和运行时。footnote:[新版的 Visual Studio 或 UCRT 构建无法在 XP 上启动。见 xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[平台说明]（英文）。]
+
+|Windows 7 及以上
+|x86、x86_64、ARM、ARM64
+|MSVC 或 MinGW
+
+|Linux
+|x86、x86_64、ARM、ARM64
+|共享或静态 Lua
+
+|macOS
+|x86_64、ARM64
+|推荐静态 Lua
+
+|FreeBSD
+|原生
+|
+
+|Android（Termux）
+|原生
+|在 Termux 应用内运行
+|===
+
+其他类 Unix 系统通常也能工作，只要编译器和 Lua 库匹配。
+
+[CAUTION]
+====
+原生 C 模块（任何编译成 `.so` 或 `.dll` 的模块）会原样复制。它们
+必须已经为目标系统和你的 Lua 版本构建好。
+====
+
+[#documentation-index]
+== 文档
+
+NOTE: 以下指南为英文。
+
+[cols="1,3",frame=none,grid=none]
+|===
+|xref:docs/INSTALL.adoc[安装]
+|免 LuaRocks 安装，覆盖 Linux、macOS 和 Windows
+
+|xref:docs/USAGE.adoc[使用]
+|全部选项、依赖发现、原生模块、库 API
+
+|xref:docs/TROUBLESHOOTING.adoc[故障排查]
+|常见错误及解决方法
+
+|xref:docs/PLATFORMS-NATIVE-LIMITS.adoc[平台]
+|各系统的编译器、Windows XP、原生模块、范围之外的内容
+
+|xref:docs/BUNDLING.adoc[打包格式]
+|打包结果里有什么、它如何启动
+
+|xref:docs/RELINKING.adoc[许可证与重链接]
+|再分发可执行文件时要保留什么
+
+|xref:CHANGELOG.adoc[更新日志]
+|各版本之间的变化
+|===
+
+.面向贡献者
+[%collapsible]
+====
+* xref:docs/IMPLEMENTATION.adoc[实现说明] — 代码如何组织
+* xref:docs/TESTING.adoc[测试] — 测试套件与 CI
+====
+
+[#license]
+== 许可证
+
+`luainstaller` 以 link:LICENSE[GNU LGPL 第 3 版或更新]的条款发布。
+
+每个打包结果都包含 Lua 许可证、luainstaller 许可证和生成的 C
+源码，因此可以原样转发。再分发时保留 `.luai/` 目录。原因见
+xref:docs/RELINKING.adoc[重链接]（英文）。
