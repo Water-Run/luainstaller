@@ -1480,7 +1480,7 @@ local function inspectNativeDependencies(config, module_path, opts)
     local unchecked = {}
     local bundled = opts.bundled_libraries or {}
     local index = 1
-    while index <= #queue and index <= 128 do
+    while index <= #queue do
         local current = queue[index]
         index = index + 1
         if not seen_paths[current.path] then
@@ -1515,7 +1515,6 @@ local function inspectNativeDependencies(config, module_path, opts)
             end
         end
     end
-    if index <= #queue then unchecked[#unchecked + 1] = "Dependency traversal limit reached" end
     table.sort(dependencies, function(left, right) return left.name < right.name end)
     return {
         ok = true, checked = #unchecked == 0, dependencies = dependencies,

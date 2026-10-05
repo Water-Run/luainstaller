@@ -30,7 +30,8 @@ toc::[]
 
 官方的 Lua 5.1、5.2、5.3、5.4 和 5.5 都可以。LuaJIT 不行。
 
-运行 `luainstaller` 的解释器决定版本。头文件、Lua 库以及你打包的每个 C 模块都必须是同一个版本。构建结束前，新的可执行文件会被启动一次，以确认各版本一致。
+运行 `luainstaller` 的解释器决定版本。Lua 库以及你打包的每个 C 模块
+都必须是同一个版本。构建结束前，新的可执行文件会被启动一次，以确认各版本一致。
 
 [#platforms-toolchains]
 == 各系统需要什么
@@ -56,7 +57,9 @@ toc::[]
 |共享或静态，与 Linux 相同
 |===
 
-如果没有自动找到头文件或库，请传入 `--lua-prefix /path/to/lua`（或设置 `LUAI_LUA_PREFIX`）。显式给出的前缀会按原样使用；`luainstaller` 不会悄悄回退到它找到的另一个 Lua。
+构建不需要 Lua 头文件。如果没有自动找到库，请传入
+`--lua-prefix /path/to/lua`（或设置 `LUAI_LUA_PREFIX`）。显式给出的前缀
+会按原样使用；`luainstaller` 不会悄悄回退到它找到的另一个 Lua。
 
 [#platforms-windows]
 == Windows（包括 XP）
@@ -84,7 +87,8 @@ WARNING: 用当前的 Visual Studio 或 UCRT 构建可以顺利编译，但在 X
 == Linux、macOS 及其他
 
 32 位 Linux::
-所有东西都必须是 32 位的：解释器、编译器、头文件、库和 C 模块。`luainstaller` 能识别 64 位内核上的 32 位用户环境。
+所有东西都必须是 32 位的：解释器、编译器、库和 C 模块。
+`luainstaller` 能识别 64 位内核上的 32 位用户环境。
 
 macOS::
 为 Mac 自身的架构构建。通用二进制、代码签名和公证不会替你完成。
@@ -100,7 +104,11 @@ Android（Termux）::
 
 C 模块按 `package.cpath` 找到它的样子原样复制。`luainstaller` 不会重新构建它，也不会复制它链接的系统库。
 
-因此，使用 `luasocket` 或 `lsqlite3` 的打包可以在这些模块自身的库存在的地方运行。如果目标机器缺少这些库，就把它们随程序一起分发，或者把模块静态链接。
+在 Linux 和 macOS 上，构建会提示外部库依赖，包括传递依赖。
+Windows 构建会说明 DLL 依赖未检查。这些告警不会阻止构建。
+
+请在目标机器上安装所需的库，或将模块的依赖静态链接。参见
+xref:TROUBLESHOOTING.adoc#troubleshooting-native-dependencies[依赖告警]。
 
 [#platforms-matrix]
 == 测试情况

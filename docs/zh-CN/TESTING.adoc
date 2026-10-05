@@ -30,13 +30,15 @@ LUA=${LUA:-lua}
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
+"$LUA" test/headerless_build.lua
+"$LUA" test/native_dependencies.lua
 "$LUA" test/production_edges.lua
 "$LUA" test/build_interruption.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.4.0-1.rockspec
+luarocks lint luainstaller-1.5.0-1.rockspec
 ----
 
 [cols="2,3",options="header"]
@@ -63,6 +65,14 @@ luarocks lint luainstaller-1.4.0-1.rockspec
 |边界情况与安全相关行为、静态与共享 Lua 回退、可选的 FreeBSD 交叉
 编译、可执行文件的 Termux 回退探针，以及面向 XP 目标的 x86 与
 x86_64 生成 C 代码和 PE 审计
+
+|`test/headerless_build.lua`
+|仅含库的 Lua 前缀、忽略系统头文件、两种打包形式、干净目标环境运行，
+以及使用随包最小头文件重链接
+
+|`test/native_dependencies.lua`
+|真实 Linux 传递依赖和缺失库、诊断或日志失败不影响构建、macOS 解析夹具，
+以及 Windows 未检查依赖的提示
 
 |`test/build_interruption.lua`
 |转发 SIGINT 后的编译器关闭、有界的 SIGKILL 子进程、属主死亡后的
@@ -164,9 +174,9 @@ LuaRocks 依赖解析的情况下只安装以下 SHA-256 锁定的源码输入�
 |`8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32`
 |===
 
-lsqlite3 的 C 源码取自不可变的镜像提交
-`72cf3d38f6df7ac995f6db05d8ffeb78c25c9179`。其哈希与上游 `v0.9.6`
-Fossil 快照中的源码一致，不依赖 Fossil 服务器生成的 ZIP 字节。
+lsqlite3 的 C 源码取自 Debian 的 `0.9.6-1` 版本源码归档。
+其哈希与上游 `v0.9.6` Fossil 快照中的源码一致，
+不依赖 Fossil 服务器生成的 ZIP 字节。
 
 原生依赖的缓存身份同时绑定这份源码清单及其精确的安装顺序。运行器把
 lsqlite3 暂存、把锁定的 SQLite amalgamation 解压到各自独立的根目录，
@@ -222,6 +232,10 @@ x86_64 与带 MSVC 的 Windows x86_64，外加原生 Linux x86 Lua 5.4 作业。
 
 [#testing-systems]
 == 必需的 CI 运行器类别
+
+Fedora 44 容器作业验证仅安装 Lua 运行时的环境。它确认没有
+`lua-devel` 和系统 Lua 头文件，然后构建两种打包形式、检查重链接，
+并验证原生模块的依赖告警。
 
 [cols="2,1,2",options="header"]
 |===

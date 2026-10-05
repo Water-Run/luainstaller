@@ -15,6 +15,27 @@ permissions:
   contents: read
 
 jobs:
+  headerless-runtime:
+    name: runtime-only Lua installation (Fedora 44)
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:44
+    steps:
+      - name: Install Lua runtime and compiler
+        run: dnf install -y git lua gcc
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build without Lua development packages
+        run: |
+          if rpm -q lua-devel; then
+            echo 'lua-devel must be absent for this acceptance test' >&2
+            exit 1
+          fi
+          test ! -f /usr/include/lua.h
+          lua test/toolchain_native.lua
+          lua test/headerless_build.lua
+          lua test/native_dependencies.lua
+
   local-suites:
     name: local suites (pinned shared Lua 5.4)
     runs-on: ubuntu-latest

@@ -68,6 +68,20 @@ assert(not by_name["libc.so.6"] and not by_name["libm.so.6"]
     and not by_name["liblua.so.5.4"], "platform or bundled runtime was reported")
 assert(inspected["/fixture/libfirst.so"] == 1, "dependency cycle was traversed again")
 
+-- A large but finite dependency graph still needs its complete closure.
+process.outputCommand = function(command, arguments)
+    assert(command == "ldd")
+    local index = tonumber(arguments[1]:match("/libchain%-(%d+)%.so$"))
+    assert(index)
+    if index == 140 then return true, "statically linked\n" end
+    return true, string.format("libchain-%d.so => /fixture/libchain-%d.so (0x001)\n",
+        index + 1, index + 1)
+end
+local chain = toolchain.inspectNativeDependencies({ host = { os = "linux" } },
+    "/fixture/libchain-0.so")
+assert(chain.ok and chain.checked and #chain.dependencies == 140,
+    "finite dependency graph was truncated: " .. tostring(#chain.dependencies))
+
 process.outputCommand = function() return false, "ldd unavailable" end
 local unchecked = toolchain.inspectNativeDependencies({ host = { os = "linux" } }, "module.so")
 assert(unchecked.ok and not unchecked.checked and unchecked.reason)

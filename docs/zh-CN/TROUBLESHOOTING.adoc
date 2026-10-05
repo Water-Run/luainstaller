@@ -61,14 +61,14 @@ toc::[]
 [#troubleshooting-compile]
 == 构建时编译或链接失败
 
-几乎总是因为编译器、Lua 头文件和 Lua 库彼此不匹配，或者与你正在
-运行的 `lua` 不匹配。把它们放在一起检查：
+检查编译器和 Lua 库是否适用于当前机器，以及库的版本是否与你正在
+运行的 `lua` 一致：
 
 [source,bash]
 ----
 lua -v
 cc --version
-pkg-config --cflags --libs lua
+pkg-config --libs lua
 ----
 
 如果 `pkg-config` 找到了错误的 Lua 或者什么都没找到，就让
@@ -79,22 +79,24 @@ pkg-config --cflags --libs lua
 luai -b app/main.lua --lua-prefix /opt/lua-5.4
 ----
 
-前缀目录中应当有 `include/lua.h`，并且 `lib/` 下有一个 Lua 库。
+前缀目录的 `lib/` 或 `lib64/` 下应当有匹配的 Lua 库，不需要 Lua 头文件。
+使用 `--verbose` 可以看到选中的库和查找路径。
 
 .各系统的注意事项
 [%collapsible]
 ====
 Linux（32 位）::
-解释器、编译器、头文件、库和每个 C 模块都必须是 32 位的。只给
+解释器、编译器、库和每个 C 模块都必须是 32 位的。只给
 编译器加上 `-m32` 是不够的。
 
 macOS::
-检查前缀目录下存在 `include/lua.h` 和 `lib/liblua.a`，并且与你的
+检查前缀目录下存在 `lib/liblua.a`，并且与你的
 Mac 架构匹配。
 
 Windows::
 在 Visual Studio 开发者命令提示符（或 MinGW shell）里构建，让
-编译器位于 `PATH` 上。前缀目录需要头文件、导入库和 `lua5x.dll`。
+编译器位于 `PATH` 上。前缀目录需要 `lua5x.dll` 和对应的导入库。
+MSVC 也可以根据 DLL 的导出符号生成导入库。
 
 Windows XP::
 使用支持 XP 的编译器和 C 运行时。新版 Visual Studio 构建出的程序
@@ -105,9 +107,26 @@ FreeBSD::
 不要加 `-ldl`；它只适用于 Linux。
 
 Android（Termux）::
-在 Termux 里安装 `clang` 和 Lua 开发包。不要改动 `$PREFIX` 和
+在 Termux 里安装 `clang` 和 Lua。不要改动 `$PREFIX` 和
 `$TMPDIR`，也不要创建 `/tmp` 或 `/bin/sh`。
 ====
+
+[#troubleshooting-native-dependencies]
+== 构建提示 C 模块的库依赖
+
+告警会列出模块及其依赖的外部库。这些库不会复制进打包结果。
+请在目标机器上安装它们，或重新构建模块，将这些依赖静态链接。
+标记为 `not found on build host` 的库也需要在构建机器上处理。
+
+对于 `libstdc++` 和 `libgcc_s`，请先确认它们与目标机器的 C/C++
+运行时兼容，再决定如何分发。
+
+如果告警说明依赖未检查，可在 Linux 上运行 `ldd module.so`，
+在 macOS 上运行 `otool -L module.so`。Windows 的 DLL 依赖需要单独检查，
+例如在 Visual Studio 开发者命令提示符中运行 `dumpbin /DEPENDENTS module.dll`。
+
+`luainstaller logs --level warning` 可查看保存的诊断记录。
+构建可以成功，但目标机器仍可能需要安装这些库。
 
 [#troubleshooting-native]
 == 程序启动后某个 C 模块出错
@@ -164,7 +183,7 @@ rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 |InvalidOutputError          |输出目录无法被安全替换
 |UnsupportedPlatformError    |`--target-os` 与本机不匹配
 |UnsupportedLuaVersionError  |不是官方 Lua 5.1–5.5（LuaJIT 也不支持）
-|ToolchainError              |编译器、头文件或库缺失或不匹配
+|ToolchainError              |编译器或 Lua 库缺失或不匹配
 |CompilationFailedError      |编译器已运行并报告了错误
 |LuaRuntimeNotFoundError     |找不到 Lua 共享库
 |DiscoveryError              |运行时发现没有完成

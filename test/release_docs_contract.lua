@@ -68,6 +68,14 @@ expect_contains("docs/USAGE.adoc", "Build results include a `warnings` list")
 expect_contains("CHANGELOG.adoc", "This release reduces build setup")
 expect_contains("CHANGELOG.adoc", "Lua headers and development metadata aren't required")
 expect_contains("README.adoc", "A Lua library that matches that interpreter's version")
+expect_contains("README.zh-CN.adoc", "构建可执行文件不需要 Lua 头文件")
+expect_not_contains("README.zh-CN.adoc", "Lua 头文件和 Lua 库")
+expect_contains("docs/zh-CN/INSTALL.adoc", "不需要 Lua 头文件")
+expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查")
+expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
+expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
+expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.5.0-1.rockspec")
 
 local structured_contract = "The structured result contract applies to `analyze`, `trace`, "
     .. "`compatibility`, and `bundle` only."

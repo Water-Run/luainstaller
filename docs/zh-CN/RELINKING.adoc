@@ -8,6 +8,7 @@ xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
 == 包含的材料
 
 * `launcher.c` 是内部可执行文件所用的、精确生成的启动器源码。它以文本形式包含入口脚本和打包的纯 Lua 源码。
+* `lua_min.h` 包含 `launcher.c` 使用的 Lua API 声明。编译时把它放在源码旁边。
 * `extractor.c` 在单文件 payload 中出现时，即外层自解包器对应的源码。其中生成的 payload 定义可按其头部说明，由其余解包出的文件重建。
 * `generate-onefile-payload.lua` 和 `payload-files.lua` 在出现时，可根据精确解包出的文件及其记录的可执行模式，重新生成被省略的自引用 `payload.inc`。
 * `../manifest.lua` 记录 Lua ABI、目标操作系统与体系结构、链接模式、逻辑源 ID 以及 SHA-256 内容哈希。
@@ -16,7 +17,7 @@ xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
 
 == 重链接启动器
 
-. 使用官方 Lua 解释器、头文件和库，其 ABI 主版本与次版本需与 `../manifest.lua` 中所示一致。
+. 使用官方 Lua 解释器和库，其 ABI 主版本与次版本需与 `../manifest.lua` 中所示一致。
 . 使用面向目标操作系统和体系结构的原生编译器。交叉编译不在受支持的原生重链接配置之内。
 . 将 `launcher.c` 按可移植 C99 编译，链接选定的 Lua 库及其平台依赖，并保留目标配置使用的加载器搜索路径。
 . 替换 onedir 目录树中的内部可执行文件，或用匹配的 luainstaller 源码修订版本从该目录树重建单文件 payload。
@@ -30,7 +31,9 @@ cc -std=c99 -Wall -Wextra \
   launcher.c -o application $(pkg-config --cflags --libs lua)
 ----
 
-如果没有 `pkg-config`，请改用显式的、相互匹配的头文件路径和库路径来完成该替换。对于静态 POSIX Lua 归档，还需链接该 Lua 构建所用的平台库，并导出主可执行文件的 Lua 符号。Linux 通常需要 `liblua.a -lm -ldl -Wl,-E`。FreeBSD 不得带上 Linux 的 `-ldl`。
+如果没有 `pkg-config`，请改用显式的、匹配的库路径。不需要系统 Lua 头文件。
+对于静态 POSIX Lua 归档，还需链接该 Lua 构建所用的平台库，并导出主可执行文件的
+Lua 符号。Linux 通常需要 `liblua.a -lm -ldl -Wl,-E`。FreeBSD 不得带上 Linux 的 `-ldl`。
 
 要重建解包出的单文件包装器，先重新生成它的 payload include，然后编译这份精确的解包器翻译单元：
 

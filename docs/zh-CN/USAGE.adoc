@@ -161,7 +161,7 @@ ldd build/app/app        # macOS 上用 otool -L
 [horizontal]
 `--lua PATH`:: 运行时发现使用的解释器；必须与运行 `luainstaller` 的
 Lua 是同一个版本
-`--lua-prefix PATH`:: 指定 Lua 头文件和库的位置，在自动检测选错时使用
+`--lua-prefix PATH`:: 指定 Lua 库的位置，在自动检测选错时使用
 `--target-os OS`:: 构建机器不是该操作系统即失败；不支持交叉编译
 
 .其他
@@ -206,6 +206,8 @@ local built = luainstaller.bundle({
 })
 print(built.ok and built.executable or built.error.message)
 ----
+
+构建结果包含 `warnings` 列表。每条告警的 `message` 会说明原生库的依赖情况。
 
 [cols="1m,3",options="header"]
 |===

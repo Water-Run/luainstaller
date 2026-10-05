@@ -251,6 +251,10 @@ interpreter's exact patch banner to the pinned source digest.
 [#testing-systems]
 == Required CI runner classes
 
+The Fedora 44 container job exercises runtime-only installation. It checks
+that `lua-devel` and system Lua headers are absent, then builds both bundle
+forms, checks relinking and verifies native dependency warnings.
+
 [cols="2,1,2",options="header"]
 |===
 |Runner |Architecture |Workflow label
