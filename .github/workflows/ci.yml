@@ -68,6 +68,8 @@ jobs:
           lua test/cli_split_smoke.lua
           lua test/contract_docs.lua
           lua test/standalone_install.lua
+          lua test/headerless_build.lua
+          lua test/native_dependencies.lua
 
       - name: Edge and safety suites
         run: |
@@ -153,6 +155,8 @@ jobs:
           file "$LUAI_TEST_LUA" | grep -F 'ELF 32-bit'
           "$LUAI_TEST_LUA" test/version_contract.lua
           "$LUAI_TEST_LUA" test/toolchain_native.lua
+          "$LUAI_TEST_LUA" test/headerless_build.lua
+          "$LUAI_TEST_LUA" test/native_dependencies.lua
           "$LUAI_TEST_LUA" test/native_bundle.lua
           "$LUAI_TEST_LUA" test/native_onefile.lua
           "$LUAI_TEST_LUA" test/onefile_lifecycle.lua

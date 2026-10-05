@@ -1,5 +1,5 @@
 --[[
-Native compiler and Lua development-toolchain discovery for luainstaller.
+Native compiler and Lua runtime discovery for luainstaller.
 
 Author:
     WaterRun
@@ -7,7 +7,7 @@ File:
     toolchain.lua
 Date:
 Updated:
-    2026-08-24
+    2026-10-05
 ]]
 
 local compat = require("luainstaller.compat")
@@ -35,7 +35,98 @@ local PROBE_TIMEOUT_SECONDS = 120
 -- MSVC's much newer /std:c11 switch: Lua itself still builds with toolchains
 -- used for legacy Windows targets, including the XP-capable MinGW/MSVC era.
 local MSVC_COMPILE_FLAGS = { "/nologo", "/W4", "/WX", "/wd5105", "/MT" }
-local PORTABLE_C_FLAGS = { "-std=c99", "-Wall", "-Wextra" }
+local PORTABLE_C_FLAGS = {
+    "-std=c99", "-Wall", "-Wextra", "-Werror=implicit-function-declaration",
+}
+
+-- Only the official API used by our generated sources belongs here. Keep
+-- lua_State opaque and avoid lua_Number/lua_Integer: their configured widths
+-- cannot be inferred from the runtime version. Signatures and macros follow
+-- lua.org/source/{5.1,5.2,5.3,5.4,5.5}/{lua.h,lauxlib.h,lualib.h}.html.
+local LUA_MIN_HEADER = [=[
+#ifndef LUAI_LUA_MIN_H
+#define LUAI_LUA_MIN_H
+
+#include <stddef.h>
+#define LUAI_LUA_ABI @LUA_ABI@
+
+typedef struct lua_State lua_State;
+typedef int (*lua_CFunction)(lua_State *L);
+
+void lua_close(lua_State *L);
+int lua_gettop(lua_State *L);
+void lua_settop(lua_State *L, int idx);
+int lua_type(lua_State *L, int idx);
+const char *lua_tolstring(lua_State *L, int idx, size_t *len);
+const char *lua_pushfstring(lua_State *L, const char *fmt, ...);
+void lua_pushcclosure(lua_State *L, lua_CFunction fn, int n);
+void lua_createtable(lua_State *L, int narr, int nrec);
+void lua_rawset(lua_State *L, int idx);
+void lua_setfield(lua_State *L, int idx, const char *k);
+int luaL_callmeta(lua_State *L, int obj, const char *e);
+int luaL_loadstring(lua_State *L, const char *s);
+lua_State *luaL_newstate(void);
+#if LUAI_LUA_ABI == 505
+void luaL_openselectedlibs(lua_State *L, int load, int preload);
+#define luaL_openlibs(L) luaL_openselectedlibs(L, ~0, 0)
+#else
+void luaL_openlibs(lua_State *L);
+#endif
+
+#if LUAI_LUA_ABI == 501
+void lua_pushlstring(lua_State *L, const char *s, size_t len);
+void lua_pushstring(lua_State *L, const char *s);
+void lua_getfield(lua_State *L, int idx, const char *k);
+void lua_call(lua_State *L, int nargs, int nresults);
+int lua_pcall(lua_State *L, int nargs, int nresults, int errfunc);
+int luaL_loadbuffer(lua_State *L, const char *buff, size_t sz, const char *name);
+#define lua_getglobal(L,s) lua_getfield(L, -10002, (s))
+#define lua_setglobal(L,s) lua_setfield(L, -10002, (s))
+#define lua_pushliteral(L,s) lua_pushlstring(L, "" s, sizeof(s) - 1)
+#else
+const char *lua_pushlstring(lua_State *L, const char *s, size_t len);
+const char *lua_pushstring(lua_State *L, const char *s);
+void lua_setglobal(lua_State *L, const char *name);
+int luaL_loadbufferx(lua_State *L, const char *buff, size_t sz,
+                     const char *name, const char *mode);
+void luaL_traceback(lua_State *L, lua_State *L1, const char *msg, int level);
+#if LUAI_LUA_ABI == 502
+void lua_getglobal(lua_State *L, const char *name);
+void lua_getfield(lua_State *L, int idx, const char *k);
+void lua_callk(lua_State *L, int nargs, int nresults, int ctx, lua_CFunction k);
+int lua_pcallk(lua_State *L, int nargs, int nresults, int errfunc,
+               int ctx, lua_CFunction k);
+#else
+typedef ptrdiff_t lua_KContext;
+typedef int (*lua_KFunction)(lua_State *L, int status, lua_KContext ctx);
+int lua_getglobal(lua_State *L, const char *name);
+int lua_getfield(lua_State *L, int idx, const char *k);
+void lua_callk(lua_State *L, int nargs, int nresults,
+               lua_KContext ctx, lua_KFunction k);
+int lua_pcallk(lua_State *L, int nargs, int nresults, int errfunc,
+               lua_KContext ctx, lua_KFunction k);
+#endif
+#define lua_call(L,n,r) lua_callk(L, (n), (r), 0, NULL)
+#define lua_pcall(L,n,r,f) lua_pcallk(L, (n), (r), (f), 0, NULL)
+#define luaL_loadbuffer(L,s,sz,n) luaL_loadbufferx(L, (s), (sz), (n), NULL)
+#define lua_pushliteral(L,s) lua_pushstring(L, "" s)
+#endif
+
+#define LUA_MULTRET (-1)
+#define LUA_OK 0
+#define LUA_ERRSYNTAX 3
+#define LUA_TSTRING 4
+#define LUA_TTABLE 5
+#define LUA_TFUNCTION 6
+#define lua_pop(L,n) lua_settop(L, -(n)-1)
+#define lua_tostring(L,i) lua_tolstring(L, (i), NULL)
+#define lua_istable(L,n) (lua_type(L, (n)) == LUA_TTABLE)
+#define lua_isfunction(L,n) (lua_type(L, (n)) == LUA_TFUNCTION)
+#define lua_pushcfunction(L,f) lua_pushcclosure(L, (f), 0)
+#define luaL_dostring(L,s) (luaL_loadstring(L, (s)) || lua_pcall(L, 0, LUA_MULTRET, 0))
+
+#endif
+]=]
 local configured_timeout = tonumber(os.getenv("LUAI_CMD_TIMEOUT"))
 local function compileTimeout()
     if type(configured_timeout) == "number" and configured_timeout > 0 then
@@ -390,9 +481,25 @@ local function prefixFromInterpreter(interpreter)
             located = ok and trimmed(output):match("[^\r\n]+") or nil
         end
     end
-    if not regularFile(located) then return nil end
-    if IS_WINDOWS then return path.dirname(normalizePath(located)) end
-    return path.dirname(path.dirname(normalizePath(located)))
+    local kind = located and fs.pathType(located)
+    if kind ~= "file" and kind ~= "reparse" then return nil end
+    if IS_WINDOWS then return path.dirname(normalizePath(located)), normalizePath(located) end
+    return path.dirname(path.dirname(normalizePath(located))), normalizePath(located)
+end
+
+local function activeLuaPrefix(opts)
+    local configured = opts.lua or os.getenv("LUAI_LUA")
+    if configured and configured ~= "" then return prefixFromInterpreter(configured) end
+    -- `lua -e ...` and library callers may put options at arg[-1], or have
+    -- no launcher arguments at all. Look for the interpreter before options.
+    for index = -1, -16, -1 do
+        local candidate = arg and arg[index]
+        if type(candidate) == "string" and candidate:sub(1, 1) ~= "-" then
+            local prefix, interpreter = prefixFromInterpreter(candidate)
+            if prefix then return prefix, interpreter end
+        end
+    end
+    return prefixFromInterpreter("lua")
 end
 
 local function luaNames(lua_version)
@@ -498,8 +605,6 @@ local function prefixCandidate(prefix, lua_version, source, config)
     }) do
         if regularFile(candidate .. "/lua.h") then include_dir = candidate break end
     end
-    if not include_dir then return nil end
-
     local names = luaNames(lua_version)
     local library_paths = {}
     local extensions
@@ -536,6 +641,12 @@ local function prefixCandidate(prefix, lua_version, source, config)
                 library_paths[#library_paths + 1] = directory .. "/lib" .. name .. extension
                 library_paths[#library_paths + 1] = directory .. "/" .. name .. extension
                 if extension == ".so" then
+                    -- Runtime packages commonly expose only a SONAME such
+                    -- as liblua5.4.so.0, without a development linker symlink.
+                    library_paths[#library_paths + 1] = directory .. "/lib"
+                        .. name .. extension .. ".0"
+                    library_paths[#library_paths + 1] = directory .. "/lib"
+                        .. name .. extension .. ".0.0.0"
                     library_paths[#library_paths + 1] = directory .. "/lib"
                         .. name .. extension .. "." .. version
                     library_paths[#library_paths + 1] = directory .. "/"
@@ -572,7 +683,7 @@ local function prefixCandidate(prefix, lua_version, source, config)
     return {
         source = source,
         prefix = prefix,
-        include_dir = normalizePath(include_dir),
+        include_dir = include_dir and normalizePath(include_dir) or nil,
         library_dir = library_path and path.dirname(library_path) or nil,
         library_path = library_path,
         runtime_path = runtime_path,
@@ -589,11 +700,11 @@ local function luarocksCandidate(lua_version, config)
     local include_dir = commandConfigValue("LUA_INCDIR")
     local library_dir = commandConfigValue("LUA_LIBDIR")
     local library_name = commandConfigValue("LUA_LIBNAME")
-    if not include_dir or not regularFile(normalizePath(include_dir .. "/lua.h"))
-        or not library_dir then
-        return nil
+    if not library_dir then return nil end
+    if include_dir and not regularFile(normalizePath(include_dir .. "/lua.h")) then
+        include_dir = nil
     end
-    local prefix = path.dirname(normalizePath(include_dir))
+    local prefix = path.dirname(normalizePath(library_dir))
     local candidate = prefixCandidate(prefix, lua_version, "luarocks", config)
     if candidate then return candidate end
     local names = library_name and { library_name:gsub("^lib", ""):gsub("%.[^.]+$", "") }
@@ -609,7 +720,7 @@ local function luarocksCandidate(lua_version, config)
     if not library_path then return nil end
     return {
         source = "luarocks",
-        include_dir = normalizePath(include_dir),
+        include_dir = include_dir and normalizePath(include_dir) or nil,
         library_dir = normalizePath(library_dir),
         library_path = library_path,
     }
@@ -712,8 +823,7 @@ end
 
 local function nativeModuleProbeSource()
     return [[
-#include <lua.h>
-#include <lauxlib.h>
+#include "lua_min.h"
 
 #if defined(_WIN32)
 #define LUAI_EXPORT __declspec(dllexport)
@@ -734,13 +844,7 @@ local function probeSource(lua_version, module_pattern)
     local source = [[
 #include <stdio.h>
 #include <string.h>
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
-
-#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM != @LUA_VERSION_NUM@
-#error "luainstaller toolchain Lua ABI mismatch"
-#endif
+#include "lua_min.h"
 
 int main(void) {
     lua_State *state = luaL_newstate();
@@ -762,8 +866,7 @@ int main(void) {
     return matches && module_status == 0 ? 0 : 42;
 }
 ]]
-    source = source:gsub("@LUA_VERSION_NUM@", tostring(lua_version.num))
-        :gsub("@LUA_VERSION@", lua_version.version)
+    source = source:gsub("@LUA_VERSION@", lua_version.version)
     return (source:gsub("@MODULE_SCRIPT@", function()
         return cStringLiteral(module_script)
     end))
@@ -903,6 +1006,39 @@ local function appendMsvcReproducibleCompile(arguments, config)
     if config.supports_brepro then arguments[#arguments + 1] = "/Brepro" end
 end
 
+function M.writeLuaHeader(config, directory)
+    local lua_version, version_err = luaVersionInfo(config.lua_version)
+    if not lua_version then return version_err end
+    local header_path = path.join(directory, "lua_min.h")
+    local kind = fs.pathType(header_path)
+    if fs.pathType(directory) ~= "directory"
+        or (kind ~= "file" and kind ~= "missing") then
+        return makeError("FilesystemError", "Cannot safely write the minimal Lua header", {
+            path = header_path,
+        })
+    end
+    local content = LUA_MIN_HEADER:gsub("@LUA_ABI@", tostring(lua_version.num))
+    local wrote, write_err = fs.writeFile(header_path, content)
+    if not wrote then
+        return makeError("FilesystemError", "Cannot write the minimal Lua header", {
+            path = header_path,
+            cause = write_err,
+        })
+    end
+    return { ok = true, path = header_path }
+end
+
+local function compileHeaderDirectory(config, output_path, opts)
+    local directory = normalizePath(
+        opts.lua_header_dir or opts.work_dir or path.dirname(output_path)
+    )
+    local written = M.writeLuaHeader(config, directory)
+    if not written.ok then
+        return nil, written.error.message .. ": " .. tostring(written.error.cause or written.error.path)
+    end
+    return directory
+end
+
 local function verifyMacosSharedRuntime(config, output_path)
     if not config.host or config.host.os ~= "macos"
         or config.link_mode ~= "shared" then
@@ -929,6 +1065,8 @@ end
 
 function M.compile(config, source_path, output_path, opts)
     opts = opts or {}
+    local header_dir, header_err = compileHeaderDirectory(config, output_path, opts)
+    if not header_dir then return false, header_err end
     local arguments = {}
     if config.compiler_family == "msvc" then
         appendValues(arguments, MSVC_COMPILE_FLAGS)
@@ -936,7 +1074,7 @@ function M.compile(config, source_path, output_path, opts)
         appendMsvcReproducibleCompile(arguments, config)
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
         local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
-        arguments[#arguments + 1] = "/I" .. config.include_dir:gsub("/", "\\")
+        arguments[#arguments + 1] = "/I" .. header_dir:gsub("/", "\\")
         arguments[#arguments + 1] = source_path:gsub("/", "\\")
         arguments[#arguments + 1] = "/Fo" .. normalizePath(
             object_dir .. "/" .. object_name
@@ -967,7 +1105,7 @@ function M.compile(config, source_path, output_path, opts)
     else
         appendPortableCompileFlags(arguments)
         appendWindowsCompatibilityDefines(arguments, config)
-        if config.include_dir then arguments[#arguments + 1] = "-I" .. config.include_dir end
+        arguments[#arguments + 1] = "-I" .. header_dir
         arguments[#arguments + 1] = source_path
         arguments[#arguments + 1] = "-o"
         arguments[#arguments + 1] = output_path
@@ -996,6 +1134,8 @@ end
 
 function M.compileNativeModule(config, source_path, output_path, opts)
     opts = opts or {}
+    local header_dir, header_err = compileHeaderDirectory(config, output_path, opts)
+    if not header_dir then return false, header_err end
     local arguments = {}
     if config.compiler_family == "msvc" then
         appendValues(arguments, MSVC_COMPILE_FLAGS)
@@ -1004,7 +1144,10 @@ function M.compileNativeModule(config, source_path, output_path, opts)
         arguments[#arguments + 1] = "/LD"
         local object_dir = normalizePath(opts.work_dir or path.dirname(output_path))
         local object_name = path.basename(source_path):gsub("%.[^%.]+$", "") .. ".obj"
-        arguments[#arguments + 1] = "/I" .. config.include_dir:gsub("/", "\\")
+        arguments[#arguments + 1] = "/I" .. header_dir:gsub("/", "\\")
+        if config.include_dir then
+            arguments[#arguments + 1] = "/I" .. config.include_dir:gsub("/", "\\")
+        end
         arguments[#arguments + 1] = source_path:gsub("/", "\\")
         arguments[#arguments + 1] = "/Fo" .. normalizePath(
             object_dir .. "/" .. object_name
@@ -1032,6 +1175,7 @@ function M.compileNativeModule(config, source_path, output_path, opts)
     else
         appendPortableCompileFlags(arguments)
         appendWindowsCompatibilityDefines(arguments, config)
+        arguments[#arguments + 1] = "-I" .. header_dir
         if config.host.os == "macos" then
             arguments[#arguments + 1] = "-bundle"
             arguments[#arguments + 1] = "-undefined"
@@ -1208,6 +1352,186 @@ local function sharedRuntimeInstallName(config, candidate)
     return path.basename(library_path)
 end
 
+local LINUX_SYSTEM_LIBRARIES = {
+    "^libc%.so", "^libm%.so", "^libdl%.so", "^libpthread%.so", "^librt%.so",
+    "^libresolv%.so", "^libutil%.so", "^libnsl%.so", "^libanl%.so",
+    "^ld%-linux", "^ld%-musl", "^linux%-vdso",
+}
+
+local function systemDependency(os_name, name, resolved)
+    if os_name == "macos" then
+        local function systemPath(value)
+            return type(value) == "string" and
+                (value:sub(1, 9) == "/usr/lib/" or value:sub(1, 8) == "/System/")
+        end
+        return systemPath(name) or systemPath(resolved)
+    end
+    for _, pattern in ipairs(LINUX_SYSTEM_LIBRARIES) do
+        if path.basename(name):match(pattern) then return true end
+    end
+    -- libstdc++ and libgcc_s are deliberately reported. Bundling them can
+    -- help some targets but can also conflict with the target's glibc. This
+    -- diagnostic makes no automatic exclusion or shipping decision for them.
+    return false
+end
+
+local function dependencyCommand(command, arguments)
+    return process.outputCommand(command, arguments, { LC_ALL = "C" }, {
+        timeout_seconds = math.min(probeTimeout(), 10),
+    })
+end
+
+local function linuxDependencies(binary)
+    local ok, output = dependencyCommand("ldd", { binary })
+    local dependencies = {}
+    for line in tostring(output or ""):gmatch("[^\r\n]+") do
+        local name, target = line:match("^%s*(.-)%s+=>%s+(.-)%s*$")
+        if name and target then
+            local resolved = target:match("^(.-)%s+%([^)]+%)%s*$") or target
+            local missing = resolved:match("^not found%s*$") ~= nil
+            if missing or path.isAbsolute(resolved) then
+                dependencies[#dependencies + 1] = {
+                    name = name, path = not missing and normalizePath(resolved) or nil,
+                    missing = missing,
+                }
+            end
+        else
+            local resolved = line:match("^%s*(/.-)%s+%([^)]+%)%s*$")
+            if resolved then
+                dependencies[#dependencies + 1] = {
+                    name = path.basename(resolved), path = normalizePath(resolved), missing = false,
+                }
+            end
+        end
+    end
+    -- Some ldd implementations return nonzero while still listing unresolved
+    -- libraries. Preserve those useful records and mark incomplete scans.
+    local complete = ok or tostring(output):find("statically linked", 1, true) ~= nil
+    return dependencies, complete, not complete and tostring(output) or nil
+end
+
+local function macosExpandPath(value, binary, executable)
+    if value == "@loader_path" then return path.dirname(binary) end
+    if value:sub(1, 13) == "@loader_path/" then
+        return path.join(path.dirname(binary), value:sub(14))
+    end
+    if executable and value == "@executable_path" then return path.dirname(executable) end
+    if executable and value:sub(1, 17) == "@executable_path/" then
+        return path.join(path.dirname(executable), value:sub(18))
+    end
+    return path.isAbsolute(value) and normalizePath(value) or nil
+end
+
+local function macosDependencies(binary, inherited_rpaths, executable)
+    local ok, output = dependencyCommand("otool", { "-L", binary })
+    if not ok then return {}, false, tostring(output), inherited_rpaths end
+    local rpaths = {}
+    local load_ok, load_output = dependencyCommand("otool", { "-l", binary })
+    local is_rpath = false
+    if load_ok then
+        for line in tostring(load_output):gmatch("[^\r\n]+") do
+            local command = line:match("^%s*cmd%s+(%S+)")
+            if command then is_rpath = command == "LC_RPATH" end
+            local value = is_rpath and line:match("^%s*path%s+(.-)%s+%(offset")
+            local expanded = value and macosExpandPath(value, binary, executable)
+            if expanded then rpaths[#rpaths + 1] = expanded end
+        end
+    end
+    for _, inherited in ipairs(inherited_rpaths or {}) do rpaths[#rpaths + 1] = inherited end
+    local id_ok, id_output = dependencyCommand("otool", { "-D", binary })
+    local install_name = id_ok and tostring(id_output):match("[^\r\n]+[\r\n]+%s*([^\r\n]+)")
+    local dependencies = {}
+    local unresolved_rpath = false
+    for line in tostring(output):gmatch("[^\r\n]+") do
+        local name = line:match("^%s*(.-)%s+%(compatibility version")
+        if name and name ~= install_name then
+            local resolved = macosExpandPath(name, binary, executable)
+            if name:sub(1, 7) == "@rpath/" then
+                for _, root in ipairs(rpaths) do
+                    local candidate = path.join(root, name:sub(8))
+                    local kind = fs.pathType(candidate)
+                    if kind == "file" or kind == "reparse" then resolved = candidate break end
+                end
+                if not load_ok then unresolved_rpath = true end
+            end
+            local kind = resolved and fs.pathType(resolved)
+            dependencies[#dependencies + 1] = {
+                name = name, path = resolved,
+                missing = kind ~= "file" and kind ~= "reparse",
+            }
+        end
+    end
+    return dependencies, not unresolved_rpath,
+        unresolved_rpath and "otool could not inspect LC_RPATH" or nil, rpaths
+end
+
+local function inspectNativeDependencies(config, module_path, opts)
+    local os_name = config.host.os
+    if os_name ~= "linux" and os_name ~= "macos" then
+        return {
+            ok = true, checked = false, dependencies = {},
+            reason = os_name == "windows" and "Windows DLL dependencies were not checked"
+                or "Native system dependencies were not checked on " .. tostring(os_name),
+        }
+    end
+    local dependencies, seen_names, seen_paths = {}, {}, {}
+    local queue = { { path = normalizePath(module_path), rpaths = {} } }
+    local queued_paths = { [normalizePath(module_path)] = true }
+    local unchecked = {}
+    local bundled = opts.bundled_libraries or {}
+    local index = 1
+    while index <= #queue and index <= 128 do
+        local current = queue[index]
+        index = index + 1
+        if not seen_paths[current.path] then
+            seen_paths[current.path] = true
+            local records, complete, reason, rpaths
+            if os_name == "macos" then
+                records, complete, reason, rpaths = macosDependencies(
+                    current.path, current.rpaths, opts.executable_path or config.lua_executable
+                )
+            else
+                records, complete, reason = linuxDependencies(current.path)
+            end
+            if not complete then
+                unchecked[#unchecked + 1] = current.path .. ": " .. tostring(reason)
+            end
+            for _, dependency in ipairs(records) do
+                local name = dependency.name
+                if not systemDependency(os_name, name, dependency.path)
+                    and not bundled[name] and not bundled[path.basename(name)]
+                    and dependency.path ~= normalizePath(module_path) then
+                    if not seen_names[name] then
+                        seen_names[name] = true
+                        dependency.parent = current.path
+                        dependencies[#dependencies + 1] = dependency
+                    end
+                    if dependency.path and not dependency.missing
+                        and not queued_paths[dependency.path] then
+                        queued_paths[dependency.path] = true
+                        queue[#queue + 1] = { path = dependency.path, rpaths = rpaths or {} }
+                    end
+                end
+            end
+        end
+    end
+    if index <= #queue then unchecked[#unchecked + 1] = "Dependency traversal limit reached" end
+    table.sort(dependencies, function(left, right) return left.name < right.name end)
+    return {
+        ok = true, checked = #unchecked == 0, dependencies = dependencies,
+        reason = #unchecked > 0 and table.concat(unchecked, "\n") or nil,
+    }
+end
+
+function M.inspectNativeDependencies(config, module_path, opts)
+    local called, inspected = pcall(inspectNativeDependencies, config, module_path, opts or {})
+    if called then return inspected end
+    return {
+        ok = true, checked = false, dependencies = {},
+        reason = "Native dependency inspection failed: " .. tostring(inspected),
+    }
+end
+
 local function verifyCandidate(config, candidate)
     local directory, directory_err = makeProbeDirectory()
     if not directory then return nil, directory_err end
@@ -1267,7 +1591,7 @@ local function verifyCandidate(config, candidate)
     })
     if not compiled then
         cleanupProbeDirectory(directory)
-        return nil, makeError("ToolchainError", "Lua development toolchain probe did not compile", {
+        return nil, makeError("ToolchainError", "Lua runtime toolchain probe did not compile", {
             command = command,
             output = compile_output,
             source = candidate.source,
@@ -1394,6 +1718,8 @@ function M.resolve(opts)
     }
 
     local candidates = {}
+    local active_prefix, active_interpreter = activeLuaPrefix(opts)
+    config.lua_executable = active_interpreter
     local requested_prefix = opts.lua_prefix or os.getenv("LUAI_LUA_PREFIX")
     if type(requested_prefix) == "string" and requested_prefix ~= "" then
         local explicit, prefix_err = prefixCandidate(
@@ -1405,7 +1731,7 @@ function M.resolve(opts)
         if not explicit then
             return nil, makeError(
                 "ToolchainError",
-                "Lua prefix does not contain development files for the selected Lua ABI",
+                "Lua prefix does not contain a library for the selected Lua ABI",
                 {
                     lua_prefix = normalizePath(requested_prefix),
                     lua_abi = lua_version.abi,
@@ -1416,7 +1742,7 @@ function M.resolve(opts)
         candidates[#candidates + 1] = explicit
     else
         local active = prefixCandidate(
-            prefixFromInterpreter(opts.lua or os.getenv("LUAI_LUA") or (arg and arg[-1])),
+            active_prefix,
             lua_version,
             "active-lua",
             config
@@ -1431,7 +1757,7 @@ function M.resolve(opts)
         end
     end
     if #candidates == 0 then
-        return nil, makeError("ToolchainError", "No Lua development metadata matches the selected ABI", {
+        return nil, makeError("ToolchainError", "No Lua library matches the selected ABI", {
             lua_abi = lua_version.abi,
         })
     end
@@ -1453,7 +1779,7 @@ function M.resolve(opts)
     end
     return nil, makeError(
         "ToolchainError",
-        "Cannot resolve a verified native Lua development toolchain for the linked Lua runtime",
+        "Cannot resolve a verified native toolchain for the linked Lua runtime",
         {
             lua_abi = lua_version.abi,
             compiler = config.cc,

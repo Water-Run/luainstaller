@@ -13,7 +13,7 @@ LUAROCKS_TARBALL=luarocks-$LUAROCKS_VERSION.tar.gz
 LUAROCKS_SHA256=245bf6ec560c042cb8948e3d661189292587c5949104677f1eecddc54dbe7e37
 LSQLITE3_SOURCE=lsqlite3-0.9.6.c
 LSQLITE3_SHA256=a3de0d56dcdd7df85e334174cd46e70451f996bc843e735ab1d8a8e8804f9486
-LSQLITE3_URL=https://raw.githubusercontent.com/abramov7613/lsqlite3-mirror/72cf3d38f6df7ac995f6db05d8ffeb78c25c9179/lsqlite3.c
+LSQLITE3_URL=https://sources.debian.org/data/main/l/lua-lsqlite3/0.9.6-1/lsqlite3.c
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
 SQLITE_SOURCE_MEMBER=sqlite-amalgamation-3530200/sqlite3.c
@@ -584,10 +584,12 @@ run_version() {
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.4.0-1.rockspec
+    "$luarocks" lint luainstaller-1.5.0-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/standalone_install.lua
     "$lua" test/toolchain_native.lua
+    "$lua" test/headerless_build.lua
+    "$lua" test/native_dependencies.lua
     "$lua" test/native_bundle.lua
     "$lua" test/onefile_compile_native.lua
     "$lua" test/native_onefile.lua

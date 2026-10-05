@@ -58,15 +58,15 @@ xref:docs/INSTALL.adoc[Installing without LuaRocks].
 
 .What you need to build executables
 ****
+NOTE: Lua headers aren't needed to build executables.
+
 * An official Lua interpreter, 5.1 to 5.5. LuaJIT isn't supported.
 * A C compiler for the machine you're on.
-* Lua headers and a Lua library that match that interpreter's version.
+* A Lua library that matches that interpreter's version. It usually comes
+  with the interpreter.
 
 Analysis works with just Lua. Only building needs the compiler.
 ****
-
-TIP: On most Linux systems the headers come from a package such as
-`liblua5.4-dev` or `lua-devel`.
 
 [#usage]
 == Build your first executable

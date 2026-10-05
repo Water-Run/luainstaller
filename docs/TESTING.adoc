@@ -32,13 +32,15 @@ LUA=${LUA:-lua}
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
+"$LUA" test/headerless_build.lua
+"$LUA" test/native_dependencies.lua
 "$LUA" test/production_edges.lua
 "$LUA" test/build_interruption.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.4.0-1.rockspec
+luarocks lint luainstaller-1.5.0-1.rockspec
 ----
 
 [cols="2,3",options="header"]
@@ -67,6 +69,14 @@ empty runtime PATH
 |Boundary and safety-related behavior, static and shared Lua fallback,
 optional FreeBSD cross-compilation, executable Termux fallback probes,
 and x86 and x86_64 XP-targeted generated-C and PE audits
+
+|`test/headerless_build.lua`
+|Library-only prefixes, ignored system headers, both bundle forms,
+clean-target execution and relinking with the shipped minimal header
+
+|`test/native_dependencies.lua`
+|Real Linux transitive and missing libraries, advisory build and log
+failures, parser fixtures for macOS, and unchecked Windows diagnostics
 
 |`test/build_interruption.lua`
 |Relayed SIGINT compiler shutdown, bounded SIGKILL descendants,
@@ -175,10 +185,9 @@ every Lua and native module from that ABI's isolated tree:
 |`8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32`
 |===
 
-The lsqlite3 C source is fetched from immutable mirror commit
-`72cf3d38f6df7ac995f6db05d8ffeb78c25c9179`. Its hash matches the
-source in the upstream `v0.9.6` Fossil snapshot without relying on
-Fossil's server-generated ZIP bytes.
+The lsqlite3 C source is fetched from Debian's versioned `0.9.6-1`
+source archive. Its hash matches the source in the upstream `v0.9.6`
+Fossil snapshot without relying on Fossil's server-generated ZIP bytes.
 
 The native-dependency cache identity binds both this source list and
 its exact installation order. The runner stages lsqlite3 and extracts

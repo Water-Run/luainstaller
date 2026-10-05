@@ -166,7 +166,7 @@ on the target machine.
 [horizontal]
 `--lua PATH`:: interpreter used by runtime discovery; must be the same Lua
 version as the one running `luainstaller`
-`--lua-prefix PATH`:: where to find Lua headers and library, when automatic
+`--lua-prefix PATH`:: where to find the Lua library, when automatic
 detection picks the wrong ones
 `--target-os OS`:: fail unless the build machine is this OS; there's no
 cross-compiling
@@ -213,6 +213,9 @@ local built = luainstaller.bundle({
 })
 print(built.ok and built.executable or built.error.message)
 ----
+
+Build results include a `warnings` list. Read each warning's `message`
+for native library diagnostics.
 
 [cols="1m,3",options="header"]
 |===

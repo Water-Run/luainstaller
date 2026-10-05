@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-09-22
+    2026-10-05
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -1187,12 +1187,12 @@ print(result.executable)
 end
 
 local function check_release_metadata_contract()
-    local rockspec = read_file("luainstaller-1.4.0-1.rockspec")
+    local rockspec = read_file("luainstaller-1.5.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
     assert_contains(changelog, "== 1.1.1")
-    assert_contains(changelog, "== 1.4.0")
+    assert_contains(changelog, "== 1.5.0")
     assert_contains(changelog, "== 1.1.0")
     local bundling = read_file("docs/BUNDLING.adoc")
     assert_contains(bundling, "luainstaller-generated-output-v2")
@@ -1231,7 +1231,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luai", { "-v" })),
-        "luai 1.4.0\n"
+        "luai 1.5.0\n"
     )
 
     local full_help = run(cli_command("luainstaller", { "help" }))
@@ -1245,7 +1245,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luainstaller", { "version" })),
-        "luainstaller 1.4.0  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.5.0  LGPL 3.0 by WaterRun\n"
     )
 
     local bad_luai = run(cli_command("luai", { "build", "test/single_file/01_hello_luainstaller.lua" }), {
@@ -1463,6 +1463,10 @@ end
 local function check_c_launcher()
     local script = SOURCE_LOADER .. [[
 local launcher = require("luainstaller.launcher")
+local toolchain = require("luainstaller.toolchain")
+local config, config_error = toolchain.resolve()
+assert(config, config_error and config_error.error.message)
+assert(toolchain.writeLuaHeader(config, "test/runtime_bundle").ok)
 local c_source = launcher.generateSource({
     entry = "test/runtime_bundle/main.lua",
     dependencies = {
@@ -1496,7 +1500,6 @@ print("c source generated")
     local link_flags
     local prefix = os.getenv("LUAI_LUA_PREFIX")
     if prefix and prefix ~= "" then
-        assert_file_exists(prefix .. "/include/lua.h")
         assert_file_exists(prefix .. "/lib/liblua.a")
         link_flags = "-I" .. shell_quote(prefix .. "/include")
             .. " " .. shell_quote(prefix .. "/lib/liblua.a") .. " -lm"
@@ -1525,6 +1528,7 @@ print("c source generated")
 
     remove_file(c_path)
     remove_file(exe_path)
+    remove_file("test/runtime_bundle/lua_min.h")
     print("c launcher ok")
 end
 
@@ -1810,10 +1814,10 @@ local function check_installed_cli_bundle()
     local root = make_temp_dir("installed-cli")
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
-    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.4.0-1.rockspec")
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.5.0-1.rockspec")
     assert_equals(
         run(shell_quote(tree .. "/bin/luainstaller") .. " version"),
-        "luainstaller 1.4.0  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.5.0  LGPL 3.0 by WaterRun\n"
     )
     run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")

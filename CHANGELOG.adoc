@@ -15,6 +15,37 @@ truth for the exact contents of a published version.
 * Introduction video link in the READMEs: bilibili in the Chinese README,
   YouTube in the English one.
 
+== 1.5.0 - 2026-10-05
+
+This release reduces build setup. Use an official Lua interpreter, its
+matching Lua library and a native C compiler. Lua headers and development
+metadata aren't required.
+
+=== Changed
+
+* Executable builds use bundled minimal Lua API declarations for all five
+  supported ABIs. A C compiler and matching Lua library are still required;
+  system Lua headers and development metadata are optional. Runtime ABI
+  probes continue to verify the linked library, and `lua_min.h` ships with
+  generated source for relinking. These declarations follow the supported
+  official APIs and need review when Lua changes its ABI.
+* Runtime-only Lua prefixes work without headers, including versioned Linux
+  shared libraries. Explicit prefixes still don't fall back to another
+  installation. Verbose builds show the selected discovery path and library.
+
+=== Added
+
+* Linux and macOS builds report C modules' external system libraries,
+  including missing and transitive dependencies, with target-machine
+  installation guidance. Windows reports that DLL dependencies weren't
+  checked. Diagnostics are also available in operation logs and bundle
+  results; they don't stop a build.
+
+=== Fixed
+
+* POSIX CI fetches the same hash-pinned lsqlite3 source from Debian's
+  versioned source archive after the previous GitHub mirror became unavailable.
+
 == 1.4.0 - 2026-09-22
 
 === Added

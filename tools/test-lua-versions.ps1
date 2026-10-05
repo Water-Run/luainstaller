@@ -330,12 +330,12 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         }
     }
     foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','release_docs_contract.lua',
-        'windows_native.lua','toolchain_native.lua',
+        'windows_native.lua','toolchain_native.lua','headerless_build.lua','native_dependencies.lua',
         'luarocks_install.lua','standalone_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
         'onefile_lifecycle.lua','distribution_licenses.lua','reproducible_artifacts.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
-    Invoke-Native $LuaRocks @('lint','luainstaller-1.4.0-1.rockspec')
+    Invoke-Native $LuaRocks @('lint','luainstaller-1.5.0-1.rockspec')
     "PASS host=$HostLabel lua=$version abi=Lua $abi"
 }
 

@@ -30,17 +30,7 @@
 #include <unistd.h>
 #endif
 
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
-
-#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM != @LUA_VERSION_NUM@
-#error "luainstaller was generated for a different Lua ABI"
-#endif
-
-#ifndef LUA_OK
-#define LUA_OK 0
-#endif
+#include "lua_min.h"
 
 static int luai_traceback(lua_State *L)
 {
@@ -53,7 +43,7 @@ static int luai_traceback(lua_State *L)
         }
         message = "(error object is not a string)";
     }
-#if LUA_VERSION_NUM == 501
+#if LUAI_LUA_ABI == 501
     lua_getglobal(L, "debug");
     if (!lua_istable(L, -1))
     {
@@ -69,7 +59,7 @@ static int luai_traceback(lua_State *L)
         return 1;
     }
     lua_pushstring(L, message);
-    lua_pushinteger(L, 2);
+    lua_pushstring(L, "2");
     lua_call(L, 2, 1);
 #else
     luaL_traceback(L, L, message, 1);
@@ -174,12 +164,15 @@ static void luai_push_arg(lua_State *L, int argc, char **argv)
         executable_path = executable;
     }
     lua_createtable(L, argc > 1 ? argc - 1 : 0, 1);
-    lua_pushstring(L, arg0);
-    lua_rawseti(L, -2, 0);
-    for (i = 1; i < argc; ++i)
+    for (i = 0; i < argc || i == 0; ++i)
     {
-        lua_pushstring(L, argv[i]);
-        lua_rawseti(L, -2, i);
+        /* Let Lua create the numeric key without assuming the configured
+         * width of lua_Integer or lua_Number in a headerless build. */
+        lua_getglobal(L, "tonumber");
+        lua_pushfstring(L, "%d", i);
+        lua_call(L, 1, 1);
+        lua_pushstring(L, i == 0 ? arg0 : argv[i]);
+        lua_rawset(L, -3);
     }
     lua_setglobal(L, "arg");
     lua_pushstring(L, executable_path);
@@ -188,7 +181,7 @@ static void luai_push_arg(lua_State *L, int argc, char **argv)
 
 static int luai_load_bootstrap(lua_State *L)
 {
-#if LUA_VERSION_NUM == 501
+#if LUAI_LUA_ABI == 501
     if (luai_bootstrap_size > 0 && luai_bootstrap[0] == 0x1b) return LUA_ERRSYNTAX;
     return luaL_loadbuffer(L, (const char *)luai_bootstrap, luai_bootstrap_size, "@luainstaller-bootstrap");
 #else

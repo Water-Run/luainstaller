@@ -62,14 +62,14 @@ bundle fails with `module 'x' not found`.
 [#troubleshooting-compile]
 == The build fails to compile or link
 
-Almost always, the compiler, the Lua headers and the Lua library don't
-match each other or the `lua` you're running. Check them together:
+Check that the compiler and Lua library match this machine, and that the
+library matches the version of `lua` you're running:
 
 [source,bash]
 ----
 lua -v
 cc --version
-pkg-config --cflags --libs lua
+pkg-config --libs lua
 ----
 
 If `pkg-config` finds the wrong Lua or none at all, point `luainstaller` at
@@ -80,24 +80,25 @@ the right installation:
 luai -b app/main.lua --lua-prefix /opt/lua-5.4
 ----
 
-The prefix folder should contain `include/lua.h` and a Lua library under
-`lib/`.
+The prefix folder should contain a matching Lua library under `lib/` or
+`lib64/`. Lua headers aren't needed. Use `--verbose` to see which library
+and discovery path were selected.
 
 .Notes per system
 [%collapsible]
 ====
 Linux, 32-bit::
-The interpreter, compiler, headers, library and every C module must all
+The interpreter, compiler, library and every C module must all
 be 32-bit. Adding `-m32` to the compiler alone isn't enough.
 
 macOS::
-Check that `include/lua.h` and `lib/liblua.a` exist under the prefix and
+Check that `lib/liblua.a` exists under the prefix and
 match your Mac's architecture.
 
 Windows::
 Build from a Visual Studio developer prompt (or a MinGW shell) so the
-compiler is on `PATH`. The prefix needs the headers, the import library
-and the `lua5x.dll`.
+compiler is on `PATH`. The prefix needs `lua5x.dll` and its import library.
+MSVC can also generate the import library from the DLL's exports.
 
 Windows XP::
 Use a compiler and C runtime that support XP. A modern Visual Studio
@@ -108,9 +109,29 @@ FreeBSD::
 Don't add `-ldl`; it's Linux-only.
 
 Android (Termux)::
-Install `clang` and the Lua development package inside Termux. Leave
+Install `clang` and Lua inside Termux. Leave
 `$PREFIX` and `$TMPDIR` alone and don't create `/tmp` or `/bin/sh`.
 ====
+
+[#troubleshooting-native-dependencies]
+== A build warns about C module libraries
+
+The warning names the module and the external libraries it needs. These
+libraries aren't copied into the bundle. Install them on the target
+machine, or rebuild the module with those dependencies linked statically.
+A library marked `not found on build host` also needs attention on the
+machine doing the build.
+
+For `libstdc++` and `libgcc_s`, check compatibility with the target's C/C++
+runtime before deciding how to distribute them.
+
+If the warning says dependencies weren't checked, run `ldd module.so` on
+Linux or `otool -L module.so` on macOS. Windows DLL dependencies need a
+separate check, such as `dumpbin /DEPENDENTS module.dll` from a Visual
+Studio developer prompt.
+
+`luainstaller logs --level warning` shows the saved diagnostics. A build
+can succeed while a target machine still needs these libraries.
 
 [#troubleshooting-native]
 == A C module fails after the program starts
@@ -168,7 +189,7 @@ rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 |InvalidOutputError          |The output folder can't be safely replaced
 |UnsupportedPlatformError    |`--target-os` doesn't match this machine
 |UnsupportedLuaVersionError  |Not official Lua 5.1–5.5 (LuaJIT included)
-|ToolchainError              |Compiler, headers or library missing or mismatched
+|ToolchainError              |Compiler or Lua library missing or mismatched
 |CompilationFailedError      |The compiler ran and reported errors
 |LuaRuntimeNotFoundError     |The Lua shared library couldn't be located
 |DiscoveryError              |Runtime discovery didn't finish

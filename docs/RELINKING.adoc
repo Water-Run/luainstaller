@@ -13,6 +13,8 @@ the license texts in `../licenses/`.
 * `launcher.c` is the exact generated launcher source used for the
   inner executable. It contains the entry and bundled pure-Lua sources
   as text.
+* `lua_min.h` contains the Lua API declarations used by `launcher.c`.
+  Keep it beside the source when compiling.
 * `extractor.c`, when present in a onefile payload, is the corresponding
   source for the outer self-extractor. Its generated payload definitions
   are rebuilt from the other extracted files as described in its header.
@@ -28,7 +30,7 @@ the license texts in `../licenses/`.
 
 == Relinking the launcher
 
-. Use an official Lua interpreter, headers, and library with the same
+. Use an official Lua interpreter and library with the same
   major and minor ABI shown in `../manifest.lua`.
 . Use a native compiler for the target operating system and
   architecture. Cross-compilation is outside the supported native
@@ -50,10 +52,10 @@ cc -std=c99 -Wall -Wextra \
   launcher.c -o application $(pkg-config --cflags --libs lua)
 ----
 
-If `pkg-config` is absent, replace that substitution with explicit
-matching include and library paths. For a static POSIX Lua archive, also
-link the platform libraries used by that Lua build and export the main
-executable's Lua symbols. Linux commonly needs
+If `pkg-config` is absent, replace that substitution with the explicit
+matching library path. System Lua headers aren't needed. For a static
+POSIX Lua archive, also link the platform libraries used by that Lua build
+and export the main executable's Lua symbols. Linux commonly needs
 `liblua.a -lm -ldl -Wl,-E`. FreeBSD must not receive Linux's `-ldl`.
 
 To rebuild an extracted onefile wrapper, first regenerate its payload

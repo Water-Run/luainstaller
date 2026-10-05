@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-09-22
+    2026-10-05
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -931,6 +931,8 @@ test("Windows release toolchains close the CRT and select the native machine", f
     local toolchain = require("luainstaller.toolchain")
     local process = require("luainstaller.process")
     local original_output_command = process.outputCommand
+    local original_write_header = toolchain.writeLuaHeader
+    toolchain.writeLuaHeader = function() return { ok = true } end
     local captured_arguments
     process.outputCommand = function(_, arguments)
         captured_arguments = arguments
@@ -984,6 +986,7 @@ test("Windows release toolchains close the CRT and select the native machine", f
             name .. " does not apply /Brepro to both cl.exe and link.exe")
     end
     process.outputCommand = original_output_command
+    toolchain.writeLuaHeader = original_write_header
     for version, compiler_flag in pairs({
         ["5.2.4"] = "/DLUA_COMPAT_ALL",
         ["5.3.6"] = "/DLUA_COMPAT_5_2",
@@ -3828,8 +3831,10 @@ fi
 exit 2
 ]], shellQuote(lua_info.version:match("(%d+%.%d+)") .. ".99"), shellQuote(fake_flags)))
     writeFile(fake_bin .. "/luarocks", "#!/bin/sh\nexit 2\n")
+    writeFile(fake_bin .. "/lua-no-dev", "#!/bin/sh\nexit 2\n")
     runCommand("chmod 700 " .. shellQuote(fake_bin .. "/pkg-config")
-        .. " " .. shellQuote(fake_bin .. "/luarocks"))
+        .. " " .. shellQuote(fake_bin .. "/luarocks")
+        .. " " .. shellQuote(fake_bin .. "/lua-no-dev"))
 
     local child = harness.loader_prelude() .. string.format([[
 local result = require("luainstaller").bundle({
@@ -3848,6 +3853,7 @@ assert(diagnostic:find(%q, 1, true), diagnostic)
 assert(diagnostic:find(%q, 1, true), diagnostic)
     ]], out, "expected " .. lua_info.version, "got " .. misreported_version)
     runCommand(table.concat({
+        "LUAI_LUA=" .. shellQuote(fake_bin .. "/lua-no-dev"),
         "LUAI_LUA_PREFIX=" .. shellQuote(""),
         "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
         luaCommand .. " -e " .. shellQuote(child),
@@ -3875,28 +3881,14 @@ test("target launcher enforces the selected Lua ABI", function()
     local include_dir = root .. "/include"
     local c_path = root .. "/launcher.c"
     local log_path = root .. "/compiler.log"
-    local selected_prefix = os.getenv("LUAI_LUA_PREFIX")
-    local selected_include
-    if selected_prefix and selected_prefix ~= "" then
-        selected_include = selected_prefix .. "/include"
-        assert(fileExists(selected_include .. "/lua.h"),
-            "selected Lua prefix has no lua.h")
-    elseif commandSucceeds("command -v pkg-config >/dev/null 2>&1") then
-        selected_include = commandOutputTrimmed(
-            "pkg-config --variable=includedir lua"
-        )
-    else
-        removeTree(root)
-        return
-    end
+    local toolchain = require("luainstaller.toolchain")
+    local config, config_err = toolchain.resolve()
+    assert(config, config_err and config_err.error.message)
+    assert(toolchain.writeLuaHeader(config, root).ok)
+    local selected_include = root
     makeDirectory(include_dir)
     local lua_info = require("luainstaller.compat").luaVersion()
-    local mismatched_num = lua_info.num == 501 and 502 or 501
-    writeFile(include_dir .. "/lua.h", string.format([[
-#include_next <lua.h>
-#undef LUA_VERSION_NUM
-#define LUA_VERSION_NUM %d
-]], mismatched_num))
+    writeFile(include_dir .. "/lua.h", "#error unrelated Lua headers were included\n")
     local launcher = require("luainstaller.launcher")
     local generated = launcher.generateSource({
         entry = "test/single_file/01_hello_luainstaller.lua",
@@ -3913,16 +3905,17 @@ test("target launcher enforces the selected Lua ABI", function()
         dependencies = { scripts = {}, libraries = {} },
         lua_version = { version = "Lua 5.5", major = 5, minor = 5, num = 505, abi = "lua5.5" },
     })
-    assert(generated:find("LUA_VERSION_NUM != " .. tostring(lua_info.num), 1, true))
-    assert(source51:find("LUA_VERSION_NUM != 501", 1, true))
+    assert(generated:find('#include "lua_min.h"', 1, true))
+    assert(not generated:find("LUA_VERSION_NUM", 1, true))
+    assert(source51:find("LUAI_LUA_ABI == 501", 1, true))
     assert(source51:find("Lua 5.1", 1, true))
     assert(source51:find("luaL_loadbuffer", 1, true))
-    assert(source55:find("LUA_VERSION_NUM != 505", 1, true))
+    assert(source55:find('#include "lua_min.h"', 1, true))
     assert(source55:find("Lua 5.5", 1, true))
     assert(not source55:find("Lua 5.4", 1, true))
     assert(source51 ~= source55, "different Lua ABIs produced identical launchers")
     local template = readFile("src/launcher/luai_launcher.c")
-    assert(template:find("@LUA_VERSION_NUM@", 1, true))
+    assert(not template:find("LUA_VERSION_NUM", 1, true))
     assert(template:find("@LUA_VERSION@", 1, true))
     local file_template_source = launcher.generateSource({
         entry = "test/single_file/01_hello_luainstaller.lua",
@@ -3930,6 +3923,7 @@ test("target launcher enforces the selected Lua ABI", function()
         lua_version = lua_info,
         template_path = "src/launcher/luai_launcher.c",
     })
+    assert(generated == file_template_source, "embedded and file launcher templates differ")
     for source_name, source in pairs({
         embedded = generated,
         file = file_template_source,
@@ -4024,29 +4018,8 @@ test("target launcher enforces the selected Lua ABI", function()
     }, " "))
     if commandSucceeds("command -v zig >/dev/null 2>&1") then
         local portable_include = root .. "/freebsd-lua-headers"
-        local pending = { "lua.h", "lauxlib.h", "lualib.h", "luaconf.h" }
-        local copied = {}
         makeDirectory(portable_include)
-        while #pending > 0 do
-            local header = table.remove(pending)
-            if not copied[header] then
-                local source_header = selected_include .. "/" .. header
-                assert(fileExists(source_header),
-                    "selected Lua include directory has no " .. header)
-                local header_content = readFile(source_header)
-                writeFile(portable_include .. "/" .. header, header_content)
-                copied[header] = true
-                for nested in header_content:gmatch(
-                    "#%s*include%s*[<\"]([^>\"]+)[>\"]"
-                ) do
-                    if nested:match("^lua[%w_.%-]*%.h$")
-                            and fileExists(selected_include .. "/" .. nested)
-                            and not copied[nested] then
-                        pending[#pending + 1] = nested
-                    end
-                end
-            end
-        end
+        writeFile(portable_include .. "/lua_min.h", readFile(root .. "/lua_min.h"))
         local freebsd_object = root .. "/launcher-freebsd.o"
         runCommand(table.concat({
             "zig cc -target x86_64-freebsd",
@@ -4067,8 +4040,7 @@ test("target launcher enforces the selected Lua ABI", function()
         shellQuote(c_path),
         ">" .. shellQuote(log_path) .. " 2>&1",
     }, " "))
-    assert(not compiled, "mismatched Lua headers passed the launcher guard")
-    assert(readFile(log_path):find("generated for a different Lua ABI", 1, true))
+    assert(compiled, "unrelated system headers affected the launcher: " .. readFile(log_path))
     removeTree(root)
 end)
 
@@ -5429,10 +5401,10 @@ test("remote scripts are pinned and non-destructive", function()
         true
     ), "POSIX matrix does not require the pinned lsqlite3 source file")
     assert(posix_matrix:find(
-        "72cf3d38f6df7ac995f6db05d8ffeb78c25c9179/lsqlite3.c",
+        "sources.debian.org/data/main/l/lua-lsqlite3/0.9.6-1/lsqlite3.c",
         1,
         true
-    ), "POSIX matrix does not pin its lsqlite3 mirror commit")
+    ), "POSIX matrix does not pin its versioned lsqlite3 source")
     assert(posix_matrix:find(
         'SQLITE_SOURCE_MEMBER=sqlite-amalgamation-3530200/sqlite3.c',
         1,

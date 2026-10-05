@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-08-24
+    2026-10-05
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -17,6 +17,13 @@ harness.install_loader()
 local compat = require("luainstaller.compat")
 local process = require("luainstaller.process")
 local info = compat.luaVersion()
+local version = require("luainstaller").VERSION
+assert(version == "1.5.0", "unexpected product version: " .. tostring(version))
+assert(loadfile("luainstaller-" .. version .. "-1.rockspec"))
+local rockspec_text = harness.read_file("luainstaller-" .. version .. "-1.rockspec")
+harness.assert_contains(rockspec_text, 'version = "' .. version .. '-1"')
+harness.assert_contains(rockspec_text, 'tag = "v' .. version .. '"')
+harness.assert_contains(harness.read_file("luainstaller.1"), "luainstaller " .. version)
 
 local expected_host_arch = os.getenv("LUAI_EXPECT_HOST_ARCH")
 if expected_host_arch and expected_host_arch ~= "" then

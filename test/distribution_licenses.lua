@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-08-17
+    2026-10-05
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -61,6 +61,8 @@ local function assertDistribution(bundle_root, expect_extractor)
         "Relinking", "relinking instructions")
     assert(fs.pathType(path.join(bundle_root, ".luai/build/launcher.c")) == "file",
         "generated launcher source is missing")
+    assertContains(read(bundle_root, ".luai/build/lua_min.h"),
+        "typedef struct lua_State lua_State;", "minimal Lua header")
     local build_root = path.join(bundle_root, ".luai/build")
     for _, item in ipairs(assert(fs.listTree(build_root))) do
         local relative = item.path:lower()

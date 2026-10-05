@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-09-22
+    2026-10-05
 ]]
 
 local function localFileExists(path)
@@ -146,7 +146,7 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.4.0"
+local VERSION = "1.5.0"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
@@ -556,6 +556,18 @@ local function renderClassicTrace(result)
     end
 end
 
+local function renderBundleDiagnostics(result, verbose)
+    if verbose and result.toolchain then
+        local selected = result.toolchain
+        io.write(string.format("toolchain: %s; %s; Lua declarations: %s\n",
+            selected.source or "unknown", selected.link_mode or "unknown", selected.lua_header))
+        io.write(string.format("lua-library: %s\n", selected.library_path or "unknown"))
+    end
+    for _, warning in ipairs(result.warnings or {}) do
+        io.stderr:write("warning: " .. warning.message .. "\n")
+    end
+end
+
 local function renderClassicBundle(result, opts)
     io.write("ok\n")
     if result.executable then
@@ -568,6 +580,7 @@ local function renderClassicBundle(result, opts)
         io.write(string.format("lua-modules: %d\n", #(modules.lua or {})))
         io.write(string.format("native-modules: %d\n", #(modules.native or {})))
     end
+    renderBundleDiagnostics(result, opts.verbose)
 end
 
 local function renderModernAnalyze(ui, result, verbose)
@@ -629,6 +642,7 @@ local function renderModernBundle(ui, result, opts)
         io.write(string.format("  Lua modules: %d\n", #(modules.lua or {})))
         io.write(string.format("  Native modules: %d\n", #(modules.native or {})))
     end
+    renderBundleDiagnostics(result, opts.verbose)
 end
 
 local function runAction(style, ui, parser, action)

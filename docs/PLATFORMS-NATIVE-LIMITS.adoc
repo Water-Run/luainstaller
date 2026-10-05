@@ -33,8 +33,8 @@ run on the wrong kind of machine, which is handy in scripts.
 
 Official Lua 5.1, 5.2, 5.3, 5.4 and 5.5 work. LuaJIT doesn't.
 
-The interpreter running `luainstaller` decides the version. The headers,
-the Lua library and every C module you bundle must be that same version.
+The interpreter running `luainstaller` decides the version. The Lua
+library and every C module you bundle must be that same version.
 Before finishing a build, the new executable is started once to confirm
 the versions line up.
 
@@ -62,7 +62,7 @@ the versions line up.
 |shared or static, as on Linux
 |===
 
-If headers or the library aren't found automatically, pass
+Lua headers aren't needed. If the library isn't found automatically, pass
 `--lua-prefix /path/to/lua` (or set `LUAI_LUA_PREFIX`). An explicit prefix
 is used as given; `luainstaller` won't quietly fall back to another Lua it
 finds.
@@ -102,7 +102,7 @@ Other notes:
 == Linux, macOS and the rest
 
 32-bit Linux::
-Everything must be 32-bit: interpreter, compiler, headers, library and
+Everything must be 32-bit: interpreter, compiler, library and
 C modules. `luainstaller` notices a 32-bit userland on a 64-bit kernel.
 
 macOS::
@@ -122,9 +122,13 @@ no `/bin/sh` or `/tmp`, and none is needed.
 A C module is copied exactly as `package.cpath` finds it. `luainstaller`
 doesn't rebuild it, and doesn't copy the system libraries it links to.
 
-So a bundle that uses `luasocket` or `lsqlite3` runs anywhere those modules'
-own libraries are present. If the target machine lacks them, ship them
-alongside or link the module statically.
+On Linux and macOS, builds warn about external libraries, including
+transitive dependencies. Windows builds report that DLL dependencies
+weren't checked. These warnings don't stop the build.
+
+Install the libraries on the target machine or link the module's
+dependencies statically. See
+xref:TROUBLESHOOTING.adoc#troubleshooting-native-dependencies[Dependency warnings].
 
 [#platforms-matrix]
 == How it's tested

@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "September 2026" "luainstaller 1.4.0" "User Commands"
+.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.5.0" "User Commands"
 .SH NAME
 luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
@@ -36,9 +36,11 @@ placed beside the launcher in an inspectable directory bundle.
 The output is not a universal executable. The target must match the selected
 operating-system family, CPU architecture, system ABI, and Lua ABI. External
 shared libraries required by Lua C modules are not copied automatically.
+Linux and macOS builds warn about external and missing libraries. Windows
+reports that DLL dependencies were not checked. These warnings do not stop builds.
 .PP
-Official Lua 5.1 or newer within the 5.x series is supported. Runtime
-discovery, generated headers, linked runtimes, and native modules must all
+Official Lua 5.1 through 5.5 is supported. Runtime
+discovery, linked runtimes, and native modules must all
 match the interpreter's Lua major/minor ABI. LuaJIT is rejected.
 .PP
 Before publishing, every native backend compiles and executes a linked-runtime
@@ -140,10 +142,10 @@ Assert the detected native host OS. A different OS is rejected; this option
 does not enable cross-building.
 .TP
 .BI \-\-lua-prefix " path"
-Select matching native Lua headers and runtime files.
+Select matching native Lua libraries and runtime files. Lua headers are not required.
 .TP
 .B \-\-verbose
-Print additional trace or bundle counts.
+Print additional trace or bundle counts and the selected Lua library and discovery path.
 .TP
 .B \-\-
 Pass the remaining arguments to the entry during runtime dependency discovery.
@@ -247,10 +249,10 @@ cleared.
 .TP
 .B LUAI_LUA
 Default interpreter for runtime discovery. A selected interpreter that is not
-official Lua 5.1 or newer is rejected.
+official Lua 5.1 through 5.5 is rejected.
 .TP
 .B LUAI_LUA_PREFIX
-Default matching native Lua headers/runtime prefix.
+Default matching native Lua library/runtime prefix.
 .TP
 .B LUAI_TARGET_OS
 Optional assertion for the detected native host OS.

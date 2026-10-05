@@ -18,6 +18,8 @@ fi
 "$LUA" test/lua_abi.lua
 "$LUA" test/version_contract.lua
 "$LUA" test/toolchain_native.lua
+"$LUA" test/headerless_build.lua
+"$LUA" test/native_dependencies.lua
 "$LUA" test/native_bundle.lua
 "$LUA" test/native_onefile.lua
 "$LUA" test/onefile_lifecycle.lua

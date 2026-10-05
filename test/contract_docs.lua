@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-02
+    2026-10-05
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -539,6 +539,7 @@ local function check_documentation_contract()
     assert_contains(usage, "DynamicRequireError")
     assert_contains(usage, "--max-deps")
     assert_contains(usage, "LUA_CPATH")
+    assert_contains(usage, "Build results include a `warnings` list")
     assert_contains(usage, "luainstaller.VERSION")
 
     local testing = read_file("docs/TESTING.adoc")
@@ -600,6 +601,9 @@ local function check_documentation_contract()
     assert_contains(readme, "CHANGELOG.adoc")
     assert_contains(readme, "docs/RELINKING.adoc")
     assert_contains(readme, "LuaRocks is optional")
+    assert_contains(readme, "Lua headers aren't needed")
+    assert_contains(readme, "A Lua library that matches that interpreter's version")
+    assert_not_contains(readme, "Lua headers and a Lua library")
     assert_contains(readme, "docs/INSTALL.adoc")
     assert_contains(readme, "README.zh-CN.adoc")
     assert_contains(readme, "https://www.youtube.com/watch?v=ctYfIRZeuYc")
@@ -617,7 +621,8 @@ local function check_documentation_contract()
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
     assert_contains(changelog, "== 1.1.1")
-    assert_contains(changelog, "== 1.4.0")
+    assert_contains(changelog, "== 1.5.0")
+    assert_contains(changelog, "This release reduces build setup")
     assert_contains(changelog, "== 1.1.0")
     assert_contains(changelog, "=== Upgrade notes")
 
@@ -625,18 +630,25 @@ local function check_documentation_contract()
     assert_contains(platform_limits, "LuaJIT")
     assert_contains(platform_limits, "evidence, not a platform allowlist")
     assert_contains(platform_limits, "doesn't cross-compile")
+    assert_contains(platform_limits, "Lua headers aren't needed")
+    assert_contains(platform_limits, "transitive dependencies")
+    assert_contains(platform_limits, "weren't checked")
+    assert_contains(platform_limits, "These warnings don't stop the build")
 
     local troubleshooting = read_file("docs/TROUBLESHOOTING.adoc")
     assert_contains(troubleshooting, "LuaSyntaxError")
     assert_contains(troubleshooting, "SourceChangedError")
     assert_contains(troubleshooting, "luainstaller-generated-output-v2")
+    assert_contains(troubleshooting, "troubleshooting-native-dependencies")
+    assert_contains(troubleshooting, "not found on build host")
+    assert_contains(troubleshooting, "libstdc++")
 
     local manpage = read_file("luainstaller.1")
     assert_contains(manpage, "Lua 5.1")
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.4.0-1.rockspec")
+    local rockspec = read_file("luainstaller-1.5.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -649,7 +661,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.4.0-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.5.0-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-08-22
+    2026-10-05
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -1707,6 +1707,8 @@ function M.bundleOnefile(opts)
         out = out_path,
         executable = out_path,
         manifest = opts.manifest,
+        warnings = staged.warnings,
+        toolchain = staged.toolchain,
     }
 end
 

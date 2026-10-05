@@ -1,5 +1,5 @@
 --[[
-Native compiler and Lua development metadata integration test.
+Native compiler and Lua runtime integration test.
 
 Author:
     WaterRun
@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-18
+    2026-10-05
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -38,7 +38,7 @@ if config_err and config_err.error then
 end
 assert(config, table.concat(diagnostic, "\n"))
 assert(type(config.cc) == "string" and config.cc ~= "")
-assert(type(config.include_dir) == "string" and config.include_dir ~= "")
+assert(config.include_dir == nil or type(config.include_dir) == "string")
 assert(config.lua_version.abi == compat.luaVersion().abi)
 local supported_link_modes = {}
 for _, mode in ipairs(config.profile.supported_link_modes or {}) do

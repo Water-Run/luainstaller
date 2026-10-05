@@ -9,7 +9,7 @@ File:
 Date:
     2026-08-22
 Updated:
-    2026-09-23
+    2026-10-05
 ]]
 
 local function read_file(path)
@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.4.0-1.rockspec",
+    "luainstaller-1.5.0-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -56,6 +56,18 @@ expect_not_contains(
     "The installed manual page is available as `luai(1)` and `luainstaller(1)`."
 )
 expect_contains_raw("docs/BUNDLING.adoc", "exact file set")
+for _, doc in ipairs({ "README.adoc", "docs/INSTALL.adoc", "docs/PLATFORMS-NATIVE-LIMITS.adoc" }) do
+    expect_contains(doc, "Lua headers aren't needed")
+end
+expect_contains("docs/RELINKING.adoc", "`lua_min.h`")
+expect_not_contains("docs/RELINKING.adoc", "interpreter, headers, and library")
+expect_contains("luainstaller.1", "Lua headers are not required")
+expect_contains("docs/PLATFORMS-NATIVE-LIMITS.adoc", "These warnings don't stop the build")
+expect_contains("docs/PLATFORMS-NATIVE-LIMITS.adoc", "weren't checked")
+expect_contains("docs/USAGE.adoc", "Build results include a `warnings` list")
+expect_contains("CHANGELOG.adoc", "This release reduces build setup")
+expect_contains("CHANGELOG.adoc", "Lua headers and development metadata aren't required")
+expect_contains("README.adoc", "A Lua library that matches that interpreter's version")
 
 local structured_contract = "The structured result contract applies to `analyze`, `trace`, "
     .. "`compatibility`, and `bundle` only."

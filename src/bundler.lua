@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-08-17
+    2026-10-05
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -23,6 +23,7 @@ local platform = require("luainstaller.platform")
 local process = require("luainstaller.process")
 local result = require("luainstaller.result")
 local toolchain = require("luainstaller.toolchain")
+local logger = require("luainstaller.logger")
 
 local M = {}
 
@@ -543,6 +544,48 @@ local function copyLuaRuntime(lua_path, native_dir, runtime_name)
     }
 end
 
+local function nativeDependencyWarning(config, module_path, bundled_libraries)
+    local inspected = toolchain.inspectNativeDependencies(config, module_path, {
+        bundled_libraries = bundled_libraries,
+    })
+    local names, runtime_names = {}, {}
+    for _, dependency in ipairs(inspected.dependencies) do
+        local name = dependency.name .. (dependency.missing and " (not found on build host)" or "")
+        if path.basename(dependency.name):match("^libstdc%+%+")
+            or path.basename(dependency.name):match("^libgcc_s") then
+            runtime_names[#runtime_names + 1] = name
+        else
+            names[#names + 1] = name
+        end
+    end
+    if #names == 0 and #runtime_names == 0 and inspected.checked then return nil end
+    local messages = { "C module " .. module_path .. ":" }
+    if #names > 0 then
+        messages[#messages + 1] = "external libraries are not bundled: " .. table.concat(names, ", ") .. "."
+        messages[#messages + 1] = "Install these libraries on the target machine, or rebuild the module with static dependencies."
+    end
+    if #runtime_names > 0 then
+        messages[#messages + 1] = "C/C++ runtime libraries: " .. table.concat(runtime_names, ", ")
+            .. ". Review compatibility with the target's system runtime."
+    end
+    if not inspected.checked then
+        messages[#messages + 1] = "System dependencies were not fully checked: " .. tostring(inspected.reason) .. "."
+    end
+    messages[#messages + 1] = "See docs/TROUBLESHOOTING.adoc#troubleshooting-native-dependencies."
+    local warning = {
+        type = "NativeDependencyWarning",
+        module = module_path,
+        message = table.concat(messages, " "),
+        checked = inspected.checked,
+        dependencies = inspected.dependencies,
+        reason = inspected.reason,
+    }
+    -- Dependency diagnostics and persistence are advisory. An unavailable
+    -- inspection utility or an unwritable log does not fail the transaction.
+    pcall(logger.logWarning, "bundler", "native-dependencies", warning.message, warning)
+    return warning
+end
+
 local function sortedKeys(tbl)
     local keys = {}
     for key in pairs(tbl) do
@@ -644,13 +687,7 @@ local function abiProbeSource(lua_version)
     local source = [[
 #include <stdio.h>
 #include <string.h>
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
-
-#if !defined(LUA_VERSION_NUM) || LUA_VERSION_NUM != @LUA_VERSION_NUM@
-#error "luainstaller was generated for a different Lua ABI"
-#endif
+#include "lua_min.h"
 
 int main(void) {
     lua_State *state = luaL_newstate();
@@ -670,7 +707,6 @@ int main(void) {
     return matches ? 0 : 42;
 }
 ]]
-    source = source:gsub("@LUA_VERSION_NUM@", tostring(lua_version.num))
     source = source:gsub("@LUA_VERSION@", lua_version.version)
     return source
 end
@@ -1869,6 +1905,21 @@ local function bundleOnedir(opts, lifecycle)
         end
     end
 
+    local bundled_libraries = {}
+    for _, owner in pairs(native_owners) do bundled_libraries[basename(owner.path)] = true end
+    if native_toolchain.link_mode == "shared" and runtime_name then
+        bundled_libraries[runtime_name] = true
+    end
+    local bundle_warnings, inspected_modules = {}, {}
+    for _, module_path in ipairs(dependencies.libraries or {}) do
+        local canonical = normalizePath(absolutePath(module_path))
+        if not inspected_modules[canonical] then
+            inspected_modules[canonical] = true
+            local warning = nativeDependencyWarning(native_toolchain, canonical, bundled_libraries)
+            if warning then bundle_warnings[#bundle_warnings + 1] = warning end
+        end
+    end
+
     -- Record every staged native alias destination in the distribution
     -- manifest, so the recorded module map matches the real artifact tree.
     local native_alias_entries = {}
@@ -1900,7 +1951,7 @@ local function bundleOnedir(opts, lifecycle)
         native_toolchain,
         c_path,
         exe_path,
-        { work_dir = compiler_work_dir, rpath = profile.loader_rpath }
+        { work_dir = compiler_work_dir, lua_header_dir = build_dir, rpath = profile.loader_rpath }
     )
     if not compile_ok then
         return abandon(makeError("CompilationFailedError", "C launcher compilation failed", {
@@ -1963,7 +2014,7 @@ local function bundleOnedir(opts, lifecycle)
         native_toolchain,
         abi_probe_c,
         abi_probe_exe,
-        { work_dir = compiler_work_dir, rpath = profile.loader_rpath }
+        { work_dir = compiler_work_dir, lua_header_dir = build_dir, rpath = profile.loader_rpath }
     )
     if not abi_compile_ok then
         return abandon(makeError("ToolchainError", "Cannot compile the linked Lua runtime ABI probe", {
@@ -2064,6 +2115,13 @@ local function bundleOnedir(opts, lifecycle)
         out = final_out_dir,
         executable = normalizePath(final_out_dir .. "/" .. exe_name),
         manifest = manifest,
+        warnings = bundle_warnings,
+        toolchain = {
+            source = native_toolchain.discovery_source,
+            lua_header = "lua_min.h",
+            library_path = native_toolchain.library_path or native_toolchain.runtime_path,
+            link_mode = native_toolchain.link_mode,
+        },
     }
     local release_err = releaseOutputLock(output_lock)
     if release_err then

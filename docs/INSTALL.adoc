@@ -15,8 +15,9 @@ xref:../README.adoc#documentation-index[Back to documentation index]
 straight from the source folder, or install a copy into a folder of your
 own. Neither needs administrator rights or a network connection.
 
-NOTE: The installer copies `luainstaller` only. It doesn't install Lua, a C
-compiler, or your application's dependencies.
+NOTE: Building needs a Lua interpreter, a matching Lua library and a C
+compiler. Lua headers aren't needed. The installer doesn't install these
+or your application's dependencies.
 
 == Run from the source folder
 
@@ -72,8 +73,8 @@ different one, pass `--lua /full/path/to/lua` when installing, or set
 
 [IMPORTANT]
 ====
-That interpreter must be the same Lua version as the headers and library
-you build with. A 5.4 interpreter with 5.3 headers won't work.
+That interpreter must be the same Lua version as the library you build
+with. A 5.4 interpreter with a 5.3 library won't work.
 ====
 
 == Move, upgrade or remove
