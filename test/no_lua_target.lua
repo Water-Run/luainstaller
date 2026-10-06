@@ -74,7 +74,11 @@ print('no-lua-target-ok ' .. _VERSION)
         copied[destination] = true
     end
     local function copy_dependencies(binary)
-        local ok, output = process.outputCommand("ldd", { binary }, { LC_ALL = "C" })
+        -- CI selects its build interpreter with LD_LIBRARY_PATH. Inspect
+        -- the bundle's own RUNPATH instead of that host-only override.
+        local ok, output = process.outputCommand("ldd", { binary }, {
+            LC_ALL = "C", LD_LIBRARY_PATH = "",
+        })
         assert(ok, output)
         assert(not output:find("not found", 1, true), output)
         for line in output:gmatch("[^\r\n]+") do
@@ -118,7 +122,9 @@ echo 'verified: no installed Lua interpreter, library, headers or LuaRocks'
     local command, arguments
     if available then
         command = "bwrap"
-        arguments = { "--unshare-all", "--die-with-parent", "--clearenv",
+        -- Filesystem isolation is sufficient here. Some CI kernels forbid
+        -- configuring a new network namespace's loopback interface.
+        arguments = { "--unshare-all", "--share-net", "--die-with-parent", "--clearenv",
             "--ro-bind", target, "/", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
             "--setenv", "PATH", "/bin:/usr/bin", "--setenv", "TMPDIR", "/tmp",
             "--chdir", "/", "/bin/sh", "/check.sh" }

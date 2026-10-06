@@ -239,7 +239,8 @@ int luaopen_dependent(lua_State *L) { lua_pushfstring(L, "%d", helper_value()); 
         { "-shared", "-fPIC", helper_c, "-Wl,-soname,helper.so", "-o", helper }, config.environment)
     assert(compiled, compile_output)
     compiled, compile_output = process.outputCommand(config.cc,
-        { "-shared", "-fPIC", dependent_c, helper, "-Wl,-rpath," .. path.join(nested, "pkg"),
+        { "-shared", "-fPIC", dependent_c, helper, "-Wl,--enable-new-dtags",
+            "-Wl,-rpath," .. path.join(nested, "pkg"),
             "-o", dependent }, config.environment)
     assert(compiled, compile_output)
     local nested_entry = path.join(nested, "main.lua")
