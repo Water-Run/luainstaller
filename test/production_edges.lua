@@ -5080,6 +5080,55 @@ print("logger empty stale replacement ok")
     removeTree(root)
 end)
 
+test("MinGW public compiler paths omit volatile PE timestamps", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local toolchain = require("luainstaller.toolchain")
+    for _, target in ipairs({ { "i686", "x86" }, { "x86_64", "x86_64" } }) do
+        local compiler = target[1] .. "-w64-mingw32-gcc"
+        if commandSucceeds("command -v " .. compiler .. " >/dev/null 2>&1") then
+            local root = makeTempDir("mingw-reproducible")
+            local config = {
+                cc = compiler,
+                compiler_family = "gcc",
+                host = { os = "windows", arch = target[2] },
+                profile = { target_os = "windows", target_arch = target[2] },
+                lua_version = compat.luaVersion(),
+                link_args = {},
+                environment = {},
+            }
+            for _, kind in ipairs({ "compile", "compileStandalone", "compileNativeModule" }) do
+                local first
+                for _, checkout in ipairs({ "a", "b" }) do
+                    local directory = root .. "/" .. kind .. "-" .. checkout
+                    makeDirectory(directory)
+                    local source = directory .. "/probe.c"
+                    local library = kind == "compileNativeModule"
+                    writeFile(source, library
+                        and "__declspec(dllexport) int luai_probe(void) { return 1; }\n"
+                        or "int main(void) { return 0; }\n")
+                    local executable = directory .. (library and "/probe.dll" or "/probe.exe")
+                    local compiled, output = toolchain[kind](config, source, executable,
+                        { work_dir = directory })
+                    assert(compiled, output)
+                    local bytes = readFile(executable)
+                    local a, b, c, d = bytes:byte(61, 64)
+                    local pe_offset = a + b * 256 + c * 65536 + d * 16777216
+                    assert(bytes:sub(pe_offset + 1, pe_offset + 4) == "PE\0\0")
+                    assert(bytes:sub(pe_offset + 9, pe_offset + 12) == "\0\0\0\0",
+                        compiler .. " " .. kind .. " retained a PE build timestamp")
+                    -- MinGW DLL preferred image bases can vary with the output
+                    -- path. Executables must also match byte for byte.
+                    if first and not library then
+                        assert(bytes == first, compiler .. " " .. kind .. " differs across build roots")
+                    end
+                    first = bytes
+                end
+            end
+            removeTree(root)
+        end
+    end
+end)
+
 test("remote scripts are pinned and non-destructive", function()
     local posix_matrix = readFile("tools/test-lua-versions.sh")
     local windows_matrix = readFile("tools/test-lua-versions.ps1")

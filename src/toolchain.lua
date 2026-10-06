@@ -1101,6 +1101,9 @@ function M.compile(config, source_path, output_path, opts)
             arguments[#arguments + 1] = "-Wl,-rpath," .. opts.rpath
         end
         for _, value in ipairs(config.link_args or {}) do arguments[#arguments + 1] = value end
+        if config.host and config.host.os == "windows" then
+            arguments[#arguments + 1] = "-Wl,--no-insert-timestamp"
+        end
         if not appendWindowsSubsystem(arguments, config) then
             return false, "unsupported Windows subsystem architecture"
         end
@@ -1181,6 +1184,7 @@ function M.compileNativeModule(config, source_path, output_path, opts)
         arguments[#arguments + 1] = "-o"
         arguments[#arguments + 1] = output_path
         if config.host.os == "windows" then
+            arguments[#arguments + 1] = "-Wl,--no-insert-timestamp"
             for _, value in ipairs(config.link_args or {}) do
                 arguments[#arguments + 1] = value
             end

@@ -47,6 +47,8 @@ metadata aren't required.
 
 === Fixed
 
+* MinGW-built launchers omit PE build timestamps, keeping directory and
+  single-file artifacts reproducible across build roots.
 * Native dependency warnings retain missing Linux system libraries and report
   `libnsl` as an external dependency. A copied C module's filename no longer
   hides a dependency that the system loader may still be unable to find.
