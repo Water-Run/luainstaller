@@ -46,7 +46,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates curl liblua5.4-dev lua5.4 \
+            build-essential bubblewrap ca-certificates curl liblua5.4-dev lua5.4 \
             luarocks unzip zlib1g-dev
 
       - name: Build pinned shared Lua 5.4.8
@@ -91,6 +91,7 @@ jobs:
           lua test/standalone_install.lua
           lua test/headerless_build.lua
           lua test/native_dependencies.lua
+          lua test/no_lua_target.lua
 
       - name: Edge and safety suites
         run: |
@@ -133,7 +134,7 @@ jobs:
       - name: Install matrix prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libreadline-dev \
+          sudo apt-get install -y build-essential bubblewrap pkg-config libreadline-dev \
             unzip curl ca-certificates clang luajit gcc-mingw-w64-x86-64 \
             gcc-mingw-w64-i686
 
@@ -155,7 +156,7 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential gcc-multilib libc6-dev-i386 ca-certificates curl \
+            build-essential bubblewrap gcc-multilib libc6-dev-i386 ca-certificates curl \
             file pkg-config
 
       - name: Build and exercise native 32-bit artifacts
@@ -178,6 +179,7 @@ jobs:
           "$LUAI_TEST_LUA" test/toolchain_native.lua
           "$LUAI_TEST_LUA" test/headerless_build.lua
           "$LUAI_TEST_LUA" test/native_dependencies.lua
+          "$LUAI_TEST_LUA" test/no_lua_target.lua
           "$LUAI_TEST_LUA" test/native_bundle.lua
           "$LUAI_TEST_LUA" test/native_onefile.lua
           "$LUAI_TEST_LUA" test/onefile_lifecycle.lua

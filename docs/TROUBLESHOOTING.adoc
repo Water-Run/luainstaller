@@ -117,7 +117,9 @@ Install `clang` and Lua inside Termux. Leave
 == A build warns about C module libraries
 
 The warning names the module and the external libraries it needs. These
-libraries aren't copied into the bundle. Install them on the target
+libraries aren't automatically installed for the system loader. Copying a
+C module with the same filename doesn't make the dependency discoverable.
+Install the libraries on the target
 machine, or rebuild the module with those dependencies linked statically.
 A library marked `not found on build host` also needs attention on the
 machine doing the build.

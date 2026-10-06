@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -561,7 +561,7 @@ local function nativeDependencyWarning(config, module_path, bundled_libraries)
     if #names == 0 and #runtime_names == 0 and inspected.checked then return nil end
     local messages = { "C module " .. module_path .. ":" }
     if #names > 0 then
-        messages[#messages + 1] = "external libraries are not bundled: " .. table.concat(names, ", ") .. "."
+        messages[#messages + 1] = "external library dependencies require attention: " .. table.concat(names, ", ") .. "."
         messages[#messages + 1] = "Install these libraries on the target machine, or rebuild the module with static dependencies."
     end
     if #runtime_names > 0 then
@@ -1906,7 +1906,10 @@ local function bundleOnedir(opts, lifecycle)
     end
 
     local bundled_libraries = {}
-    for _, owner in pairs(native_owners) do bundled_libraries[basename(owner.path)] = true end
+    -- Only the verified Lua runtime is loaded by the launcher itself.
+    -- Copying a C module (even one with the needed SONAME) does not put it
+    -- on another module's loader search path. Keep those dependencies in
+    -- the diagnostics instead of suppressing them by basename.
     if native_toolchain.link_mode == "shared" and runtime_name then
         bundled_libraries[runtime_name] = true
     end

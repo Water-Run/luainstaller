@@ -43,6 +43,9 @@ metadata aren't required.
 
 === Fixed
 
+* Native dependency warnings retain missing Linux system libraries and report
+  `libnsl` as an external dependency. A copied C module's filename no longer
+  hides a dependency that the system loader may still be unable to find.
 * POSIX CI fetches the same hash-pinned lsqlite3 source from Debian's
   versioned source archive after the previous GitHub mirror became unavailable.
 

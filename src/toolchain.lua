@@ -7,7 +7,7 @@ File:
     toolchain.lua
 Date:
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local compat = require("luainstaller.compat")
@@ -1354,7 +1354,7 @@ end
 
 local LINUX_SYSTEM_LIBRARIES = {
     "^libc%.so", "^libm%.so", "^libdl%.so", "^libpthread%.so", "^librt%.so",
-    "^libresolv%.so", "^libutil%.so", "^libnsl%.so", "^libanl%.so",
+    "^libresolv%.so", "^libutil%.so", "^libanl%.so",
     "^ld%-linux", "^ld%-musl", "^linux%-vdso",
 }
 
@@ -1498,7 +1498,12 @@ local function inspectNativeDependencies(config, module_path, opts)
             end
             for _, dependency in ipairs(records) do
                 local name = dependency.name
-                if not systemDependency(os_name, name, dependency.path)
+                -- ldd's explicit failure takes precedence over the Linux
+                -- baseline. macOS system libraries can live only in dyld's
+                -- shared cache, so their absence from disk is not evidence
+                -- that they are missing.
+                if (os_name == "linux" and dependency.missing
+                        or not systemDependency(os_name, name, dependency.path))
                     and not bundled[name] and not bundled[path.basename(name)]
                     and dependency.path ~= normalizePath(module_path) then
                     if not seen_names[name] then

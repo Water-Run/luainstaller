@@ -39,6 +39,8 @@ LUA=${LUA:-lua}
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
 luarocks lint luainstaller-1.5.0-1.rockspec
+# Linux: requires bubblewrap or unprivileged user/mount namespaces
+"$LUA" test/no_lua_target.lua
 ----
 
 [cols="2,3",options="header"]
@@ -73,6 +75,11 @@ x86_64 生成 C 代码和 PE 审计
 |`test/native_dependencies.lua`
 |真实 Linux 传递依赖和缺失库、诊断或日志失败不影响构建、macOS 解析夹具，
 以及 Windows 未检查依赖的提示
+
+|`test/no_lua_target.lua`
+|在未安装 Lua 解释器、库、头文件或 LuaRocks 的隔离文件系统中进行
+原生 Linux 测试。删除原始源码后，两种打包形式都加载 Lua 与 C 模块；
+随后删除一个随包依赖，确认程序确实无法再运行。
 
 |`test/build_interruption.lua`
 |转发 SIGINT 后的编译器关闭、有界的 SIGKILL 子进程、属主死亡后的

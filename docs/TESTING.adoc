@@ -41,6 +41,8 @@ LUA=${LUA:-lua}
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
 luarocks lint luainstaller-1.5.0-1.rockspec
+# Linux: requires bubblewrap or unprivileged user/mount namespaces
+"$LUA" test/no_lua_target.lua
 ----
 
 [cols="2,3",options="header"]
@@ -77,6 +79,12 @@ clean-target execution and relinking with the shipped minimal header
 |`test/native_dependencies.lua`
 |Real Linux transitive and missing libraries, advisory build and log
 failures, parser fixtures for macOS, and unchecked Windows diagnostics
+
+|`test/no_lua_target.lua`
+|Native Linux execution in an isolated filesystem without an installed Lua
+interpreter, library, headers or LuaRocks. Both bundle forms load Lua and C
+modules after their original sources are removed. A negative control removes
+a bundled dependency and requires execution to fail.
 
 |`test/build_interruption.lua`
 |Relayed SIGINT compiler shutdown, bounded SIGKILL descendants,

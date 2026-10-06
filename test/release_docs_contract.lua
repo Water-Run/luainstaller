@@ -9,7 +9,7 @@ File:
 Date:
     2026-08-22
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local function read_file(path)
@@ -76,6 +76,12 @@ expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会�
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
 expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.5.0-1.rockspec")
+expect_contains("docs/TESTING.adoc", "test/no_lua_target.lua")
+expect_contains("docs/zh-CN/TESTING.adoc", "test/no_lua_target.lua")
+expect_contains("docs/TROUBLESHOOTING.adoc",
+    "Copying a C module with the same filename doesn't make the dependency discoverable.")
+expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc",
+    "复制一个同名的 C 模块，也不代表加载器就能找到该依赖。")
 
 local structured_contract = "The structured result contract applies to `analyze`, `trace`, "
     .. "`compatibility`, and `bundle` only."

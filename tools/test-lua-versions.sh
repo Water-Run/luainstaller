@@ -590,6 +590,7 @@ run_version() {
     "$lua" test/toolchain_native.lua
     "$lua" test/headerless_build.lua
     "$lua" test/native_dependencies.lua
+    if [ "$(uname -s)" = Linux ]; then "$lua" test/no_lua_target.lua; fi
     "$lua" test/native_bundle.lua
     "$lua" test/onefile_compile_native.lua
     "$lua" test/native_onefile.lua

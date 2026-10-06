@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-05
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -67,6 +67,28 @@ assert(not by_name["libc.so.6"] and not by_name["libm.so.6"]
     and not by_name["libpthread.so.0"] and not by_name["ld-linux-x86-64.so.2"]
     and not by_name["liblua.so.5.4"], "platform or bundled runtime was reported")
 assert(inspected["/fixture/libfirst.so"] == 1, "dependency cycle was traversed again")
+
+process.outputCommand = function(command, arguments)
+    assert(command == "ldd")
+    if arguments[1] == "/fixture/missing.so" then
+        return true, [[
+    libm.so.6 => not found
+    libnsl.so.2 => not found
+    libnsl.so.3 => /fixture/libnsl.so.3 (0x001)
+]]
+    end
+    return true, "libc.so.6 => /lib/libc.so.6 (0x002)\n"
+end
+local missing_system = toolchain.inspectNativeDependencies({ host = { os = "linux" } },
+    "/fixture/missing.so")
+by_name = {}
+for _, dependency in ipairs(missing_system.dependencies) do by_name[dependency.name] = dependency end
+assert(missing_system.checked and by_name["libm.so.6"] and by_name["libm.so.6"].missing,
+    "missing system library was filtered")
+assert(by_name["libnsl.so.2"] and by_name["libnsl.so.2"].missing,
+    "missing libnsl dependency was filtered")
+assert(by_name["libnsl.so.3"] and not by_name["libnsl.so.3"].missing,
+    "separately distributed libnsl was treated as a baseline system library")
 
 -- A large but finite dependency graph still needs its complete closure.
 process.outputCommand = function(command, arguments)
@@ -192,6 +214,58 @@ if config.host.os == "linux" then
     })
     assert(code == 0, diagnostic)
     harness.assert_contains(output .. diagnostic, "libluai-second.so")
+
+    -- A copied Lua module does not make its SONAME discoverable by the OS
+    -- loader. Its original RUNPATH can still point outside the bundle.
+    local nested = path.join(root, "nested")
+    assert(fs.makeDirectory(nested))
+    assert(fs.makeDirectory(path.join(nested, "pkg")))
+    assert(toolchain.writeLuaHeader(config, nested).ok)
+    local helper = path.join(nested, "pkg/helper.so")
+    local dependent = path.join(nested, "dependent.so")
+    local helper_c = path.join(nested, "helper.c")
+    local dependent_c = path.join(nested, "dependent.c")
+    assert(fs.writeFile(helper_c, [[
+#include "lua_min.h"
+int helper_value(void) { return 42; }
+int luaopen_pkg_helper(lua_State *L) { lua_pushliteral(L, "helper-ok"); return 1; }
+]]))
+    assert(fs.writeFile(dependent_c, [[
+#include "lua_min.h"
+extern int helper_value(void);
+int luaopen_dependent(lua_State *L) { lua_pushfstring(L, "%d", helper_value()); return 1; }
+]]))
+    local compiled, compile_output = process.outputCommand(config.cc,
+        { "-shared", "-fPIC", helper_c, "-Wl,-soname,helper.so", "-o", helper }, config.environment)
+    assert(compiled, compile_output)
+    compiled, compile_output = process.outputCommand(config.cc,
+        { "-shared", "-fPIC", dependent_c, helper, "-Wl,-rpath," .. path.join(nested, "pkg"),
+            "-o", dependent }, config.environment)
+    assert(compiled, compile_output)
+    local nested_entry = path.join(nested, "main.lua")
+    assert(fs.writeFile(nested_entry,
+        "assert(require('dependent') == '42'); assert(require('pkg.helper') == 'helper-ok')\n"))
+    local nested_bundles = {}
+    for _, mode in ipairs({ "onedir", "onefile" }) do
+        local built = require("luainstaller").bundle({
+            entry = nested_entry, out = path.join(nested, mode), mode = mode,
+        })
+        assert(built.ok, built.error and built.error.message)
+        assert(#built.warnings == 1, "copied module basename hid an external loader dependency")
+        assert(built.warnings[1].module == dependent)
+        harness.assert_contains(built.warnings[1].message, "helper.so")
+        local ran, output = process.outputCommand(built.executable, {}, { LUA_PATH = "", LUA_CPATH = "" })
+        assert(ran, output)
+        nested_bundles[#nested_bundles + 1] = built
+    end
+    assert(fs.removeFile(helper))
+    for _, built in ipairs(nested_bundles) do
+        local ran, output = process.outputCommand(built.executable, {}, {
+            LUA_PATH = "", LUA_CPATH = "", LD_LIBRARY_PATH = "",
+        })
+        assert(not ran, "fixture unexpectedly found its removed external dependency")
+        harness.assert_contains(output, "helper.so")
+    end
 elseif config.host.os == "windows" then
     local c_path = path.join(root, "native_dep.c")
     local module = path.join(root, "native_dep.dll")
