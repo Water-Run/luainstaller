@@ -8,32 +8,11 @@ File:
 Date:
     2026-06-24
 Updated:
-    2026-08-24
+    2026-10-06
 ]]
 
-package.preload["luainstaller.lua_abi"] = function() return dofile("src/lua_abi.lua") end
-package.preload["luainstaller.native_profile"] = function() return dofile("src/native_profile.lua") end
-package.preload["luainstaller.analyzer"] = function() return dofile("src/analyzer.lua") end
-package.preload["luainstaller.logger"] = function() return dofile("src/logger.lua") end
-package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
-package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
-package.preload["luainstaller.fs"] = function() return dofile("src/fs.lua") end
-package.preload["luainstaller.hash"] = function() return dofile("src/hash.lua") end
-package.preload["luainstaller.lock_owner"] = function() return dofile("src/lock_owner.lua") end
-package.preload["luainstaller.distribution_files"] = function() return dofile("src/distribution_files.lua") end
-package.preload["luainstaller.process"] = function() return dofile("src/process.lua") end
-package.preload["luainstaller.toolchain"] = function() return dofile("src/toolchain.lua") end
-package.preload["luainstaller.path"] = function() return dofile("src/path.lua") end
-package.preload["luainstaller.result"] = function() return dofile("src/result.lua") end
-package.preload["luainstaller.platform"] = function() return dofile("src/platform.lua") end
-package.preload["luainstaller.runtime"] = function() return dofile("src/runtime.lua") end
-package.preload["luainstaller.cgen"] = function() return dofile("src/cgen.lua") end
-package.preload["luainstaller.launcher"] = function() return dofile("src/launcher.lua") end
-package.preload["luainstaller.bundler"] = function() return dofile("src/bundler.lua") end
-package.preload["luainstaller.discovery"] = function() return dofile("src/discovery.lua") end
-package.preload["luainstaller.onefile"] = function() return dofile("src/onefile.lua") end
-package.preload["luainstaller"] = function() return dofile("src/init.lua") end
-package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
+local harness = dofile("test/support/harness.lua")
+harness.install_loader()
 
 local cli = require("luainstaller.cli")
 
