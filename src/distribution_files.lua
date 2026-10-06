@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 return {
@@ -1034,6 +1034,15 @@ Usage:
     lua generate-onefile-payload.lua <extracted-root> [output]
 
 The generated payload-files.lua is authoritative for path ordering and mode.
+
+Author:
+    WaterRun
+File:
+    generate-onefile-payload.lua
+Date:
+    2026-10-06
+Updated:
+    2026-10-06
 ]]
 
 local root = assert(arg and arg[1], "extracted bundle root is required")
@@ -1114,13 +1123,166 @@ local function quotePosix(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
+local function portableDigest(content)
+    -- Keep relinking usable when a legacy certutil cannot select SHA-256,
+    -- or no external hash program is installed. Compression follows src/hash.lua.
+    local modulus = 4294967296
+    local function mask32(value) return value % modulus end
+    local bits = rawget(_G, "bit32")
+    if not bits and _VERSION:match("^Lua 5%.[345]$") then
+        bits = assert((loadstring or load)([=[
+return {
+    band = function(a, b) return (a & b) & 0xffffffff end,
+    bxor = function(a, b) return (a ~ b) & 0xffffffff end,
+}
+]=], "@payload-sha256-bits"))()
+    end
+    if not bits then
+        local nibble_and, nibble_xor = {}, {}
+        for left = 0, 15 do
+            for right = 0, 15 do
+                local a, b, both, different, place = left, right, 0, 0, 1
+                for _ = 1, 4 do
+                    local low_a, low_b = a % 2, b % 2
+                    if low_a == 1 and low_b == 1 then both = both + place end
+                    if low_a ~= low_b then different = different + place end
+                    a, b, place = math.floor(a / 2), math.floor(b / 2), place * 2
+                end
+                local index = left * 16 + right + 1
+                nibble_and[index], nibble_xor[index] = both, different
+            end
+        end
+        local byte_and, byte_xor = {}, {}
+        for left = 0, 255 do
+            for right = 0, 255 do
+                local low = (left % 16) * 16 + right % 16 + 1
+                local high = math.floor(left / 16) * 16 + math.floor(right / 16) + 1
+                local index = left * 256 + right + 1
+                byte_and[index] = nibble_and[low] + nibble_and[high] * 16
+                byte_xor[index] = nibble_xor[low] + nibble_xor[high] * 16
+            end
+        end
+        local function bitOperation(lookup, left, right)
+            local result, place = 0, 1
+            for _ = 1, 4 do
+                local a, b = left % 256, right % 256
+                result = result + lookup[a * 256 + b + 1] * place
+                left, right, place = (left - a) / 256, (right - b) / 256, place * 256
+            end
+            return result
+        end
+        bits = {
+            band = function(a, b) return bitOperation(byte_and, a, b) end,
+            bxor = function(a, b) return bitOperation(byte_xor, a, b) end,
+        }
+    end
+    local band, bxor = bits.band, bits.bxor
+    local function bnot(value) return modulus - 1 - value end
+    local function rshift(value, count) return math.floor(value / 2 ^ count) end
+    local function rotateRight(value, count)
+        return rshift(value, count) + (value % 2 ^ count) * 2 ^ (32 - count)
+    end
+    local function wordAt(value, offset)
+        local a, b, c, d = value:byte(offset, offset + 3)
+        return a * 16777216 + b * 65536 + c * 256 + d
+    end
+    local SHA256_CONSTANTS = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    }
+
+    local function portableCompressBlock(state_hash, block, offset)
+        offset = offset or 1
+        local words = {}
+        for index = 0, 15 do
+            words[index] = wordAt(block, offset + index * 4)
+        end
+        for index = 16, 63 do
+            local previous_15 = words[index - 15]
+            local previous_2 = words[index - 2]
+            local sigma0 = bxor(
+                bxor(rotateRight(previous_15, 7), rotateRight(previous_15, 18)),
+                rshift(previous_15, 3)
+            )
+            local sigma1 = bxor(
+                bxor(rotateRight(previous_2, 17), rotateRight(previous_2, 19)),
+                rshift(previous_2, 10)
+            )
+            words[index] = mask32(
+                words[index - 16] + sigma0 + words[index - 7] + sigma1
+            )
+        end
+
+        local a, b, c, d = state_hash[1], state_hash[2], state_hash[3], state_hash[4]
+        local e, f, g, h = state_hash[5], state_hash[6], state_hash[7], state_hash[8]
+        for index = 0, 63 do
+            local sum1 = bxor(
+                bxor(rotateRight(e, 6), rotateRight(e, 11)),
+                rotateRight(e, 25)
+            )
+            local choose = bxor(band(e, f), band(bnot(e), g))
+            local temporary1 = mask32(
+                h + sum1 + choose + SHA256_CONSTANTS[index + 1] + words[index]
+            )
+            local sum0 = bxor(
+                bxor(rotateRight(a, 2), rotateRight(a, 13)),
+                rotateRight(a, 22)
+            )
+            local majority = bxor(bxor(band(a, b), band(a, c)), band(b, c))
+            local temporary2 = mask32(sum0 + majority)
+
+            h = g
+            g = f
+            f = e
+            e = mask32(d + temporary1)
+            d = c
+            c = b
+            b = a
+            a = mask32(temporary1 + temporary2)
+        end
+
+        state_hash[1] = mask32(state_hash[1] + a)
+        state_hash[2] = mask32(state_hash[2] + b)
+        state_hash[3] = mask32(state_hash[3] + c)
+        state_hash[4] = mask32(state_hash[4] + d)
+        state_hash[5] = mask32(state_hash[5] + e)
+        state_hash[6] = mask32(state_hash[6] + f)
+        state_hash[7] = mask32(state_hash[7] + g)
+        state_hash[8] = mask32(state_hash[8] + h)
+    end
+    local state = {
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    }
+    local length = #content
+    local padded = content .. "\128" .. string.rep("\0", (56 - (length + 1) % 64) % 64)
+        .. packU32(math.floor(length / 536870912)) .. packU32((length % 536870912) * 8)
+    for offset = 1, #padded, 64 do portableCompressBlock(state, padded, offset) end
+    return string.format("%08x%08x%08x%08x%08x%08x%08x%08x",
+        state[1], state[2], state[3], state[4], state[5], state[6], state[7], state[8])
+end
+
 local function commandDigest(file_path)
     local commands
     if windows then
-        assert(not file_path:find('["%%]'), "unsupported Windows hash path")
-        commands = {
-            'certutil -hashfile "' .. native(file_path) .. '" SHA256 2>NUL',
-        }
+        commands = {}
+        if not file_path:find('["%%]') then
+            commands[1] = 'certutil -hashfile "' .. native(file_path) .. '" SHA256 2>NUL'
+        end
     else
         commands = {
             "sha256sum " .. quotePosix(file_path) .. " 2>/dev/null",
@@ -1129,8 +1291,9 @@ local function commandDigest(file_path)
         }
     end
     for _, command in ipairs(commands) do
-        local pipe = io.popen(command, "r")
-        if pipe then
+        local opened, pipe
+        if type(io.popen) == "function" then opened, pipe = pcall(io.popen, command, "r") end
+        if opened and pipe then
             local output = pipe:read("*a") or ""
             local ok = pipe:close()
             if ok then
@@ -1140,7 +1303,7 @@ local function commandDigest(file_path)
             end
         end
     end
-    error("SHA-256 tool is unavailable")
+    return portableDigest(readFile(file_path))
 end
 
 local function cString(value)

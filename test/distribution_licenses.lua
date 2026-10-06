@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -108,6 +108,35 @@ local function assertManifest(bundle_root)
 end
 
 local called, failure = xpcall(function()
+    local fixture = path.join(root, "without-hash-tools")
+    assert(fs.makeDirectory(path.join(fixture, ".luai/build")))
+    local generator = path.absolute("tools/generate-onefile-payload.lua")
+    local probe = path.join(root, "without-hash-tools.lua")
+    assert(fs.writeFile(probe, string.format([[
+io.popen = nil
+package.path, package.cpath = "", ""
+arg = { %q, %q }
+dofile(%q)
+]], fixture, path.join(fixture, "payload.inc"), generator)))
+    -- Independent SHA-256 vectors for the serialized payload, including
+    -- padding boundaries and binary data spanning multiple compression blocks.
+    for _, vector in ipairs({
+        { 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+        { 37, "b4a5acbe83001c6b3fd7602bf6b1b42f7a6de5d355fa85c9aad1a1a5a62da105" },
+        { 38, "7ed62d2ab231302696a78dbde785e298a32571f95a79569f293a112a9f1ab373" },
+        { 45, "68e9a0637c72d2c68a50489af9c1b6e362f088a89715e35caf2cc26f2e7e6991" },
+        { 46, "7ab6663339be97a7c403f8971c452deed2f3bff9f0286810ed9155ec4d363170" },
+        { 47, "13801c34be73a27012f6e2899d26d6921c765d26e2c8084e913dd86c37c84c1f" },
+        { 2048, "973d136b3310181a31c9325d5a1271e63c853263d09ac640ed7d4a1f4c1c7d04" },
+    }) do
+        local bytes = {}
+        for index = 0, vector[1] - 1 do bytes[#bytes + 1] = string.char(index % 256) end
+        assert(fs.writeFile(path.join(fixture, "probe"), table.concat(bytes)))
+        assert(fs.writeFile(path.join(fixture, ".luai/build/payload-files.lua"),
+            vector[1] == 0 and "return {}\n" or "return {{path='probe', executable=false}}\n"))
+        local generated, output = process.outputCommand(harness.lua_command(), { probe })
+        assert(generated and output == vector[2] .. "\n", output)
+    end
     assert(hash.sha256(assert(fs.readRegularFile("LICENSES/Lua-MIT.txt")))
         == "a23ad1f0b07e4e59009d8efaaf1f5ed1dcd06e5256c1743a58ca4f1cacad32e0",
         "Lua license differs from the verified Lua 5.5.1 text")
