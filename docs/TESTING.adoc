@@ -41,7 +41,7 @@ LUA=${LUA:-lua}
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
 luarocks lint luainstaller-1.5.0-1.rockspec
-# Linux: requires bubblewrap or unprivileged user/mount namespaces
+# Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
 

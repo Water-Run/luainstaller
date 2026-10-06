@@ -24,7 +24,7 @@ assert(config.host.os == "linux", "this filesystem isolation test requires nativ
 
 local root = assert(fs.makePrivateDirectory("no-lua-target"))
 local function run()
-    local target = path.join(root, "target")
+    local target = assert(fs.makePrivateDirectory("target", root))
     for _, directory in ipairs({ "bin", "usr", "lib", "lib64", "tmp", "proc", "dev" }) do
         assert(fs.makeDirectory(path.join(target, directory)))
     end
@@ -118,9 +118,20 @@ echo 'verified: no installed Lua interpreter, library, headers or LuaRocks'
 /onefile 'space value' '' "quote'value"
 ]]
     assert(fs.writeFile(path.join(target, "check.sh"), check))
+    local backend = os.getenv("LUAI_CLEAN_TARGET_BACKEND")
+    if not backend then
+        local docker = process.outputCommand("docker", { "info", "--format", "{{.OSType}}" })
+        if docker then backend = "docker" end
+    end
     local available = process.outputCommand("sh", { "-c", "command -v bwrap" })
     local command, arguments
-    if available then
+    if backend == "docker" then
+        command = "docker"
+        arguments = { "run", "--rm", "--network", "none", "--read-only",
+            "--tmpfs", "/tmp:rw,exec,mode=1777", "--entrypoint", "/bin/sh",
+            "luainstaller-no-lua-target:" .. path.basename(root):lower(), "/check.sh" }
+    elseif backend == "bwrap" or (not backend and available) then
+        backend = "bwrap"
         command = "bwrap"
         -- Filesystem isolation is sufficient here. Some CI kernels forbid
         -- configuring a new network namespace's loopback interface.
@@ -129,6 +140,8 @@ echo 'verified: no installed Lua interpreter, library, headers or LuaRocks'
             "--setenv", "PATH", "/bin:/usr/bin", "--setenv", "TMPDIR", "/tmp",
             "--chdir", "/", "/bin/sh", "/check.sh" }
     else
+        assert(not backend or backend == "unshare", "unknown clean-target backend: " .. tostring(backend))
+        backend = "unshare"
         command = "unshare"
         arguments = { "--user", "--map-root-user", "--mount", "--pid", "--fork", "--net",
             "sh", "-c", [[
@@ -139,10 +152,27 @@ mount -t proc proc "$1/proc"
 exec /usr/sbin/chroot "$1" /bin/sh /check.sh
 ]], "sh", target }
     end
-    local ran, output = process.outputCommand(command, arguments, {
-        LUA_PATH = "", LUA_CPATH = "", LUA_INIT = "",
-        LUA_INIT_5_1 = "", LUA_INIT_5_2 = "", LUA_INIT_5_3 = "", LUA_INIT_5_4 = "", LUA_INIT_5_5 = "",
-    })
+    print("isolation backend: " .. backend)
+    local function execute_isolated()
+        local tag = backend == "docker" and arguments[#arguments - 1] or nil
+        if tag then
+            local archive = path.join(root, "target.tar")
+            local packed, pack_output = process.outputCommand("tar", { "-cf", archive, "-C", target, "." })
+            assert(packed, pack_output)
+            local imported, import_output = process.outputCommand("docker", { "import", archive, tag })
+            assert(imported, import_output)
+        end
+        local ran, output = process.outputCommand(command, arguments, {
+            LUA_PATH = "", LUA_CPATH = "", LUA_INIT = "",
+            LUA_INIT_5_1 = "", LUA_INIT_5_2 = "", LUA_INIT_5_3 = "", LUA_INIT_5_4 = "", LUA_INIT_5_5 = "",
+        })
+        if tag then
+            local removed, remove_output = process.outputCommand("docker", { "image", "rm", tag })
+            assert(removed, remove_output)
+        end
+        return ran, output
+    end
+    local ran, output = execute_isolated()
     assert(ran, "clean target isolation failed (required test): " .. tostring(output))
     local _, count = output:gsub("no%-lua%-target%-ok", "")
     assert(count == 3, output)
@@ -151,9 +181,10 @@ exec /usr/sbin/chroot "$1" /bin/sh /check.sh
         and path.join(target, "onedir/.luai/native/" .. config.runtime_name)
         or path.join(target, "onedir/.luai/native/native_probe.so")
     assert(fs.removeFile(removed))
-    local fallback_ran, fallback_output = process.outputCommand(command, arguments)
+    local fallback_ran, fallback_output = execute_isolated()
     assert(not fallback_ran, "clean target found a fallback after removing a bundled dependency")
     assert(not fallback_output:find("no-lua-target-ok", 1, true), fallback_output)
+    assert(fallback_output:find(path.basename(removed), 1, true), fallback_output)
     print("negative control passed: removing a bundled dependency prevents execution")
 end
 
