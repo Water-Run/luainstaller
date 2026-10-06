@@ -11,7 +11,7 @@ endif::[]
 
 xref:../README.adoc#documentation-index[Back to documentation index]
 
-`luainstaller` is plain Lua, so LuaRocks isn't required. You can run it
+LuaRocks isn't required. You can run `luainstaller`
 straight from the source folder, or install a copy into a folder of your
 own. Neither needs administrator rights or a network connection.
 
@@ -55,17 +55,18 @@ luai -v
 +
 For fish: `fish_add_path $HOME/luainstaller/bin`
 
-Windows (PowerShell)::
+Windows (compiler command prompt)::
 +
-[source,powershell]
+[source,bat]
 ----
-lua .\tools\install.lua --prefix "$HOME\luainstaller"
-$env:PATH = "$HOME\luainstaller\bin;$env:PATH"
+lua tools\install.lua --prefix "%USERPROFILE%\luainstaller"
+set "PATH=%USERPROFILE%\luainstaller\bin;%PATH%"
 luai -v
 ----
 +
-The commands are `luai.cmd` and `luainstaller.cmd`. Windows XP needs
-PowerShell 2 or later.
+The commands are `luai.cmd` and `luainstaller.cmd`. Use the compiler's
+command prompt, or put MinGW-w64 on `PATH`. PowerShell isn't needed,
+including on Windows XP.
 
 The installed commands remember which `lua` ran the installer. To pin a
 different one, pass `--lua /full/path/to/lua` when installing, or set

@@ -74,6 +74,11 @@ discovery.
 |`fs` / `hash` / `path` / `process` / `result`
 |I/O, SHA-256, paths, commands, errors
 
+|`windows_host.lua` / `windows_fs.lua` / `host/windows_host.c`
+|XP-compatible Win32 process and filesystem operations; a compiler-built
+Lua module binds the running official Lua DLL API without installed Lua headers.
+`tools/generate-windows-host-source.lua` synchronizes the embedded C source.
+
 |`platform` / `compat` / `toolchain`
 |Host, compatibility, toolchain
 

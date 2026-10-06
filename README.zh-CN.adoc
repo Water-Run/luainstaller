@@ -59,6 +59,8 @@ xref:docs/zh-CN/INSTALL.adoc[免 LuaRocks 安装指南]。
 ****
 NOTE: 构建可执行文件不需要 Lua 头文件。
 
+Windows 上请在编译器的命令提示符中安装和打包，不需要 PowerShell。
+
 * 官方 Lua 解释器，5.1 到 5.5。不支持 LuaJIT。
 * 适用于当前机器的 C 编译器。
 * 与该解释器版本匹配的 Lua 库，通常随解释器一起安装。

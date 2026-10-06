@@ -9,7 +9,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-18
+    2026-10-06
 ]]
 
 local M = {}
@@ -87,6 +87,9 @@ end
 local PRELOADS = {
     { "luainstaller", "src/init.lua" },
     { "luainstaller.fs", "src/fs.lua" },
+    { "luainstaller.windows_fs", "src/windows_fs.lua" },
+    { "luainstaller.windows_host", "src/windows_host.lua" },
+    { "luainstaller.windows_host_source", "src/windows_host_source.lua" },
     { "luainstaller.hash", "src/hash.lua" },
     { "luainstaller.path", "src/path.lua" },
     { "luainstaller.process", "src/process.lua" },
@@ -320,21 +323,31 @@ end
 
 function M.assert_pe_closure(config, artifacts)
     if not IS_WINDOWS then return end
-    assert(config and config.dumpbin, "dumpbin is required for PE closure checks")
+    assert(config, "native compiler configuration is required for PE closure checks")
     local process = require("luainstaller.process")
+    local path = require("luainstaller.path")
+    local inspector = config.dumpbin
+    if not inspector then
+        assert(config.compiler_family ~= "msvc", "dumpbin is required for MSVC PE closure checks")
+        local directory = path.dirname(config.cc)
+        inspector = directory == "." and "objdump.exe" or path.join(directory, "objdump.exe")
+    end
     for _, artifact in ipairs(artifacts or {}) do
-        local ok, output = process.outputCommand(config.dumpbin, {
-            "/nologo", "/dependents", artifact,
-        }, config.environment)
+        local arguments = config.dumpbin and { "/nologo", "/dependents", artifact } or { "-p", artifact }
+        local ok, output = process.outputCommand(inspector, arguments, config.environment)
         assert(ok, tostring(output))
+        local dependencies = 0
         for line in tostring(output):gmatch("[^\r\n]+") do
-            local dependency = line:match("^%s*([^%s]+%.dll)%s*$")
+            local dependency = line:lower():match("^%s*([^%s]+%.dll)%s*$")
+                or line:match("DLL Name:%s*([^%s]+)")
+            if dependency then dependencies = dependencies + 1 end
             local upper = dependency and dependency:upper() or ""
             assert(not upper:match("^VCRUNTIME%d*%.DLL$")
                 and not upper:match("^MSVCP%d*%.DLL$")
                 and upper ~= "UCRTBASE.DLL",
                 "unexpected dynamic CRT dependency in " .. artifact .. ": " .. upper)
         end
+        assert(dependencies > 0, "PE inspection returned no import records: " .. artifact)
     end
 end
 

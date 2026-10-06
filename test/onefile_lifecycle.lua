@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-08-16
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -23,7 +23,7 @@ if package.config:sub(1, 1) == "\\" then
     local entry = path.join(root, "main.lua")
     local artifact = path.join(root, "lifecycle-onefile.exe")
     local ready = path.join(root, "inner-ready.txt")
-    local script = path.join(root, "lifecycle.ps1")
+    local fixture = dofile("test/support/windows_fixture.lua")(root)
     local called, failure = xpcall(function()
         assert(fs.writeFile(entry, [[
 if arg[1] == "exit23" then os.exit(23) end
@@ -47,67 +47,7 @@ end
             tostring(built.error.message),
             tostring(built.error.output or built.error.cause or ""),
         }, "\n"))
-        assert(fs.writeFile(script, [[
-param([string]$Artifact,[string]$ReadyFile)
-$ErrorActionPreference='Stop'
-if(Test-Path -LiteralPath $ReadyFile){Remove-Item -LiteralPath $ReadyFile -Force}
-$QuotedReady='"'+$ReadyFile+'"'
-$Outer=Start-Process -FilePath $Artifact -ArgumentList @($QuotedReady) -PassThru
-$InnerId=0
-$ObservedIds=@()
-try {
-    $ReadySeen=$false
-    for($Attempt=0;$Attempt -lt 400;$Attempt++){
-        if(Test-Path -LiteralPath $ReadyFile -PathType Leaf){$ReadySeen=$true;break}
-        if($Outer.HasExited){break}
-        Start-Sleep -Milliseconds 25
-    }
-    if(-not $ReadySeen){throw 'inner launcher did not become ready'}
-    $Children=@(Get-WmiObject Win32_Process -Filter ('ParentProcessId='+$Outer.Id))
-    $InnerChildren=@($Children|Where-Object{$_.Name -ieq 'inner.exe'})
-    $Unexpected=@($Children|Where-Object{
-        $_.Name -ine 'inner.exe' -and $_.Name -ine 'conhost.exe'
-    })
-    if($InnerChildren.Count -ne 1 -or $Unexpected.Count -ne 0){
-        $Summary=@($Children|ForEach-Object{
-            '{0}:{1}' -f $_.Name,$_.ProcessId
-        }) -join ','
-        throw ('expected one inner.exe and optional conhost.exe children; observed '+$Summary)
-    }
-    $ObservedIds=@($Children|ForEach-Object{[int]$_.ProcessId})
-    $InnerId=[int]$InnerChildren[0].ProcessId
-    Stop-Process -Id $Outer.Id -Force
-    for($Attempt=0;$Attempt -lt 400;$Attempt++){
-        $OuterAlive=$null -ne (Get-Process -Id $Outer.Id -ErrorAction SilentlyContinue)
-        $InnerAlive=$null -ne (Get-Process -Id $InnerId -ErrorAction SilentlyContinue)
-        $ObservedAlive=@($ObservedIds|Where-Object{
-            $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue)
-        })
-        if(-not $OuterAlive -and -not $InnerAlive -and $ObservedAlive.Count -eq 0){break}
-        Start-Sleep -Milliseconds 25
-    }
-    $OuterAlive=$null -ne (Get-Process -Id $Outer.Id -ErrorAction SilentlyContinue)
-    $InnerAlive=$null -ne (Get-Process -Id $InnerId -ErrorAction SilentlyContinue)
-    $ObservedAlive=@($ObservedIds|Where-Object{
-        $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue)
-    })
-    [Console]::WriteLine(
-        'outer={0} inner={1} outer_alive={2} inner_alive={3} children_alive={4}',
-        $Outer.Id,$InnerId,[int]$OuterAlive,[int]$InnerAlive,$ObservedAlive.Count)
-} finally {
-    Stop-Process -Id $Outer.Id -Force -ErrorAction SilentlyContinue
-    foreach($ObservedId in $ObservedIds){
-        Stop-Process -Id $ObservedId -Force -ErrorAction SilentlyContinue
-    }
-}
-$Exit=Start-Process -FilePath $Artifact -ArgumentList @('exit23') -Wait -PassThru
-[Console]::WriteLine('exit={0}',$Exit.ExitCode)
-]]))
-        local powershell = assert(process.windowsPowerShellPath())
-        local ok, output = process.outputCommand(powershell, {
-            "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-            "-File", script, artifact, ready,
-        })
+        local ok, output = process.outputCommand(fixture, { "lifecycle", artifact, ready })
         assert(ok, output)
         local outer, inner, outer_alive, inner_alive = output:match(
             "outer=(%d+) inner=(%d+) outer_alive=(%d+) inner_alive=(%d+)"

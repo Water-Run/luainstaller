@@ -272,26 +272,15 @@ local function regularFile(candidate)
     return type(candidate) == "string" and fs.pathType(candidate) == "file"
 end
 
-local function windowsSystemPath(name)
-    local root = os.getenv("SystemRoot") or os.getenv("WINDIR")
-    if type(root) ~= "string" or not root:match("^%a:[/\\]")
-        or root:find('[%c"%%!%^&|<>]') then
-        return nil
-    end
-    local candidate = normalizePath(root .. "/System32/" .. name)
-    return regularFile(candidate) and candidate or nil
-end
-
 local function whereProgram(name, environment)
-    local where = windowsSystemPath("where.exe")
-    if not where then return nil end
-    local ok, output = process.outputCommand(where, { name }, environment)
-    if not ok then return nil end
-    for line in tostring(output):gmatch("[^\r\n]+") do
-        local candidate = trimmed(line)
-        if regularFile(candidate) then return normalizePath(candidate) end
+    local host = require("luainstaller.windows_host")
+    local ok, output
+    if environment and environment.PATH then
+        ok, output = host.call("which", name, environment.PATH)
+    else
+        ok, output = host.call("which", name)
     end
-    return nil
+    return ok and normalizePath(output) or nil
 end
 
 local function linkerSupportsBrepro(linker, environment)
@@ -390,17 +379,16 @@ local function discoverMsvc(host)
         or not regularFile(dumpbin) or not regularFile(linker) then
         return nil, "Visual C++ compiler tools for " .. target_arch .. " are incomplete"
     end
-    local sdk_ok, sdk_output = process.outputPowerShell(table.concat({
-        "$Root=[IO.Path]::Combine([IO.Path]::Combine(",
-        "${env:ProgramFiles(x86)},'Windows Kits'),'10');",
-        "$Root=[IO.Path]::Combine($Root,'Include');",
-        "$Version=Get-ChildItem -LiteralPath $Root -ErrorAction Stop|",
-        "Where-Object{$_.PSIsContainer -and ",
-        "(Test-Path -LiteralPath ([IO.Path]::Combine($_.FullName,'um','Windows.h')))}|",
-        "Sort-Object Name -Descending|Select-Object -First 1;",
-        "if($null -eq $Version){exit 1};[Console]::Write($Version.Name)",
-    }))
-    local sdk_version = sdk_ok and trimmed(sdk_output) or nil
+    local sdk_root = normalizePath(program_files .. "/Windows Kits/10/Include")
+    local sdk_entries = fs.listDirectory(sdk_root)
+    local sdk_version
+    for _, entry in ipairs(sdk_entries or {}) do
+        if entry.type == "directory" and entry.path:match("^%d+%.%d+%.%d+%.%d+$")
+            and regularFile(sdk_root .. "/" .. entry.path .. "/um/Windows.h")
+            and (not sdk_version or entry.path > sdk_version) then
+            sdk_version = entry.path
+        end
+    end
     if not sdk_version or not sdk_version:match("^%d+%.%d+%.%d+%.%d+$") then
         return nil, "Windows SDK headers are unavailable"
     end

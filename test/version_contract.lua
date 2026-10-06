@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -154,6 +154,9 @@ local product_files = {
     "src/discovery.lua",
     "src/distribution_files.lua",
     "src/fs.lua",
+    "src/windows_fs.lua",
+    "src/windows_host.lua",
+    "src/windows_host_source.lua",
     "src/hash.lua",
     "src/init.lua",
     "src/launcher.lua",

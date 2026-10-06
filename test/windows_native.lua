@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-08-22
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -26,12 +26,9 @@ assert(windows_host.arch == "x86" or windows_host.arch == "x86_64"
     "Windows tests require a recognized native architecture: " .. windows_host.arch)
 assert(platform.profile({ target_os = "windows" }))
 
-local binary_stdin = "\0\255A\nB"
-local stdin_ok, stdin_error = process.inputPowerShell(table.concat({
-    "$Bytes=$LuaiInput.ToArray();",
-    "if([Convert]::ToBase64String($Bytes) -ne 'AP9BCkI='){exit 9}",
-}), binary_stdin)
-assert(stdin_ok, stdin_error)
+-- Any accidental use of the old backend is a test failure.
+process.outputPowerShell = function() error("PowerShell must not be used") end
+process.inputPowerShell = function() error("PowerShell must not be used") end
 
 local lua = harness.lua_command()
 local runtime_analysis = require("luainstaller").analyze({
@@ -46,22 +43,17 @@ assert(#runtime_analysis.dependencies.scripts == 1,
     "Windows runtime discovery omitted the required Lua module")
 
 local argument = "say \"hello\"\\trail\\ & percent% caret^ bang! 测试"
-local shell_ok, shell_output = process.outputPowerShell(
-    "[Console]::Write([Text.Encoding]::UTF8.GetString(" ..
-        "[Convert]::FromBase64String('5rWL6K+VICYgJSBeICE=')))"
-)
-assert(shell_ok and shell_output == "测试 & % ^ !", tostring(shell_output))
-local long_unicode_ok, long_unicode_output = process.outputPowerShell(
-    string.rep("$null=1;", 1000)
-        .. "[Console]::Write([Text.Encoding]::UTF8.GetString("
-        .. "[Convert]::FromBase64String('6ZW/6ISa5pys6Zuq')))"
-)
-assert(long_unicode_ok and long_unicode_output == "长脚本雪", tostring(long_unicode_output))
-local powershell = assert(process.windowsPowerShellPath())
 local root, unexpected_root_result = fs.makePrivateDirectory("windows-native")
 assert(root, unexpected_root_result)
 assert(unexpected_root_result == nil,
     "successful private-directory creation leaked an auxiliary return value")
+
+local fixture = dofile("test/support/windows_fixture.lua")(root)
+local flooded, flood_output = process.outputCommand(fixture, { "flood" }, {}, { timeout_seconds = 15 })
+assert(flooded and flood_output == string.rep("a", 64 * 4096) .. string.rep("b", 64 * 4096),
+    "simultaneous stdout/stderr capture failed")
+local timed, timeout_output = process.outputCommand(fixture, { "sleep" }, {}, { timeout_seconds = 0.1 })
+assert(not timed and timeout_output:find("timed out", 1, true), timeout_output)
 
 local concurrent_root = path.join(root, "private-directory-concurrency")
 assert(fs.makeDirectory(concurrent_root))
@@ -80,32 +72,8 @@ if fs.readRegularFile(marker) ~= owner then os.exit(41) end
 if not fs.removeTree(directory) then os.exit(42) end
 assert(fs.writeFile(result_path, directory))
 ]]))
-local private_launcher = path.join(root, "private-directory-concurrency.ps1")
-assert(fs.writeFile(private_launcher, [[
-param([string]$Lua,[string]$Worker,[string]$Results,[string]$Project)
-$ErrorActionPreference='Stop'
-$Processes=foreach($Index in 1..12){
-    $Result=[IO.Path]::Combine($Results,"result-$Index.txt")
-    Start-Process -FilePath $Lua -ArgumentList @($Worker,$Result,[string]$Index) `
-        -WorkingDirectory $Project -WindowStyle Hidden -PassThru
-}
-$Failures=@()
-foreach($Process in $Processes){
-    $Process.WaitForExit()
-    if($Process.ExitCode -ne 0){$Failures += "$($Process.Id):$($Process.ExitCode)"}
-}
-if($Failures.Count -ne 0){throw "private directory workers failed: $($Failures -join ',')"}
-]]))
-local concurrent_ok, concurrent_output = process.outputCommand(powershell, {
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy", "Bypass",
-    "-File", private_launcher,
-    lua,
-    private_worker,
-    concurrent_root,
-    path.currentDirectory(),
+local concurrent_ok, concurrent_output = process.outputCommand(fixture, {
+    "spawn", lua, private_worker, concurrent_root, path.currentDirectory(),
 })
 assert(concurrent_ok, concurrent_output)
 local private_paths = {}
@@ -119,32 +87,9 @@ end
 local special = path.join(root, "&A%caret^bang!-测试")
 assert(fs.makeDirectory(special))
 
--- Official Lua uses the narrow CRT entry point on Windows, so asking it to
--- open a script through a non-ASCII path depends on the machine's active code
--- page. Exercise luainstaller's Unicode argv/environment bridge with a native
--- Unicode-aware child instead; the filesystem operations below still cover
--- the non-ASCII directory itself.
-local child = path.join(root, "unicode-process-child.ps1")
-assert(fs.writeFile(child, [[
-param([string]$Value)
-$ExpectedValue=[Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String('c2F5ICJoZWxsbyJcdHJhaWxcICYgcGVyY2VudCUgY2FyZXReIGJhbmchIOa1i+ivlQ=='))
-$ExpectedEnvironment=[Text.Encoding]::UTF8.GetString(
-    [Convert]::FromBase64String('dmFsdWUgJiAlIF4gISDmtYvor5U='))
-if($Value -cne $ExpectedValue){exit 31}
-if([Environment]::GetEnvironmentVariable('LUAI_WINDOWS_ENV','Process') `
-    -cne $ExpectedEnvironment){exit 32}
-[Console]::Write('windows unicode process ok')
-]]))
-
-local ok, output = process.outputCommand(powershell, {
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy", "Bypass",
-    "-File", child,
-    argument,
-}, {
+-- A Unicode-aware native child checks the actual argv and environment;
+-- Lua's narrow CRT entry point depends on the system code page.
+local ok, output = process.outputCommand(fixture, { "unicode", argument }, {
     LUAI_WINDOWS_ENV = "value & % ^ ! 测试",
 })
 assert(ok, output)
@@ -178,23 +123,27 @@ assert(fs.readRegularFile(large) == large_content)
 local target = path.join(root, "junction-target")
 local junction = path.join(root, "junction")
 assert(fs.makeDirectory(target))
-local junction_script = [[
-& {
-    param([string]$Link, [string]$Target)
-    $ErrorActionPreference = 'Stop'
-    New-Item -ItemType Junction -Path $Link -Target $Target -ErrorAction Stop | Out-Null
-}]]
-local junction_ok, junction_output = process.outputCommand(powershell, {
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    junction_script,
-    (junction:gsub("/", "\\")),
-    (target:gsub("/", "\\")),
+local junction_ok, junction_output = process.outputCommand(fixture, {
+    "junction", junction, target,
 })
 assert(junction_ok, junction_output)
 assert(fs.pathType(junction) == "reparse")
+
+assert(not fs.writeFile(path.join(junction, "escaped.txt"), "unsafe"))
+assert(fs.pathType(path.join(target, "escaped.txt")) == "missing")
+assert(not fs.copyFile(original, path.join(junction, "copied.txt")))
+assert(not fs.makeDirectory(path.join(junction, "nested")))
+
+local owner_worker = path.join(root, "owner-worker.lua")
+assert(fs.writeFile(owner_worker, [[
+local harness = dofile("test/support/harness.lua")
+harness.install_loader()
+require("luainstaller.process").outputCommand(arg[1], { "tree", arg[2] }, {}, { timeout_seconds = 30 })
+]]))
+local owner_ok, owner_output = process.outputCommand(fixture, {
+    "owner", lua, owner_worker, path.join(root, "owner-ready.txt"), path.currentDirectory(),
+}, {}, { timeout_seconds = 20 })
+assert(owner_ok and owner_output:find("owner death contained descendants", 1, true), owner_output)
 
 local entries = assert(fs.listTree(root))
 local seen_original = false

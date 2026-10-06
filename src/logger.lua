@@ -8,7 +8,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-07-29
+    2026-10-06
 ]]
 
 local fs = require("luainstaller.fs")
@@ -156,7 +156,7 @@ local function getProcessId()
     end
     local value
     if IS_WINDOWS then
-        local ok, output = process.outputPowerShell("[Console]::Write($PID)")
+        local ok, output = require("luainstaller.windows_host").call("pid")
         value = ok and output:match("%d+") or nil
     else
         value = process.firstLine([[printf '%s\n' "$PPID"]])
@@ -321,9 +321,8 @@ local function transitionPath(lock_path, label, token)
         return lock_path .. "." .. label .. "." .. token
     end
     -- Keep the renamed directory no longer than the public lock basename.
-    -- Appending a full token can push the owner sentinel beyond MAX_PATH on
-    -- Windows PowerShell 5.1/.NET Framework, making post-rename verification
-    -- impossible. The full token remains inside the checked owner record; a
+    -- Appending a full token can exceed legacy Windows tool path limits.
+    -- The full token remains inside the checked owner record; a
     -- compact sibling collision merely makes the operation fail closed.
     local parent = lock_path:match("^(.*)[/\\][^/\\]+$")
     if not parent then return lock_path .. "." .. label .. "." .. token end
@@ -491,7 +490,7 @@ end
 
 local function waitForLockRetry()
     if IS_WINDOWS then
-        process.outputPowerShell("Start-Sleep -Milliseconds " .. tostring(
+        require("luainstaller.windows_host").call("sleep", tostring(
             math.floor(LOCK_RETRY_SECONDS * 1000)
         ))
     else

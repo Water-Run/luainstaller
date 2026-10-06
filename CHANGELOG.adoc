@@ -23,6 +23,10 @@ metadata aren't required.
 
 === Changed
 
+* Windows installation and packaging use an XP-compatible native host module
+  instead of PowerShell. The existing C compiler builds it without Lua headers;
+  file operations, Unicode arguments, child output and process cleanup use Win32
+  APIs. Generated programs continue to run without installed Lua or PowerShell.
 * Executable builds use bundled minimal Lua API declarations for all five
   supported ABIs. A C compiler and matching Lua library are still required;
   system Lua headers and development metadata are optional. Runtime ABI

@@ -10,7 +10,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-14
+    2026-10-06
 ]]
 
 local process = require("luainstaller.process")
@@ -205,9 +205,7 @@ end
 function M.currentDirectory()
     local line
     if IS_WINDOWS then
-        local ok, output = process.outputPowerShell(
-            "[Console]::Write([Environment]::CurrentDirectory)"
-        )
+        local ok, output = require("luainstaller.windows_host").call("cwd")
         line = ok and tostring(output):match("^[^\r\n]+") or nil
     else
         line = process.firstLine("pwd")

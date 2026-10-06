@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-07-18
+    2026-10-06
 ]]
 
 local hash = require("luainstaller.hash")
@@ -33,27 +33,9 @@ local function validToken(value)
 end
 
 local function windowsParentProcessId()
-    local script = table.concat({
-        "$Current=[int]$PID;",
-        "$Shells=@('powershell.exe','pwsh.exe','cmd.exe');",
-        "$Found=0;",
-        "for($i=0;$i -lt 8;$i++){",
-        "$P=Get-WmiObject Win32_Process -Filter ('ProcessId='+$Current) -ErrorAction SilentlyContinue;",
-        "if($null -eq $P){break};",
-        "$ParentId=[int]$P.ParentProcessId;if($ParentId -le 0){break};",
-        "$Parent=Get-WmiObject Win32_Process -Filter ('ProcessId='+$ParentId) -ErrorAction SilentlyContinue;",
-        "if($null -eq $Parent){break};",
-        "if($Shells -notcontains ([string]$Parent.Name).ToLowerInvariant())",
-        "{$Found=$ParentId;break};",
-        "$Current=$ParentId",
-        "};",
-        "if($Found -le 0){exit 1};[Console]::Write($Found)",
-    })
-    local ok, output = process.outputPowerShell(script)
-    if not ok then return nil, tostring(output) end
-    local pid = tostring(output or ""):match("(%d+)")
-    if not validInteger(pid) then return nil, "cannot identify the owning Windows process" end
-    return pid
+    local ok, output = require("luainstaller.windows_host").call("pid")
+    if not ok then return nil, output end
+    return validInteger(output)
 end
 
 function M.currentPid()
@@ -76,16 +58,11 @@ end
 function M.secureToken(context)
     local random_bytes
     if IS_WINDOWS then
-        local ok, output = process.outputPowerShell(table.concat({
-            "$Bytes=New-Object byte[] 32;",
-            "$Rng=[Security.Cryptography.RandomNumberGenerator]::Create();",
-            "try{$Rng.GetBytes($Bytes)}finally{$Rng.Dispose()};",
-            "[Console]::Write([Convert]::ToBase64String($Bytes))",
-        }))
-        if not ok or not tostring(output):match("^[A-Za-z0-9+/]+=?=?%s*$") then
+        local ok, output = require("luainstaller.windows_host").call("random")
+        if not ok or type(output) ~= "string" or #output ~= 32 then
             return nil, tostring(output or "cannot acquire Windows cryptographic randomness")
         end
-        random_bytes = tostring(output):gsub("%s+$", "")
+        random_bytes = output
     else
         local opened, handle, open_err = pcall(io.open, "/dev/urandom", "rb")
         if not opened or not handle then
@@ -187,15 +164,9 @@ function M.isAlive(pid)
     pid = validInteger(pid)
     if not pid then return nil, "process id is invalid" end
     if IS_WINDOWS then
-        local ok, output = process.outputPowerShell(
-            "$P=Get-Process -Id " .. pid
-                .. " -ErrorAction SilentlyContinue;if($null -eq $P){exit 1}"
-        )
-        if ok then return true end
-        if tostring(output or ""):match("[Aa]ccess.+[Dd]enied") then
-            return nil, tostring(output)
-        end
-        return false
+        local ok, output = require("luainstaller.windows_host").call("alive", pid)
+        if not ok then return nil, output end
+        return output == "yes"
     end
     local ok, output = process.outputCommand("kill", { "-0", pid })
     if ok then return true end

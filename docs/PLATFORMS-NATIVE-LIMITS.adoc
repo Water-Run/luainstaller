@@ -80,7 +80,10 @@ default. That only helps if the rest of the toolchain supports XP too:
 * [ ] a compiler and C runtime that target XP (an XP-capable MSVC toolset,
       or a MinGW runtime that runs on XP)
 * [ ] a `lua5x.dll` built with that same toolchain
-* [ ] PowerShell 2 or later on the build machine
+* [ ] the compiler available in the command prompt used for installation
+      and packaging
+
+Installation, packaging and the generated programs don't need PowerShell.
 
 WARNING: A current Visual Studio or UCRT build compiles without complaint
 and still won't start on XP.

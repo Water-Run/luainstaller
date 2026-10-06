@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local function localFileExists(path)
@@ -51,6 +51,9 @@ local function installSourcePreloads()
     local module_names = {
         "luainstaller",
         "luainstaller.fs",
+        "luainstaller.windows_fs",
+        "luainstaller.windows_host",
+        "luainstaller.windows_host_source",
         "luainstaller.hash",
         "luainstaller.process",
         "luainstaller.path",
@@ -81,6 +84,12 @@ local function installSourcePreloads()
     end
     package.preload["luainstaller.fs"] = package.preload["luainstaller.fs"] or function()
         return dofile(sourcePath("fs.lua"))
+    end
+    for _, leaf in ipairs({ "windows_fs", "windows_host", "windows_host_source" }) do
+        local module_name, filename = "luainstaller." .. leaf, leaf .. ".lua"
+        package.preload[module_name] = package.preload[module_name] or function()
+            return dofile(sourcePath(filename))
+        end
     end
     package.preload["luainstaller.hash"] = package.preload["luainstaller.hash"] or function()
         return dofile(sourcePath("hash.lua"))

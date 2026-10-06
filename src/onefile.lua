@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -1661,10 +1661,8 @@ function M.bundleOnefile(opts)
     end
     local published = false
     if not err then
-        -- File.Move maps to a same-volume, no-replace MoveFile operation on
-        -- Windows and is available through .NET 2/PowerShell 2.  This avoids
-        -- both PowerShell 5's New-Item -ItemType HardLink and XP's
-        -- administrator-only fsutil path.  POSIX link(2) retains the same
+        -- MoveFile provides same-volume, no-replace publication on Windows.
+        -- POSIX link(2) retains the same
         -- no-replace publication guarantee without rename-overwrite races.
         local publish = profile.target_os == "windows" and fs.rename or fs.hardLink
         local committed, publish_output = publish(staged_exe, out_path)

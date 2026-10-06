@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-08-17
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -89,8 +89,13 @@ return { message = function(value) return "repro " .. value end }
                 "onefile " .. index .. " leaks checkout path " .. project)
         end
         if username and #username >= 3 then
-            assert(not bytes:find(username, 1, true),
-                "onefile " .. index .. " leaks build username")
+            -- Account names such as Administrator and root also occur in
+            -- Windows API identifiers and ordinary source text. Look for
+            -- the account as a filesystem component, not an arbitrary word.
+            for _, separator in ipairs({ "/", "\\" }) do
+                assert(not bytes:find(separator .. username .. separator, 1, true),
+                    "onefile " .. index .. " leaks a build-user path")
+            end
         end
     end
 

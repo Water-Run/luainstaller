@@ -10,75 +10,17 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-08-24
+    2026-10-06
 ]]
 
 local M = {}
 local output_counter = 0
-local powershell_counter = 0
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
-local BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-local function base64Encode(value)
-    local output = {}
-    value = tostring(value or "")
-    for index = 1, #value, 3 do
-        local first = value:byte(index)
-        local second = value:byte(index + 1)
-        local third = value:byte(index + 2)
-        local packed = first * 0x10000 + (second or 0) * 0x100 + (third or 0)
-        local first_index = math.floor(packed / 0x40000) % 64 + 1
-        local second_index = math.floor(packed / 0x1000) % 64 + 1
-        output[#output + 1] = BASE64_ALPHABET:sub(first_index, first_index)
-        output[#output + 1] = BASE64_ALPHABET:sub(second_index, second_index)
-        output[#output + 1] = second
-            and BASE64_ALPHABET:sub(math.floor(packed / 0x40) % 64 + 1,
-                math.floor(packed / 0x40) % 64 + 1)
-            or "="
-        output[#output + 1] = third
-            and BASE64_ALPHABET:sub(packed % 64 + 1, packed % 64 + 1)
-            or "="
-    end
-    return table.concat(output)
-end
-
-local function base64Decode(value)
-    local inverse = {}
-    for index = 1, #BASE64_ALPHABET do
-        inverse[BASE64_ALPHABET:sub(index, index)] = index - 1
-    end
-    local output = {}
-    value = tostring(value or ""):gsub("%s", "")
-    if #value % 4 ~= 0 then return nil end
-    for index = 1, #value, 4 do
-        local first = inverse[value:sub(index, index)]
-        local second = inverse[value:sub(index + 1, index + 1)]
-        local third_character = value:sub(index + 2, index + 2)
-        local fourth_character = value:sub(index + 3, index + 3)
-        local third = inverse[third_character] or 0
-        local fourth = inverse[fourth_character] or 0
-        if first == nil or second == nil
-            or (third_character ~= "=" and inverse[third_character] == nil)
-            or (fourth_character ~= "=" and inverse[fourth_character] == nil) then
-            return nil
-        end
-        local packed = first * 0x40000 + second * 0x1000 + third * 0x40 + fourth
-        output[#output + 1] = string.char(math.floor(packed / 0x10000) % 0x100)
-        if third_character ~= "=" then
-            output[#output + 1] = string.char(math.floor(packed / 0x100) % 0x100)
-        end
-        if fourth_character ~= "=" then
-            output[#output + 1] = string.char(packed % 0x100)
-        end
-    end
-    return table.concat(output)
-end
-
 -- CreateProcess-style argument quoting (backslash/double-quote rules). This
 -- is NOT safe for cmd.exe command lines: cmd.exe additionally interprets
--- % ^ & | < > and () metacharacters. Product data paths use the PowerShell
--- encoded PowerShell process backend (outputCommand) or base64-decoded PowerShell
--- expressions, never a raw cmd.exe string built from external data. Callers
+-- % ^ & | < > and () metacharacters. Product data paths use the native
+-- Win32 process backend (outputCommand), never a raw cmd.exe string built
+-- from external data. Callers
 -- that build raw strings for M.output on Windows remain responsible for
 -- cmd.exe quoting.
 local function windowsQuote(value)
@@ -104,15 +46,6 @@ local function windowsQuote(value)
     output[#output + 1] = string.rep("\\", slashes * 2)
     output[#output + 1] = '"'
     return table.concat(output)
-end
-
-local function utf16leBase64(ascii)
-    local bytes = {}
-    for index = 1, #ascii do
-        bytes[#bytes + 1] = ascii:sub(index, index)
-        bytes[#bytes + 1] = "\0"
-    end
-    return base64Encode(table.concat(bytes))
 end
 
 local function validateCommand(executable, arguments, environment)
@@ -148,26 +81,6 @@ local function sortedKeys(values)
     return keys
 end
 
-local function asciiScript(script)
-    if type(script) ~= "string" or script == "" or script:find("\0", 1, true) then
-        return false
-    end
-    for index = 1, #script do
-        if script:byte(index) > 0x7f then return false end
-    end
-    return true
-end
-
-local function cleanWindowsOutput(output)
-    local cleaned, removed = tostring(output):gsub(
-        '<Objs Version="1%.1%.0%.1" xmlns="http://schemas%.microsoft%.com/powershell/2004/04">'
-            .. '<Obj S="progress".-</Objs>%s*$',
-        ""
-    )
-    if removed > 0 then cleaned = cleaned:gsub("^#< CLIXML\r?\n", "") end
-    return cleaned
-end
-
 local function legacyPosixInvocation(command)
     output_counter = output_counter + 1
     local identity = tostring({}):gsub("[^%w]", "")
@@ -197,21 +110,6 @@ local function legacyWindowsInvocation(command)
         .. "&echo."
         .. "&call echo " .. token .. ":^%LUAI_STATUS^%"
     return invocation, token
-end
-
-function M.windowsPowerShellPath()
-    local root = os.getenv("SystemRoot")
-    if type(root) ~= "string" or root == "" then
-        root = os.getenv("WINDIR")
-    end
-    if type(root) ~= "string" or root == "" then
-        return nil
-    end
-    root = root:gsub("/", "\\"):gsub("\\+$", "")
-    if not root:match("^%a:\\") or root:find('[%c"%%!%^&|<>]') then
-        return nil
-    end
-    return root .. "\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
 end
 
 local hasTimeoutUtility
@@ -337,220 +235,28 @@ posixTimeoutRelay = function(command)
     return "sh -c " .. M.quote(script)
 end
 
-local function powershellInvocation(script, input_format)
-    local powershell = M.windowsPowerShellPath()
-    if not powershell then return nil, "absolute Windows PowerShell path is unavailable" end
-    return table.concat({
-        windowsQuote(powershell),
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-InputFormat",
-        input_format,
-        "-OutputFormat",
-        "Text",
-        "-EncodedCommand",
-        utf16leBase64(script),
-    }, " ")
-end
-
-function M.outputPowerShell(script)
-    if not IS_WINDOWS then return false, "PowerShell execution is available only on Windows" end
-    if not asciiScript(script) then
-        return false, "PowerShell script must be nonempty ASCII without NUL bytes"
-    end
-    local invocation, invocation_err = powershellInvocation(script, "Text")
-    if not invocation then return false, invocation_err end
-    if #invocation > 6000 then
-        powershell_counter = powershell_counter + 1
-        local parent = os.getenv("TEMP") or os.getenv("TMP")
-        if type(parent) ~= "string" or parent == "" or parent:find("\0", 1, true) then
-            return false, "a safe Windows temporary directory is unavailable"
-        end
-        parent = parent:gsub("/", "\\"):gsub("\\+$", "")
-        local temporary = parent .. "\\luainstaller-ps-" .. tostring(os.time())
-            .. "-" .. tostring(math.floor(os.clock() * 1000000000))
-            .. "-" .. tostring(powershell_counter) .. ".ps1"
-        local function decodeExpression(value)
-            return "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
-                .. base64Encode(value) .. "'))"
-        end
-        local write_script = table.concat({
-            "$ErrorActionPreference='Stop';$p=", decodeExpression(temporary), ";",
-            "$s=New-Object IO.FileStream($p,[IO.FileMode]::CreateNew,",
-            "[IO.FileAccess]::Write,[IO.FileShare]::None);",
-            "$b=New-Object byte[] 65536;try{while(($n=$LuaiInput.Read($b,0,$b.Length))-gt 0)",
-            "{$s.Write($b,0,$n)};$s.Flush()}finally{$s.Dispose()}",
-        })
-        local wrote, write_err = M.inputPowerShell(write_script, script)
-        if not wrote then return false, write_err end
-        local run_script = table.concat({
-            "$ErrorActionPreference='Stop';$p=", decodeExpression(temporary), ";",
-            "$s=[IO.File]::ReadAllText($p,[Text.Encoding]::ASCII);",
-            "& ([ScriptBlock]::Create($s))",
-        })
-        local run_invocation, run_err = powershellInvocation(run_script, "Text")
-        if not run_invocation then return false, run_err end
-        local ok, output = M.output(run_invocation)
-        local remove_script = "$p=" .. decodeExpression(temporary)
-            .. ";if([IO.File]::Exists($p)){[IO.File]::Delete($p)}"
-        local removed, remove_err = M.outputPowerShell(remove_script)
-        if not removed then
-            return false, cleanWindowsOutput(output) .. "\n" .. tostring(remove_err)
-        end
-        return ok, cleanWindowsOutput(output)
-    end
-    local ok, output = M.output(invocation)
-    return ok, cleanWindowsOutput(output)
-end
-
 function M.environmentVariable(name)
     if type(name) ~= "string" or not name:match("^[%a_][%w_]*$") then
         return nil, "environment variable name must be portable"
     end
     if not IS_WINDOWS then return os.getenv(name) end
 
-    -- The narrow CRT getenv() used by Lua 5.1-5.3 returns bytes in the active
-    -- Windows code page. Paths then become invalid when the UTF-8 filesystem
-    -- bridge consumes those bytes. Read the Unicode process environment and
-    -- transport it as ASCII Base64 instead.
-    local ok, encoded = M.outputPowerShell(table.concat({
-        "$Value=[Environment]::GetEnvironmentVariable('", name, "','Process');",
-        "if($null -eq $Value){[Console]::Write('0')}",
-        "else{[Console]::Write('1'+[Convert]::ToBase64String(",
-        "[Text.Encoding]::UTF8.GetBytes($Value)))}",
-    }))
-    if not ok then return nil, encoded end
-    encoded = tostring(encoded or ""):gsub("%s", "")
-    if encoded == "0" then return nil end
-    if encoded:sub(1, 1) ~= "1" then
-        return nil, "invalid encoded environment response"
-    end
-    local value = base64Decode(encoded:sub(2))
-    if value == nil then return nil, "invalid encoded environment value" end
+    local ok, value, state = require("luainstaller.windows_host").call("env", name)
+    if not ok then return nil, value end
+    if state == "missing" then return nil end
     return value
-end
-
-function M.inputPowerShell(script, input)
-    if not IS_WINDOWS then return false, "PowerShell execution is available only on Windows" end
-    if not asciiScript(script) then
-        return false, "PowerShell script must be nonempty ASCII without NUL bytes"
-    end
-    if type(input) ~= "string" then return false, "PowerShell input must be a string" end
-    local wrapped_script = table.concat({
-        "$ErrorActionPreference='Stop';",
-        "$LuaiEncoded=[Console]::In.ReadToEnd();",
-        "$LuaiBytes=[Convert]::FromBase64String($LuaiEncoded);",
-        "$LuaiInput=New-Object IO.MemoryStream(,$LuaiBytes);try{",
-        script,
-        "}finally{$LuaiInput.Dispose()}",
-    })
-    local invocation, invocation_err = powershellInvocation(wrapped_script, "None")
-    if not invocation then return false, invocation_err end
-    local opened, pipe = pcall(io.popen, invocation .. " >NUL 2>&1", "w")
-    if not opened or not pipe then return false, tostring(pipe) end
-    local wrote, write_result = pcall(pipe.write, pipe, base64Encode(input))
-    local flushed, flush_result = pcall(pipe.flush, pipe)
-    local closed, close_result = pcall(pipe.close, pipe)
-    if not wrote or not write_result then return false, "cannot write PowerShell input" end
-    if not flushed or not flush_result then return false, "cannot flush PowerShell input" end
-    if not closed or close_result ~= true then return false, "PowerShell input command failed" end
-    return true
-end
-
-local function windowsOutputCommand(validated, opts)
-    opts = opts or {}
-    local powershell = M.windowsPowerShellPath()
-    if not powershell then return false, "absolute Windows PowerShell path is unavailable" end
-    local quoted_arguments = {}
-    for _, value in ipairs(validated.arguments) do
-        quoted_arguments[#quoted_arguments + 1] = windowsQuote(value)
-    end
-    local function decodeExpression(value)
-        return "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
-            .. base64Encode(value) .. "'))"
-    end
-    local timeout_seconds = type(opts.timeout_seconds) == "number"
-        and opts.timeout_seconds > 0 and opts.timeout_seconds or nil
-    local timeout_milliseconds = timeout_seconds
-        and math.floor(timeout_seconds * 1000) or 0
-    local script = {
-        "$ErrorActionPreference='Stop'",
-        "$Start=New-Object System.Diagnostics.ProcessStartInfo",
-        "$Start.FileName=" .. decodeExpression(validated.executable),
-        "$Start.Arguments=" .. decodeExpression(table.concat(quoted_arguments, " ")),
-        "$Start.UseShellExecute=$false",
-        "$Start.CreateNoWindow=$true",
-        "$Start.RedirectStandardOutput=$true",
-        "$Start.RedirectStandardError=$true",
-        "$Utf8=New-Object Text.UTF8Encoding($false)",
-        "$TimeoutMs=" .. tostring(timeout_milliseconds),
-        "$TimedOut=$false",
-    }
-    for _, name in ipairs(sortedKeys(validated.environment)) do
-        script[#script + 1] = "$Start.EnvironmentVariables[(" .. decodeExpression(name)
-            .. ")]=" .. decodeExpression(validated.environment[name])
-    end
-    -- BeginRead and WaitAny are available in .NET 2.0. Reading both raw
-    -- streams concurrently preserves exact bytes without the pipe deadlock of
-    -- sequential ReadToEnd, or a post-XP task-based async API.
-    script[#script + 1] = "try{$Child=New-Object System.Diagnostics.Process;"
-        .. "$Child.StartInfo=$Start;if(-not $Child.Start()){exit 127};"
-        .. "$OutStream=$Child.StandardOutput.BaseStream;"
-        .. "$ErrStream=$Child.StandardError.BaseStream;"
-        .. "$OutBuffer=New-Object byte[] 65536;"
-        .. "$ErrBuffer=New-Object byte[] 65536;"
-        .. "$OutBytes=New-Object IO.MemoryStream;"
-        .. "$ErrBytes=New-Object IO.MemoryStream;"
-        .. "$OutRead=$OutStream.BeginRead($OutBuffer,0,$OutBuffer.Length,$null,$null);"
-        .. "$ErrRead=$ErrStream.BeginRead($ErrBuffer,0,$ErrBuffer.Length,$null,$null);"
-        .. "$OutDone=$false;$ErrDone=$false;$Watch=[Diagnostics.Stopwatch]::StartNew();"
-        .. "$KillTree={"
-        .. "$TaskKill=[IO.Path]::Combine([IO.Path]::Combine("
-        .. "$env:SystemRoot,'System32'),'taskkill.exe');"
-        .. "if([IO.File]::Exists($TaskKill)){& $TaskKill /PID $Child.Id /T /F | Out-Null};"
-        .. "if(-not $Child.HasExited){$Child.Kill()};$Child.WaitForExit()};"
-        .. "while(-not($OutDone -and $ErrDone)){"
-        .. "[Threading.WaitHandle[]]$Handles=@();$OutIndex=-1;$ErrIndex=-1;"
-        .. "if(-not $OutDone){$OutIndex=$Handles.Length;"
-        .. "$OutWait=$OutRead.AsyncWaitHandle;$Handles+=$OutWait};"
-        .. "if(-not $ErrDone){$ErrIndex=$Handles.Length;"
-        .. "$ErrWait=$ErrRead.AsyncWaitHandle;$Handles+=$ErrWait};"
-        .. "$Signaled=[Threading.WaitHandle]::WaitAny($Handles,100);"
-        .. "if($Signaled -eq $OutIndex){$Count=$OutStream.EndRead($OutRead);"
-        .. "$OutWait.Close();if($Count -eq 0){$OutDone=$true}else{"
-        .. "$OutBytes.Write($OutBuffer,0,$Count);"
-        .. "$OutRead=$OutStream.BeginRead($OutBuffer,0,$OutBuffer.Length,$null,$null)}}"
-        .. "elseif($Signaled -eq $ErrIndex){$Count=$ErrStream.EndRead($ErrRead);"
-        .. "$ErrWait.Close();if($Count -eq 0){$ErrDone=$true}else{"
-        .. "$ErrBytes.Write($ErrBuffer,0,$Count);"
-        .. "$ErrRead=$ErrStream.BeginRead($ErrBuffer,0,$ErrBuffer.Length,$null,$null)}};"
-        .. "if($TimeoutMs -gt 0 -and -not $TimedOut -and "
-        .. "$Watch.ElapsedMilliseconds -ge $TimeoutMs){& $KillTree;$TimedOut=$true}};"
-        .. "if(-not $Child.HasExited){if($TimeoutMs -gt 0){"
-        .. "$Remaining=$TimeoutMs-[int]$Watch.ElapsedMilliseconds;"
-        .. "if($Remaining -lt 0){$Remaining=0};"
-        .. "if($Remaining -eq 0 -or -not $Child.WaitForExit($Remaining)){"
-        .. "& $KillTree;$TimedOut=$true}}else{$Child.WaitForExit()}};"
-        .. "$Child.WaitForExit();"
-        .. "$Stdout=[Text.Encoding]::Default.GetString($OutBytes.ToArray());"
-        .. "$Stderr=[Text.Encoding]::Default.GetString($ErrBytes.ToArray());"
-        .. "$Code=$Child.ExitCode;$OutBytes.Dispose();$ErrBytes.Dispose();"
-        .. "[Console]::OutputEncoding=$Utf8;[Console]::Out.Write($Stdout);"
-        .. "if($TimedOut){[Console]::Error.Write('luainstaller: command timed out after "
-        .. tostring(timeout_seconds or 0) .. "s');exit 124};"
-        .. "[Console]::Error.Write($Stderr);exit $Code}"
-        .. "catch{[Console]::OutputEncoding=$Utf8;"
-        .. "[Console]::Error.Write($_.Exception.Message);exit 127}"
-    return M.outputPowerShell(table.concat(script, ";"))
 end
 
 function M.outputCommand(executable, arguments, environment, opts)
     local validated, validation_err = validateCommand(executable, arguments, environment)
     if not validated then return false, validation_err end
-    if IS_WINDOWS then return windowsOutputCommand(validated, opts) end
+    if IS_WINDOWS then
+        local ok, output = require("luainstaller.windows_host").execute(validated.executable,
+            validated.arguments, validated.environment, opts and opts.timeout_seconds)
+        -- Match the text-mode pipe contract of the other process backends;
+        -- filesystem reads remain byte-for-byte native operations.
+        return ok, (tostring(output or ""):gsub("\r\n", "\n"))
+    end
     opts = opts or {}
     if type(opts.timeout_seconds) == "number" and opts.timeout_seconds > 0
         and hasTimeoutUtility() then

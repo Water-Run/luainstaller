@@ -6,9 +6,9 @@ Author:
 File:
     standalone_install.lua
 Date:
-    2026-09-22
+    2026-10-06
 Updated:
-    2026-09-22
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -76,16 +76,10 @@ assert(fs.rename(prefix, moved))
 local function cli(name, arguments)
     local executable = path.join(moved, "bin/" .. name .. (windows and ".cmd" or ""))
     if windows then
-        local function quote(value) return "'" .. value:gsub("'", "''") .. "'" end
-        local parts = { "&", quote(executable) }
-        for _, value in ipairs(arguments) do parts[#parts + 1] = quote(value) end
-        local script = { "Set-Location -LiteralPath " .. quote(project) }
-        for key, value in pairs(environment) do
-            script[#script + 1] = "$env:" .. key .. "=" .. quote(value)
-        end
-        script[#script + 1] = table.concat(parts, " ")
-        script[#script + 1] = "exit $LASTEXITCODE"
-        local ok, output = process.outputPowerShell(table.concat(script, ";"))
+        local command = { "cd /d", process.quote(project), "&&", process.quote(executable) }
+        for _, value in ipairs(arguments) do command[#command + 1] = process.quote(value) end
+        local ok, output = process.outputCommand(assert(os.getenv("ComSpec") or os.getenv("COMSPEC")),
+            { "/d", "/s", "/c", table.concat(command, " ") }, environment)
         assert(ok, output)
         return output
     end

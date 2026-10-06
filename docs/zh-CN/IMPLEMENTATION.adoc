@@ -73,6 +73,11 @@ CLI / Lua API
 |`fs` / `hash` / `path` / `process` / `result`
 |I/O、SHA-256、路径、命令、错误
 
+|`windows_host.lua` / `windows_fs.lua` / `host/windows_host.c`
+|兼容 XP 的 Win32 进程与文件操作；由编译器生成的 Lua 模块连接当前官方
+Lua DLL 的 API，不需要安装 Lua 头文件。
+`tools/generate-windows-host-source.lua` 同步内嵌 C 源码。
+
 |`platform` / `compat` / `toolchain`
 |宿主机、兼容性、工具链
 

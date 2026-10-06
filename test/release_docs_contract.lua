@@ -78,6 +78,15 @@ expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-depen
 expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.5.0-1.rockspec")
 expect_contains("docs/TESTING.adoc", "test/no_lua_target.lua")
 expect_contains("docs/zh-CN/TESTING.adoc", "test/no_lua_target.lua")
+expect_contains("docs/INSTALL.adoc", "PowerShell isn't needed")
+expect_contains("docs/PLATFORMS-NATIVE-LIMITS.adoc",
+    "Installation, packaging and the generated programs don't need PowerShell.")
+expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc",
+    "安装、打包和生成的程序都不需要 PowerShell。")
+for _, doc in ipairs({ "docs/INSTALL.adoc", "docs/PLATFORMS-NATIVE-LIMITS.adoc",
+    "docs/zh-CN/INSTALL.adoc", "docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc" }) do
+    expect_not_contains(doc, "PowerShell 2")
+end
 expect_contains("docs/TROUBLESHOOTING.adoc",
     "Copying a C module with the same filename doesn't make the dependency discoverable.")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc",

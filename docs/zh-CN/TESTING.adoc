@@ -76,6 +76,10 @@ x86_64 生成 C 代码和 PE 审计
 |真实 Linux 传递依赖和缺失库、诊断或日志失败不影响构建、macOS 解析夹具，
 以及 Windows 未检查依赖的提示
 
+|`test/windows_native.lua`
+|不依赖 PowerShell 的 Win32 文件与进程操作：Unicode 数据、并发私有目录、
+二进制文件、目录联接拒绝、同时捕获标准输出与错误、超时和属主退出后的子进程清理
+
 |`test/no_lua_target.lua`
 |在未安装 Lua 解释器、库、头文件或 LuaRocks 的隔离文件系统中进行
 原生 Linux 测试。删除原始源码后，两种打包形式都加载 Lua 与 C 模块；
@@ -217,6 +221,10 @@ HOST_LABEL=<label> sh tools/test-lua-versions.sh
 ----
 
 Windows：
+
+CI 的矩阵调度脚本使用 PowerShell，产品和原生 Windows 测试本身不需要它。
+在旧系统的编译器命令提示符中，可以直接运行各个 `lua test/*.lua` 测试。
+宿主模块的 C 源码还会进行 x86、x86_64 编译和 XP 导入接口审计。
 
 [source,powershell]
 ----

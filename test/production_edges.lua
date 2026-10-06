@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -489,84 +489,30 @@ test("checked write reports flush or close failure", function()
     assert(type(err) == "string" and err ~= "")
 end)
 
-test("Windows regular-file checks use a non-follow type query", function()
-    local original_process = require("luainstaller.process")
-    local original_config = package.config
-    local original_getenv = os.getenv
-    local calls = 0
-    rawset(package, "config", "\\\n;\n?\n!\n-")
-    local windows_process = dofile("src/process.lua")
-    windows_process.output = function(command)
-        calls = calls + 1
-        local powershell_position = command:find(
-            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-            1,
-            true
-        )
-        assert(powershell_position and powershell_position <= 2,
-            "Windows type query depended on PATH for PowerShell")
-        assert(command:find("-EncodedCommand", 1, true),
-            "Windows type query did not encode its PowerShell script")
-        assert(not command:find("NUL&echo unsafe", 1, true), "raw Windows path reached the shell")
-        return true, calls == 1 and "other" or "file"
-    end
-    rawset(os, "getenv", function(name)
-        if name == "SystemRoot" then return "C:\\Windows" end
-        return original_getenv(name)
-    end)
-    package.loaded["luainstaller.process"] = windows_process
-    local loaded, windows_fs = pcall(dofile, "src/fs.lua")
-    if not loaded then
-        rawset(package, "config", original_config)
-        package.loaded["luainstaller.process"] = original_process
-        rawset(os, "getenv", original_getenv)
-        error(windows_fs)
-    end
+test("Windows regular-file checks use a native non-follow type query", function()
+    local original = package.loaded["luainstaller.windows_host"]
+    local calls = {}
+    package.loaded["luainstaller.windows_host"] = {
+        call = function(operation, value)
+            calls[#calls + 1] = { operation, value }
+            return true, #calls == 1 and "other" or "file"
+        end,
+    }
+    local windows_fs = dofile("src/windows_fs.lua")
     local device = windows_fs.isRegularFile("NUL&echo unsafe")
     local regular = windows_fs.isRegularFile("C:\\safe\\empty.lua")
-    rawset(package, "config", original_config)
-    package.loaded["luainstaller.process"] = original_process
-    rawset(os, "getenv", original_getenv)
-
-    assert(not device, "Windows device was accepted as a regular file")
-    assert(regular, "Windows regular-file type result was ignored")
-    assertEqual(calls, 2, "Windows type query count")
+    package.loaded["luainstaller.windows_host"] = original
+    assert(not device and regular, "native file types were not respected")
+    assertEqual(#calls, 2, "native type query count")
+    assertEqual(calls[1][1], "type", "native operation")
+    assertEqual(calls[1][2], "NUL&echo unsafe", "path data must remain literal")
 end)
 
-test("Windows PowerShell helper is absolute and rejects shell metacharacters", function()
-    local process = require("luainstaller.process")
-    local original_getenv = os.getenv
-    rawset(os, "getenv", function(name)
-        if name == "SystemRoot" then return "D:\\Windows Root" end
-        return original_getenv(name)
-    end)
-    local ok, resolved = pcall(process.windowsPowerShellPath)
-    rawset(os, "getenv", function(name)
-        if name == "SystemRoot" then return "" end
-        if name == "WINDIR" then return "E:\\WinNT" end
-        return original_getenv(name)
-    end)
-    local fallback_ok, fallback = pcall(process.windowsPowerShellPath)
-    rawset(os, "getenv", function(name)
-        if name == "SystemRoot" then return "C:\\Windows&echo unsafe" end
-        return original_getenv(name)
-    end)
-    local unsafe_ok, unsafe = pcall(process.windowsPowerShellPath)
-    rawset(os, "getenv", original_getenv)
-
-    assert(ok, "Windows PowerShell path helper is unavailable")
-    assertEqual(
-        resolved,
-        "D:\\Windows Root\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-        "absolute Windows PowerShell path"
-    )
-    assert(fallback_ok, "WINDIR fallback raised an error")
-    assertEqual(
-        fallback,
-        "E:\\WinNT\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-        "WINDIR fallback path"
-    )
-    assert(unsafe_ok and unsafe == nil, "unsafe SystemRoot reached a shell command")
+test("Windows native helper ships its exact corresponding source", function()
+    local source = readFile("src/host/windows_host.c")
+    assertEqual(require("luainstaller.windows_host_source"), source,
+        "installed native host source differs from the C implementation")
+    assert(source:find("#define _WIN32_WINNT 0x0501", 1, true), "native host lost its XP API baseline")
 end)
 
 test("Windows process primitives document cmd.exe quoting hazards", function()
@@ -577,24 +523,15 @@ test("Windows process primitives document cmd.exe quoting hazards", function()
         "process layer does not document cmd.exe interpretation of M.output")
     assert(process_source:find("% ^ & | < >", 1, true),
         "process layer does not list the cmd.exe metacharacters")
-    assert(process_source:find("base64", 1, true),
-        "process layer does not document the encoded PowerShell data path")
-    for _, modern_api in ipairs({
-        "ReadToEndAsync", "StandardOutputEncoding", "StandardErrorEncoding", ".Kill($true)",
-    }) do
-        assert(not process_source:find(modern_api, 1, true),
-            "Windows process backend requires a post-XP .NET API: " .. modern_api)
-    end
-    assert(not process_source:find(
-        "Combine($env:SystemRoot,'System32','taskkill.exe')", 1, true),
-        "Windows timeout fallback requires a post-.NET-2 Path.Combine overload")
-    assert(process_source:find("taskkill.exe", 1, true),
+    assert(process_source:find("Win32 process backend", 1, true),
+        "process layer does not document the native Win32 data path")
+    local native_source = readFile("src/host/windows_host.c")
+    assert(native_source:find("kill_descendants(child.dwProcessId", 1, true),
         "Windows timeout fallback does not terminate child trees on legacy hosts")
     for _, capture_contract in ipairs({
-        "RedirectStandardOutput=$true", "RedirectStandardError=$true",
-        "BeginRead", "[Threading.WaitHandle]::WaitAny",
+        "CreateProcessW", "PeekNamedPipe", "hStdOutput", "hStdError",
     }) do
-        assert(process_source:find(capture_contract, 1, true),
+        assert(native_source:find(capture_contract, 1, true),
             "Windows process backend does not capture child output safely: "
                 .. capture_contract)
     end
@@ -627,13 +564,11 @@ test("result and helper contracts keep strict shapes", function()
     assert(type(log_err) == "string" and log_err ~= "", "log rejection reason")
 end)
 
-test("Windows logger delegates encoded filesystem operations", function()
+test("Windows logger delegates native checked filesystem operations", function()
     local logger_source = readFile("src/logger.lua")
-    local fs_source = readFile("src/fs.lua")
-    assert(fs_source:find("FromBase64String", 1, true),
-        "Windows filesystem backend does not encode paths and file contents")
-    assert(fs_source:find("[Text.Encoding]::UTF8.GetString", 1, true),
-        "Windows filesystem backend does not decode paths as UTF-8")
+    local fs_source = readFile("src/windows_fs.lua")
+    assert(fs_source:find('host.call("type", value)', 1, true),
+        "Windows filesystem backend does not query native path types")
     for _, operation in ipairs({ "fs.pathType", "fs.writeFile", "fs.rename", "fs.removeFile" }) do
         assert(logger_source:find(operation, 1, true),
             "Windows logger does not delegate to checked operation " .. operation)
@@ -4566,6 +4501,30 @@ assert(require("luainstaller.fs").temporaryRoot() == %q,
             assert(not pe:find(post_xp_api, 1, true),
                 "MinGW " .. cross.label .. " extractor imports post-XP API "
                     .. post_xp_api)
+        end
+        local exports = root .. "/host-exports.def"
+        writeFile(exports, "EXPORTS\n luaopen_luainstaller_windows_host\n luainstaller_host_watchdogW\n")
+        for minor = 1, 5 do
+            local helper = root .. "/native-host-" .. cross.label .. "-5" .. minor .. ".dll"
+            runCommand(table.concat({
+                cross.command, "-std=c99 -Wall -Wextra -Werror -pedantic -shared -static-libgcc",
+                "-DLUAI_HOST_ABI=50" .. minor,
+                shellQuote("src/host/windows_host.c"), shellQuote(exports), "-o", shellQuote(helper),
+                "-Wl,--major-subsystem-version," .. cross.subsystem_major
+                    .. ",--minor-subsystem-version," .. cross.subsystem_minor,
+                "-ladvapi32",
+            }, " "))
+            local imports = commandOutputTrimmed(cross.objdump .. " -p " .. shellQuote(helper))
+            for dll in imports:gmatch("DLL Name:%s*([^\r\n]+)") do
+                assert(allowed_dlls[dll:match("^%s*(.-)%s*$"):lower()],
+                    "native Windows host imports an external runtime: " .. dll)
+            end
+            for _, modern in ipairs({ "CancelIoEx", "CreateSymbolicLinkW", "GetFinalPathNameByHandleW",
+                "GetTickCount64", "InitializeCriticalSectionEx", "InitializeProcThreadAttributeList" }) do
+                assert(not imports:find(modern, 1, true), "native Windows host imports post-XP API " .. modern)
+            end
+            assert(imports:find("luaopen_luainstaller_windows_host", 1, true), "native Lua entry point was not exported")
+            assert(imports:find("luainstaller_host_watchdogW", 1, true), "legacy watchdog was not exported")
         end
       end
     end

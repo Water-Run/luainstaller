@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 
@@ -380,6 +380,14 @@ local function analyzeContext(opts, config)
     local normalized, err = normalizeOptions(opts)
     if not normalized then
         return nil, err
+    end
+    if package.config:sub(1, 1) == "\\" then
+        local native = require("luainstaller.windows_host")
+        native.configure(normalized.cc)
+        local ready, native_error = native.call("pid")
+        if not ready then
+            return nil, makeError("ToolchainError", native_error)
+        end
     end
     if config.default_mode and (normalized.mode == nil or normalized.mode == "") then
         normalized.mode = config.default_mode

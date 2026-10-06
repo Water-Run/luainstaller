@@ -60,6 +60,9 @@ xref:docs/INSTALL.adoc[Installing without LuaRocks].
 ****
 NOTE: Lua headers aren't needed to build executables.
 
+On Windows, use your compiler's command prompt for installation and packaging.
+PowerShell isn't required.
+
 * An official Lua interpreter, 5.1 to 5.5. LuaJIT isn't supported.
 * A C compiler for the machine you're on.
 * A Lua library that matches that interpreter's version. It usually comes

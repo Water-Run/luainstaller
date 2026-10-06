@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-10-05
+    2026-10-06
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -22,6 +22,9 @@ end
 
 local SOURCE_LOADER = [[
 package.preload["luainstaller.fs"] = function() return dofile("src/fs.lua") end
+package.preload["luainstaller.windows_fs"] = function() return dofile("src/windows_fs.lua") end
+package.preload["luainstaller.windows_host"] = function() return dofile("src/windows_host.lua") end
+package.preload["luainstaller.windows_host_source"] = function() return dofile("src/windows_host_source.lua") end
 package.preload["luainstaller.hash"] = function() return dofile("src/hash.lua") end
 package.preload["luainstaller.lock_owner"] = function() return dofile("src/lock_owner.lua") end
 package.preload["luainstaller.distribution_files"] = function() return dofile("src/distribution_files.lua") end

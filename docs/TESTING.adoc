@@ -80,6 +80,11 @@ clean-target execution and relinking with the shipped minimal header
 |Real Linux transitive and missing libraries, advisory build and log
 failures, parser fixtures for macOS, and unchecked Windows diagnostics
 
+|`test/windows_native.lua`
+|Native Win32 file and process operations without PowerShell: Unicode data,
+concurrent private directories, binary files, junction rejection, simultaneous
+stdout/stderr capture, timeouts and owner-death descendant cleanup
+
 |`test/no_lua_target.lua`
 |Native Linux execution in an isolated filesystem without an installed Lua
 interpreter, library, headers or LuaRocks. Both bundle forms load Lua and C
@@ -234,6 +239,11 @@ HOST_LABEL=<label> sh tools/test-lua-versions.sh
 ----
 
 Windows:
+
+The matrix orchestration script uses PowerShell on CI. The product and its
+native Windows tests don't require it; on a legacy compiler command prompt,
+the individual `lua test/*.lua` suites run directly. Generated host-module C
+is also compiled for x86 and x86_64 and audited for the XP import surface.
 
 [source,powershell]
 ----

@@ -71,7 +71,9 @@ x86 和 x86_64 可执行文件默认针对 Windows XP API 构建。但只有工�
 [%interactive]
 * [ ] 面向 XP 的编译器和 C 运行时（支持 XP 的 MSVC 工具集，或能在 XP 上运行的 MinGW 运行时）
 * [ ] 用同一工具链构建的 `lua5x.dll`
-* [ ] 构建机上有 PowerShell 2 或更高版本
+* [ ] 安装和打包所用的命令提示符能找到编译器
+
+安装、打包和生成的程序都不需要 PowerShell。
 
 WARNING: 用当前的 Visual Studio 或 UCRT 构建可以顺利编译，但在 XP 上仍然无法启动。
 
