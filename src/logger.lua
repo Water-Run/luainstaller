@@ -25,7 +25,7 @@ local LogLevel = {
 }
 
 local MAX_LOGS = 1000
-local LOCK_TIMEOUT_SECONDS = 30
+local LOCK_TIMEOUT_SECONDS = 60
 local LOCK_STALE_SECONDS = 120
 -- PID-less legacy owner records cannot be liveness-probed. Locks are normally
 -- held for milliseconds, so a much longer age floor is required before one of
@@ -490,13 +490,14 @@ local function recoverStaleLock(lock_path)
     return removeDirectory(tombstone)
 end
 
-local function waitForLockRetry()
+local function waitForLockRetry(delay)
+    delay = delay or LOCK_RETRY_SECONDS
     if IS_WINDOWS then
         require("luainstaller.windows_host").call("sleep", tostring(
-            math.floor(LOCK_RETRY_SECONDS * 1000)
+            math.floor(delay * 1000)
         ))
     else
-        execute("sleep " .. tostring(LOCK_RETRY_SECONDS))
+        execute("sleep " .. tostring(delay))
     end
 end
 
@@ -507,6 +508,7 @@ local function acquireLock()
     local lock_path = getLogFilePath() .. ".lock"
     local max_attempts = math.max(1, math.floor(LOCK_TIMEOUT_SECONDS / LOCK_RETRY_SECONDS))
     local started = os.time()
+    local retry_jitter = (tonumber(lock_owner.currentPid()) or 0) % 11 / 1000
 
     for attempt = 0, max_attempts do
         local observed_time = os.time()
@@ -533,7 +535,8 @@ local function acquireLock()
         end
         local recovered = inspected and recoverStaleLock(lock_path)
         if not recovered and attempt < max_attempts then
-            waitForLockRetry()
+        waitForLockRetry(math.min(0.2, LOCK_RETRY_SECONDS * (1 + math.floor(attempt / 10)))
+            + retry_jitter)
         end
     end
     return nil, nil

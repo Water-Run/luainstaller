@@ -2058,6 +2058,9 @@ local function validateTargetTree(root, target_os)
 end
 
 local function bundleOnedir(opts, lifecycle)
+    if type(io.popen) ~= "function" then
+        return makeError("ToolchainError", "io.popen is required to build onedir bundles")
+    end
     opts = opts or {}
     local manifest = opts.manifest
     local dependencies = opts.dependencies or { scripts = {}, libraries = {} }
@@ -2089,10 +2092,6 @@ local function bundleOnedir(opts, lifecycle)
         return makeError("InvalidOutputError", "Output directory has an unsafe ancestor", {
             path=final_out_dir, cause=parent_error,
         })
-    end
-
-    if type(io.popen) ~= "function" then
-        return makeError("ToolchainError", "io.popen is required to build onedir bundles")
     end
 
     local profile, profile_err = platform.profile({

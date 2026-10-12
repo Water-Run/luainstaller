@@ -66,7 +66,7 @@ xref:USAGE.adoc#usage-limits[时间和大小限制]。
 Termux 使用应用私有存储作为输出位置。发布前会再次核对目录身份。
 Windows 检查重解析点，并在文件操作期间持有祖先目录句柄；工作目录只向可信用户开放。
 
-并发命令共用日志锁，重试时间为 30 秒。日志写入失败不会删除已完成的打包结果。
+并发命令共用日志锁，重试时间为 60 秒。日志写入失败不会删除已完成的打包结果。
 
 [#troubleshooting-cli]
 == "unknown option" 或 "unknown command"

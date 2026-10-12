@@ -40,7 +40,7 @@ toc::[]
 
 [source,bash]
 ----
-luarocks install luainstaller
+luarocks install --only-server=https://luarocks.org luainstaller
 luai -v
 ----
 

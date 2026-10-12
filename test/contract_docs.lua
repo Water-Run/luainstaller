@@ -103,6 +103,9 @@ end
 end
 
 local function check_resource_contracts()
+    for _, file in ipairs({"README.adoc", "README.zh-CN.adoc"}) do
+        assert_contains(read_file(file), "luarocks install --only-server=https://luarocks.org luainstaller")
+    end
     for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
         local usage = read_file(prefix .. "USAGE.adoc")
         assert_contains(usage, "[#usage-limits]")
