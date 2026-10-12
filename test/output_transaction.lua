@@ -20,9 +20,9 @@ local api = require("luainstaller")
 local root = assert(fs.makePrivateDirectory("output-transaction"))
 local driver = path.join(root, "driver.lua")
 local suffix = package.config:sub(1, 1) == "\\" and ".exe" or ""
--- Lua 5.1's arithmetic SHA backend needs more time to verify every copied
--- library and backup. The fault must be reached before the driver is stopped.
-local driver_timeout = _VERSION == "Lua 5.1" and 600 or 120
+-- Older ABIs need time to verify libraries, backups and native bootstrap
+-- inventories. The fault must be reached before the bounded driver stops.
+local driver_timeout = (_VERSION == "Lua 5.1" or _VERSION == "Lua 5.2") and 600 or 120
 local phases = { "before-backup", "after-backup", "after-publish", "during-cleanup",
     "during-quarantine", "after-marker", "during-directory-cleanup" }
 local diagnostic_phase = os.getenv("LUAI_TEST_PUBLICATION_PHASE")
