@@ -43,7 +43,7 @@ local function renamed(original, source, destination)
     if ok and destination == out and phase == "after-publish" then stop() end
     if ok and destination == out and phase == "interrupt-recovery" then stop() end
     if ok and backup and source:sub(1, #backup + 1) == backup .. "/"
-        and destination:find(".luai-remove-", 1, true) then
+        and destination:match("/%.luai%-[^/]+$") then
         if source:match("/%.luai/generated%-output%.txt$") then marker_quarantine = destination end
         if phase == "during-quarantine" then stop() end
     end
@@ -173,7 +173,7 @@ local called, failure = xpcall(function()
         if injected == "throw" then
             local rename = fs.rename
             fs.rename = function(source, destination)
-                if source:find(".luai-backup-", 1, true) and destination == out then
+                if destination == out then
                     error("injected recovery exception")
                 end
                 return rename(source, destination)
@@ -182,8 +182,11 @@ local called, failure = xpcall(function()
             fs.rename = rename
         else
             for _, item in ipairs(assert(fs.listTree(directory))) do
-                if not item.path:find("/", 1, true) and item.path:find(".luai-backup-", 1, true) == 1 then
-                    user_file = path.join(path.join(directory, item.path), "USER.txt")
+                local candidate = path.join(directory, item.path)
+                if not item.path:find("/", 1, true) and item.type == "directory"
+                    and item.path:match("^%.luai%-")
+                    and fs.pathType(path.join(candidate, ".luai/generated-output.txt")) == "file" then
+                    user_file = path.join(candidate, "USER.txt")
                 end
             end
             assert(user_file, "backup fixture was not found")
