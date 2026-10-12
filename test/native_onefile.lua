@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-18
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -72,8 +72,10 @@ assert(fs.removeFile(native_module))
 
 local clean_path = path.join(root, "empty-path")
 assert(fs.makeDirectory(clean_path))
+local extract_root = path.join(root, "extraction")
+assert(fs.makeDirectory(extract_root))
 local argument = "onefile space & quote-\"value\""
-local ran, output = process.outputCommand(built.executable, { argument }, {
+local environment = {
     PATH = clean_path,
     LUA_PATH = "",
     LUA_CPATH = "",
@@ -83,9 +85,51 @@ local ran, output = process.outputCommand(built.executable, { argument }, {
     LUA_INIT_5_3 = "",
     LUA_INIT_5_4 = "",
     LUA_INIT_5_5 = "",
-})
+    TMPDIR = extract_root,
+    TEMP = extract_root,
+    TMP = extract_root,
+}
+local ran, output = process.outputCommand(built.executable, { argument }, environment)
 assert(ran, output)
 assert(output:find("native-probe-ok " .. argument, 1, true), output)
+
+local hostile = path.join(root, "hostile-lua")
+assert(fs.makeDirectory(hostile))
+assert(fs.writeFile(path.join(hostile, "luai_native_probe.lua"),
+    "return 'host-module-ran'\n"))
+local hostile_environment = {}
+for key, value in pairs(environment) do hostile_environment[key] = value end
+hostile_environment.LUA_PATH = path.join(hostile, "?.lua")
+for minor = 1, 5 do
+    hostile_environment["LUA_PATH_5_" .. minor] = hostile_environment.LUA_PATH
+    hostile_environment["LUA_CPATH_5_" .. minor] = ""
+end
+local priority_ok, priority_output = process.outputCommand(
+    built.executable, { "native-priority" }, hostile_environment
+)
+assert(priority_ok and priority_output:find("native-probe-ok native-priority", 1, true),
+    "host Lua source overrode a onefile C module: " .. tostring(priority_output))
+
+local cache_root
+for _, item in ipairs(assert(fs.listTree(extract_root))) do
+    if item.type == "file" and item.path:match("/THIRD_PARTY_NOTICES%.md$") then
+        cache_root = path.dirname(path.join(extract_root, item.path))
+    end
+end
+assert(cache_root, "onefile payload cache was not created")
+local cached_native = path.join(cache_root,
+    ".luai/native/luai_native_probe." .. native_extension)
+assert(fs.pathType(cached_native) == "file")
+local blocker = path.join(cache_root, "THIRD_PARTY_NOTICES.md")
+assert(fs.removeFile(blocker))
+assert(fs.createDirectory(blocker))
+local rejected, rejected_output = process.outputCommand(built.executable, {}, environment)
+assert(not rejected, "onefile accepted a directory in place of a payload file")
+assert(fs.pathType(cached_native) == "file",
+    "failed extraction deleted a previously valid shared cache file: " .. tostring(rejected_output))
+assert(fs.removeDirectory(blocker))
+local repaired, repaired_output = process.outputCommand(built.executable, { argument }, environment)
+assert(repaired and repaired_output:find("native-probe-ok " .. argument, 1, true), repaired_output)
 
 assert(fs.removeTree(root))
 print("native onefile clean-target ok: " .. _VERSION .. " native-probe-ok")

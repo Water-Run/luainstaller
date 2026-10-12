@@ -335,7 +335,7 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         'onefile_lifecycle.lua','distribution_licenses.lua','reproducible_artifacts.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
-    Invoke-Native $LuaRocks @('lint','luainstaller-1.5.0-1.rockspec')
+    Invoke-Native $LuaRocks @('lint','luainstaller-1.5.1-1.rockspec')
     "PASS host=$HostLabel lua=$version abi=Lua $abi"
 }
 

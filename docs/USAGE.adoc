@@ -179,11 +179,13 @@ cross-compiling
 [#usage-logs]
 == Logs
 
-Each command writes a short record to `~/.luainstaller/`. Only the long
-command name can read them:
+Each command writes a short record to `~/.luainstaller/`. Read them with
+either command name:
 
 [source,bash]
 ----
+luai -l
+luai -l --level error --limit 20
 luainstaller logs
 luainstaller logs --level error --limit 20
 ----

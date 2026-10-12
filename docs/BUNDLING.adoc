@@ -69,9 +69,12 @@ system, so starting it through a symlink or from `PATH` works.
 In this order:
 
 . `package.preload`
-. modules inside the executable
+. Lua modules inside the executable and C modules recorded in the bundle
 . the usual Lua file search
 . the usual C module search, with `.luai/native/` in front
+
+Bundled C modules are loaded from their recorded file paths. A missing or
+broken bundled module reports an error instead of trying a host copy.
 
 The bundle comes first, but it isn't sealed: a module that wasn't packaged
 can still be found on the host. Test with `LUA_PATH` and `LUA_CPATH`

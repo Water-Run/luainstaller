@@ -172,11 +172,13 @@ Lua 是同一个版本
 [#usage-logs]
 == 日志
 
-每条命令都会向 `~/.luainstaller/` 写入一条简短记录。只有长命令名能
-读取它们：
+每条命令都会向 `~/.luainstaller/` 写入一条简短记录。两个命令名都能
+读取日志：
 
 [source,bash]
 ----
+luai -l
+luai -l --level error --limit 20
 luainstaller logs
 luainstaller logs --level error --limit 20
 ----

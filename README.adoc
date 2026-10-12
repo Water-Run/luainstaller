@@ -134,7 +134,7 @@ them in one command.
 |Build      |luai -b main.lua |luainstaller build main.lua
 |Version    |luai -v          |luainstaller version
 |Help       |luai -h          |luainstaller help
-|View logs  |—                |luainstaller logs
+|View logs  |luai -l          |luainstaller logs
 |===
 
 === Options you'll actually use

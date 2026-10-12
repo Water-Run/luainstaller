@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local function localFileExists(path)
@@ -155,13 +155,14 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.5.0"
+local VERSION = "1.5.1"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
 local LUAI_HELP = [=[
 Usage: luai -h
        luai -v
+       luai -l [log options]
        luai -a <entry.lua> [options]
        luai -t <entry.lua> [options]
        luai -b <entry.lua> [options]
@@ -170,6 +171,7 @@ Commands:
   -a <entry.lua>    analyze dependencies
   -t <entry.lua>    trace dependency resolution
   -b <entry.lua>    build a bundle
+  -l               read operation logs
 
 Options:
   --dir, --onedir       directory bundle mode
@@ -185,6 +187,11 @@ Options:
   --no-depscan          manual dependencies only
   --max-deps <n>        dependency count limit
   --verbose             more detail
+
+Log options:
+  --level <level>       debug, info, warning, error, or success
+  --limit <n>           maximum records
+  --asc                 oldest first
 ]=]
 
 local LUAINSTALLER_HELP = string.format([=[
@@ -727,7 +734,8 @@ local function parseLogOptions(parser, style, ui)
                 return nil, value_err
             end
             limit = tonumber(value)
-            if not limit or limit <= 0 or limit ~= math.floor(limit) then
+            if not limit or limit ~= limit or limit == math.huge
+                or limit <= 0 or limit ~= math.floor(limit) then
                 return nil, "--limit must be a positive integer"
             end
         elseif item == "--asc" then
@@ -813,6 +821,8 @@ local function runLuai(args, context)
         return runAction("classic", ui, parser, "trace")
     elseif command == "-b" then
         return runAction("classic", ui, parser, "bundle")
+    elseif command == "-l" then
+        return runLogs(parser, "classic", ui)
     end
 
     writeClassicError(string.format("unknown luai command: %s", command))

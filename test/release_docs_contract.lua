@@ -9,7 +9,7 @@ File:
 Date:
     2026-08-22
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local function read_file(path)
@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.5.0-1.rockspec",
+    "luainstaller-1.5.1-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -75,7 +75,7 @@ expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查"
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
-expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.5.0-1.rockspec")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.5.1-1.rockspec")
 expect_contains("docs/TESTING.adoc", "test/no_lua_target.lua")
 expect_contains("docs/zh-CN/TESTING.adoc", "test/no_lua_target.lua")
 expect_contains("docs/INSTALL.adoc", "PowerShell isn't needed")

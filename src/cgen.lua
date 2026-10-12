@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-29
+    2026-10-12
 ]]
 
 local fs = require("luainstaller.fs")
@@ -187,6 +187,7 @@ function M.buildPayload(opts)
             source = entry_source,
         },
         modules = {},
+        native_modules = {},
         module_records = {},
     }
 
@@ -233,6 +234,26 @@ function M.buildPayload(opts)
         end
     end
 
+    for _, library in ipairs(dependencies.libraries or {}) do
+        local canonical = normalizePath(absolutePath(library))
+        local configured = opts.native_module_names
+            and (opts.native_module_names[library]
+                or opts.native_module_names[normalizePath(library)]
+                or opts.native_module_names[canonical])
+        local filename = basename(library)
+        local aliases = moduleAliases(configured, filename:gsub("%.[^%.]+$", ""), canonical)
+        for _, name in ipairs(aliases) do
+            if payload.modules[name] or (payload.native_modules[name]
+                and payload.native_modules[name].source_path ~= canonical) then
+                error({
+                    type = "DuplicateModuleError",
+                    message = "Duplicate generated module name: " .. name,
+                    module_name = name,
+                })
+            end
+            payload.native_modules[name] = { path = filename, source_path = canonical }
+        end
+    end
     return payload
 end
 
@@ -257,6 +278,12 @@ local function emitPayload(payload)
         local record = payload.modules[name]
         lines[#lines + 1] = "    [" .. quote(name) .. "] = module_records["
             .. tostring(record.index) .. "],"
+    end
+    lines[#lines + 1] = "  },"
+    lines[#lines + 1] = "  native_modules = {"
+    for _, name in ipairs(sortedKeys(payload.native_modules)) do
+        lines[#lines + 1] = "    [" .. quote(name) .. "] = { path = "
+            .. quote(payload.native_modules[name].path) .. " },"
     end
     lines[#lines + 1] = "  },"
     lines[#lines + 1] = "}"
@@ -293,6 +320,7 @@ local function configureNativePath(native_dir, launcher_path)
     resolved .. "/?/init.dll",
   }, ";")
   package.cpath = patterns .. ";" .. package.cpath
+  return resolved
 end
 
 local function stripSource(source)
@@ -329,6 +357,24 @@ local function loadPayloadSource(record, chunk_name)
   return loader
 end
 
+local function loadNativeModule(record, module_name, native_root)
+  local filename = joinPath(native_root or ".", record.path)
+  local symbol = module_name:gsub("%.", "_")
+  local before, after = symbol:match("^(.-)%-(.*)$")
+  local loader, err, stage
+  if before and _VERSION ~= "Lua 5.1" then
+    loader, err, stage = package.loadlib(filename, "luaopen_" .. before)
+    if loader then return loader, filename end
+    if stage ~= "init" then error(err, 0) end
+  end
+  loader, err = package.loadlib(filename, "luaopen_" .. (after or symbol))
+  if not loader then
+    error("error loading bundled module '" .. module_name .. "' from file '"
+      .. filename .. "':\n\t" .. tostring(err), 0)
+  end
+  return loader, filename
+end
+
 local function restoreLoadedModules(loaded, previous_modules)
   for name, previous in pairs(previous_modules) do
     if previous.present then rawset(loaded, name, previous.value)
@@ -338,9 +384,12 @@ end
 
 local function install(payload)
   local modules = payload.modules or {}
+  local native_modules = payload.native_modules or {}
   local searchers = loaderTable()
   local searcher
   searcher = function(module_name)
+    local native = native_modules[module_name]
+    if native then return loadNativeModule(native, module_name, payload.native_root) end
     local record = modules[module_name]
     if not record then return "\n\tno bundled module '" .. tostring(module_name) .. "'" end
     return loadPayloadSource(record, "@" .. tostring(record.path or module_name)), record.path
@@ -357,6 +406,11 @@ local function run(payload, run_args, application_arg0)
   local loaded = package.loaded
   local previous_modules = {}
   for name in pairs(payload.modules or {}) do
+    local value = rawget(loaded, name)
+    previous_modules[name] = { present = value ~= nil, value = value }
+    rawset(loaded, name, nil)
+  end
+  for name in pairs(payload.native_modules or {}) do
     local value = rawget(loaded, name)
     previous_modules[name] = { present = value ~= nil, value = value }
     rawset(loaded, name, nil)
@@ -408,7 +462,8 @@ function M.generateBootstrap(opts)
     source[#source + 1] = "local application_arg0 = arg and arg[0] or \"\""
     source[#source + 1] = "local launcher_path = rawget(_G, \"__luai_executable_path\") or application_arg0"
     source[#source + 1] = "rawset(_G, \"__luai_executable_path\", nil)"
-    source[#source + 1] = "configureNativePath(" .. quote(opts.native_dir or "") .. ", launcher_path)"
+    source[#source + 1] = "payload.native_root = configureNativePath("
+        .. quote(opts.native_dir or "") .. ", launcher_path)"
     source[#source + 1] = "local run_args = {}"
     source[#source + 1] = "if arg then for i = 1, #arg do run_args[i] = arg[i] end end"
     source[#source + 1] = "return run(payload, run_args, application_arg0)"

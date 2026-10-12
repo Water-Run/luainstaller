@@ -12,7 +12,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-07-29
+    2026-10-12
 ]]
 
 local compat = require("luainstaller.compat")
@@ -58,6 +58,29 @@ local function loadPayloadSource(record, chunk_name)
     return loader
 end
 
+local function loadNativeModule(record, module_name, native_root)
+    local root = tostring(native_root or ".")
+    local filename = record.path
+    if filename:sub(1, 1) ~= "/" and not filename:match("^%a:/")
+        and root ~= "" and root ~= "." then
+        filename = root:gsub("/+$", "") .. "/" .. filename
+    end
+    local symbol = module_name:gsub("%.", "_")
+    local before, after = symbol:match("^(.-)%-(.*)$")
+    local loader, err, stage
+    if before and _VERSION ~= "Lua 5.1" then
+        loader, err, stage = package.loadlib(filename, "luaopen_" .. before)
+        if loader then return loader, filename end
+        if stage ~= "init" then error(err, 0) end
+    end
+    loader, err = package.loadlib(filename, "luaopen_" .. (after or symbol))
+    if not loader then
+        error("error loading bundled module '" .. module_name .. "' from file '"
+            .. filename .. "':\n\t" .. tostring(err), 0)
+    end
+    return loader, filename
+end
+
 local function restoreLoadedModules(loaded, previous_modules)
     for name, previous in pairs(previous_modules) do
         if previous.present then
@@ -71,10 +94,15 @@ end
 function M.install(payload)
     payload = payload or {}
     local modules = payload.modules or {}
+    local native_modules = payload.native_modules or {}
     local searchers = loaderTable()
     local searcher
 
     searcher = function(module_name)
+        local native = native_modules[module_name]
+        if native then
+            return loadNativeModule(native, module_name, payload.native_root)
+        end
         local record = modules[module_name]
         if not record then
             return "\n\tno bundled module '" .. tostring(module_name) .. "'"
@@ -108,6 +136,14 @@ function M.run(payload, run_args, application_arg0)
     local loaded = package.loaded
     local previous_modules = {}
     for name in pairs(payload.modules or {}) do
+        local value = rawget(loaded, name)
+        previous_modules[name] = {
+            present = value ~= nil,
+            value = value,
+        }
+        rawset(loaded, name, nil)
+    end
+    for name in pairs(payload.native_modules or {}) do
         local value = rawget(loaded, name)
         previous_modules[name] = {
             present = value ~= nil,

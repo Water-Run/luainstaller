@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-05
+    2026-10-12
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -42,7 +42,13 @@ local function check_cli_surfaces_contract()
     local code, out, err = invoke_cli("luai", { "-h" })
     assert(code == 0)
     assert_contains(out, "Usage: luai")
+    assert_contains(out, "luai -l [log options]")
     assert(err == "")
+
+    assert_contains(read_file("docs/USAGE.adoc"), "luai -l --level error --limit 20")
+    assert_contains(read_file("docs/zh-CN/USAGE.adoc"), "luai -l --level error --limit 20")
+    assert_contains(read_file("docs/BUNDLING.adoc"),
+        "Bundled C modules are loaded from their recorded file paths.")
 
     code, out, err = invoke_cli("luainstaller", { "help" })
     assert(code == 0)
@@ -648,7 +654,7 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.5.0-1.rockspec")
+    local rockspec = read_file("luainstaller-1.5.1-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -661,7 +667,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.5.0-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.5.1-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

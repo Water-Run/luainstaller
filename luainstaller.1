@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.5.0" "User Commands"
+.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.5.1" "User Commands"
 .SH NAME
 luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
@@ -7,6 +7,10 @@ luai, luainstaller \- package Lua applications for a matching runtime environmen
 .br
 .B luai
 .B \-v
+.br
+.B luai
+.B \-l
+.RI [ options ]
 .br
 .B luai
 .BR \-a | \-t | \-b
@@ -72,6 +76,9 @@ Print dependency resolution decisions and compatibility notes.
 .TP
 .B luai \-b
 Build an onedir or onefile bundle.
+.TP
+.B luai \-l
+Read persistent diagnostic records.
 .TP
 .B luainstaller analyze
 Analyze dependencies.

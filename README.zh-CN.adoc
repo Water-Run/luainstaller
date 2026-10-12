@@ -130,7 +130,7 @@ IMPORTANT: 如果单文件表现异常，回到目录打包。它展示的就是
 |构建    |luai -b main.lua |luainstaller build main.lua
 |版本    |luai -v          |luainstaller version
 |帮助    |luai -h          |luainstaller help
-|查看日志 |—               |luainstaller logs
+|查看日志 |luai -l         |luainstaller logs
 |===
 
 === 常用选项

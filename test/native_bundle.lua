@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-07-18
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -44,7 +44,34 @@ if native_config.host.os == "linux" then
         tostring(native_config.library_path), 1, true
     ), "ordinary Linux C module used the selected liblua path")
 end
+local aliases_source = path.join(root, "native-aliases.c")
+assert(fs.writeFile(aliases_source, [[
+#include "lua_min.h"
+#ifdef _WIN32
+#define EXPORT __declspec(dllexport)
+#else
+#define EXPORT
+#endif
+EXPORT int luaopen_alias_root_leaf(lua_State *L) {
+    lua_pushliteral(L, "c-root-ok"); return 1;
+}
+EXPORT int luaopen_alias_before(lua_State *L) {
+    lua_pushliteral(L, "new-symbol"); return 1;
+}
+EXPORT int luaopen_alias_after(lua_State *L) {
+    lua_pushliteral(L, "old-symbol"); return 1;
+}
+]]))
+local alias_root = path.join(root, "alias_root." .. native_extension)
+local aliases_ok, aliases_output = toolchain.compileNativeModule(
+    native_config, aliases_source, alias_root, { work_dir = root }
+)
+assert(aliases_ok, aliases_output)
+assert(fs.copyFile(alias_root, path.join(root, "alias_before-alias_after." .. native_extension)))
 assert(fs.writeFile(entry, [[
+assert(require("alias_root.leaf") == "c-root-ok")
+assert(require("alias_before-alias_after")
+    == (_VERSION == "Lua 5.1" and "old-symbol" or "new-symbol"))
 local result = require("luai_native_probe")
 print(result .. " " .. (arg[1] or "missing"))
 ]]))
@@ -55,7 +82,7 @@ local built = require("luainstaller").bundle({
 })
 assert(built.ok, built.error and built.error.message or "native onedir build failed")
 assert(fs.pathType(built.executable) == "file")
-assert(#(built.manifest.modules.native or {}) == 1,
+assert(#(built.manifest.modules.native or {}) == 4,
     "native module was not recorded in the onedir manifest")
 harness.assert_pe_closure(native_config, {
     native_config.runtime_path,
@@ -133,6 +160,45 @@ assert(type(runtime.source_path) == "string" and runtime.source_path ~= "")
 if runtime.destination_path then
     assert(fs.pathType(path.join(out, runtime.destination_path)) == "file")
 end
+
+local hostile = path.join(root, "hostile-lua")
+assert(fs.makeDirectory(hostile))
+assert(fs.writeFile(path.join(hostile, "luai_native_probe.lua"),
+    "return 'host-module-ran'\n"))
+local hostile_environment = {
+    LUA_PATH = path.join(hostile, "?.lua"),
+    LUA_CPATH = "",
+}
+for minor = 1, 5 do
+    hostile_environment["LUA_PATH_5_" .. minor] = hostile_environment.LUA_PATH
+    hostile_environment["LUA_CPATH_5_" .. minor] = ""
+end
+local priority_ok, priority_output = process.outputCommand(
+    built.executable, { "native-priority" }, hostile_environment
+)
+assert(priority_ok and priority_output:find("native-probe-ok native-priority", 1, true),
+    "host Lua source overrode a bundled C module: " .. tostring(priority_output))
+
+local relocated = out
+local names = { "relocated;directory" }
+if package.config:sub(1, 1) == "/" then names[#names + 1] = "relocated?directory" end
+for _, name in ipairs(names) do
+    local destination = path.join(root, name)
+    assert(fs.rename(relocated, destination))
+    relocated = destination
+    local executable = path.join(relocated, path.basename(built.executable))
+    local moved_ok, moved_output = process.outputCommand(
+        executable, { "native-relocated" }, { LUA_PATH = "", LUA_CPATH = "" }
+    )
+    assert(moved_ok and moved_output:find("native-probe-ok native-relocated", 1, true),
+        "native module path was interpreted as a template: " .. tostring(moved_output))
+end
+assert(fs.removeFile(path.join(relocated, ".luai/native/luai_native_probe." .. native_extension)))
+local missing_ok, missing_output = process.outputCommand(
+    path.join(relocated, path.basename(built.executable)), {}, hostile_environment
+)
+assert(not missing_ok and not tostring(missing_output):find("host-module-ran", 1, true),
+    "missing bundled C module fell back to host source: " .. tostring(missing_output))
 
 assert(fs.removeTree(root))
 print("native onedir clean-target ok: " .. _VERSION .. " native-probe-ok")

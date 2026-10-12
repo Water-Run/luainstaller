@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -1837,6 +1837,7 @@ local function bundleOnedir(opts, lifecycle)
         entry = entry,
         dependencies = dependencies,
         module_names = lua_names,
+        native_module_names = native_names,
         source_hashes = source_hashes,
         source_hash_algorithm = manifest.hash_algorithm,
         native_dir = ".luai/native",

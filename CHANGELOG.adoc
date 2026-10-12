@@ -15,6 +15,27 @@ truth for the exact contents of a published version.
 * Introduction video link in the READMEs: bilibili in the Chinese README,
   YouTube in the English one.
 
+== 1.5.1 - 2026-10-12
+
+=== Added
+
+* `luai -l` reads operation logs with the existing level, limit and ordering
+  options, using the short command's plain text output.
+
+=== Fixed
+
+* Bundled C modules load before same-named Lua files on the host. Missing or
+  broken bundled modules report an error without falling back to host copies.
+* Native module loading survives relocation into directory names containing
+  Lua search-path separators or placeholders.
+* Failed onefile extraction preserves previously verified shared cache files
+  that another running instance may still need.
+
+=== Documentation
+
+* Security audit and the staged 1.5.x / 1.6.0 development plan record the
+  remaining quality and compatibility work.
+
 == 1.5.0 - 2026-10-05
 
 This release reduces build setup. Use an official Lua interpreter, its

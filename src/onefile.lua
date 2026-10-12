@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -976,16 +976,6 @@ static int luai_write_relative_file(int root_fd, const char *full_path,
     return write_result;
 }
 
-static int luai_unlink_relative(int root_fd, const char *relative) {
-    char name[256];
-    int parent_fd;
-    int result;
-    parent_fd = luai_open_relative_parent(root_fd, relative, name, sizeof(name));
-    if (parent_fd < 0) return -1;
-    result = unlinkat(parent_fd, name, 0);
-    close(parent_fd);
-    return result;
-}
 #endif
 
 #ifdef _WIN32
@@ -1173,22 +1163,10 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
         extract_result = -1;
     }
 #endif
-    if (extract_result != 0) {
-        /* Best-effort removal of the files this run created or repaired;
-           the next run re-extracts from the embedded payload. */
-        size_t created;
-        for (created = i; created > 0; --created) {
-#ifdef _WIN32
-            char target[4096];
-            if (luai_join(target, sizeof(target), bundle_dir,
-                           luai_files[created - 1].path) == 0) {
-                DeleteFileA(target);
-            }
-#else
-            luai_unlink_relative(payload_fd, luai_files[created - 1].path);
-#endif
-        }
-    }
+    /* Published files belong to a shared, content-addressed cache. Another
+       running instance may still need them. Each writer removes its own
+       incomplete temporary file; retain all atomically published files on
+       failure and let the next startup verify the entire payload again. */
 #ifndef _WIN32
     if (close(payload_fd) != 0) extract_result = -1;
 #endif

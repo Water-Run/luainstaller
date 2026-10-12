@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-24
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -67,6 +67,47 @@ assert_contains(out, "Usage: luai -h")
 assert_contains(out, "luai -a <entry.lua>")
 assert_not_contains(out, "luainstaller analyze")
 assert(err == "")
+
+local logger = require("luainstaller.logger")
+local original_get_logs = logger.getLogs
+local log_options
+logger.getLogs = function(opts)
+    log_options = opts
+    return {
+        {
+            timestamp = "2026-10-12T00:00:00Z",
+            level = "error",
+            source = "fixture",
+            action = "build",
+            message = "log command fixture",
+        },
+    }
+end
+code, out, err = run_cli("luai", {
+    "-l", "--level", "error", "--limit", "20", "--asc",
+})
+logger.getLogs = original_get_logs
+assert(code == 0, err)
+assert(log_options.level == "error" and log_options.limit == 20
+    and log_options.descending == false)
+assert_contains(out, "logs: 1\n")
+assert_contains(out, "2026-10-12T00:00:00Z\terror\tfixture:build\tlog command fixture\n")
+assert_not_contains(out, "\27[")
+assert(err == "")
+
+logger.getLogs = function() return {} end
+code, out, err = run_cli("luai", { "-l" })
+logger.getLogs = original_get_logs
+assert(code == 0 and out == "no logs\n" and err == "")
+for _, arguments in ipairs({
+    { "-l", "--limit", "1e999" },
+    { "-l", "--limit", "--asc" },
+    { "-l", "--level", "invalid" },
+    { "-l", "unexpected.lua" },
+}) do
+    code, out, err = run_cli("luai", arguments)
+    assert(code == 1 and out == "" and err ~= "")
+end
 
 code, out, err = run_cli("luainstaller", { "help" }, { color = false })
 assert(code == 0)
