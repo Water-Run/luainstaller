@@ -176,6 +176,24 @@ cross-compiling
 `--verbose`:: print more detail while working
 `-- ARGS`:: arguments passed to the script during runtime discovery
 
+[#usage-limits]
+== Time and size limits
+
+Runtime discovery stops the script after 30 seconds. Give a longer-running
+script more time with `--runtime-timeout 120`, or use static discovery.
+
+[cols="2m,2,3",options="header"]
+|===
+|Option |Default |Limits
+|--max-source-bytes |8 MiB |each Lua source
+|--max-bundle-bytes |128 MiB |combined inputs and the staged bundle
+|--max-trace-bytes |32 MiB |the runtime trace
+|===
+
+The Lua API uses `runtime_timeout`, `max_source_bytes`, `max_bundle_bytes`
+and `max_trace_bytes`. A size failure returns `ResourceLimitExceededError`
+with `resource`, `limit` and `path`.
+
 [#usage-logs]
 == Logs
 

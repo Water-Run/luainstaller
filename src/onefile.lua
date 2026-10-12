@@ -68,8 +68,11 @@ local function writeFile(path, content)
     })
 end
 
-local function readFile(path)
-    local content, read_err = fs.readRegularFile(path)
+local function readFile(path, limit)
+    local content, read_err, state = fs.readRegularFile(path, limit)
+    if state and state.limit_exceeded then
+        return nil, result.resourceLimit("bundle-bytes", limit, path)
+    end
     if content == nil then
         return nil, makeError("FilesystemError", "Cannot read file: " .. tostring(path), {
             path = path,
@@ -77,14 +80,6 @@ local function readFile(path)
         })
     end
     return content
-end
-
-local function bytesFromString(content)
-    local bytes = {}
-    for i = 1, #content do
-        bytes[#bytes + 1] = string.format("0x%02X", content:byte(i))
-    end
-    return bytes
 end
 
 local function defaultOut(entry, profile)
@@ -169,7 +164,8 @@ local function cleanupDirectory(path_value, failure)
     return failure or cleanup_err
 end
 
-local function collectFiles(root, target_os)
+local function collectFiles(root, target_os, limit)
+    limit = limit or 134217728
     local inventory, inventory_err = fs.listTree(root)
     if not inventory then
         return nil, makeError("FilesystemError", "Cannot list staged files", {
@@ -211,7 +207,8 @@ local function collectFiles(root, target_os)
     table.sort(relative_paths)
 
     local files = {}
-    local payload_hash_parts = {}
+    local payload_hash = hash.newSha256()
+    local total_bytes = 0
     for _, rel in ipairs(relative_paths) do
         local abs = normalizePath(root .. "/" .. rel)
         if not path.isWithin(abs, root) then
@@ -220,10 +217,12 @@ local function collectFiles(root, target_os)
                 root = root,
             })
         end
-        local content, err = readFile(abs)
+        local content, err = readFile(abs, math.max(1, limit - total_bytes))
         if not content then
             return nil, err
         end
+        total_bytes = total_bytes + #content
+        if total_bytes > limit then return nil, result.resourceLimit("bundle-bytes", limit, abs, total_bytes) end
         local executable = fs.isExecutable(abs)
         files[#files + 1] = {
             path = rel,
@@ -231,18 +230,14 @@ local function collectFiles(root, target_os)
             size = #content,
             executable = executable,
         }
-        payload_hash_parts[#payload_hash_parts + 1] = compat.packU32BE(#rel)
-        payload_hash_parts[#payload_hash_parts + 1] = rel
-        payload_hash_parts[#payload_hash_parts + 1] = executable and "\1" or "\0"
-        payload_hash_parts[#payload_hash_parts + 1] = compat.packU32BE(
-            math.floor(#content / 4294967296)
-        )
-        payload_hash_parts[#payload_hash_parts + 1] = compat.packU32BE(
-            #content % 4294967296
-        )
-        payload_hash_parts[#payload_hash_parts + 1] = content
+        assert(hash.updateSha256(payload_hash, compat.packU32BE(#rel)))
+        assert(hash.updateSha256(payload_hash, rel))
+        assert(hash.updateSha256(payload_hash, executable and "\1" or "\0"))
+        assert(hash.updateSha256(payload_hash, compat.packU32BE(math.floor(#content / 4294967296))))
+        assert(hash.updateSha256(payload_hash, compat.packU32BE(#content % 4294967296)))
+        assert(hash.updateSha256(payload_hash, content))
     end
-    return files, hash.sha256(table.concat(payload_hash_parts))
+    return files, hash.finalizeSha256(payload_hash)
 end
 
 local function cString(value)
@@ -254,25 +249,27 @@ local function cString(value)
     return '"' .. table.concat(escaped) .. '"'
 end
 
-local function emitFileArrays(files)
-    local lines = {}
-    for i, file in ipairs(files) do
-        local bytes = bytesFromString(file.content)
-        lines[#lines + 1] = string.format("static const unsigned char luai_file_%d[] = {", i)
-        if #bytes == 0 then
-            lines[#lines + 1] = "    0x00,"
-        else
-            for j = 1, #bytes, 12 do
-                local chunk = {}
-                for k = j, math.min(j + 11, #bytes) do
-                    chunk[#chunk + 1] = bytes[k]
-                end
-                lines[#lines + 1] = "    " .. table.concat(chunk, ", ") .. ","
-            end
-        end
-        lines[#lines + 1] = "};"
+local function emitFileArrays(files, write)
+    local lines, buffered = {}, 0
+    local function line(value)
+        lines[#lines + 1] = value
+        buffered = buffered + #value + 1
+        if buffered >= 65536 then write(table.concat(lines, "\n") .. "\n"); lines, buffered = {}, 0 end
     end
-    return table.concat(lines, "\n")
+    for i, file in ipairs(files) do
+        line(string.format("static const unsigned char luai_file_%d[] = {", i))
+        if #file.content == 0 then line("    0x00,") end
+        for j = 1, #file.content, 12 do
+            local chunk = {}
+            for k = j, math.min(j + 11, #file.content) do
+                chunk[#chunk + 1] = string.format("0x%02X", file.content:byte(k))
+            end
+            line("    " .. table.concat(chunk, ", ") .. ",")
+        end
+        line("};")
+        file.content = nil
+    end
+    write(table.concat(lines, "\n"))
 end
 
 local EXTRACTOR_TEMPLATE = [=[
@@ -1451,9 +1448,9 @@ local function generateExtractorSource(inner_exe)
     return table.concat(lines, "\n\n")
 end
 
-local function generatePayloadInclude(files, payload_id)
-    local lines = {}
-    lines[#lines + 1] = emitFileArrays(files)
+local function generatePayloadInclude(files, payload_id, write)
+    emitFileArrays(files, write)
+    local lines = { "" }
     lines[#lines + 1] = "#define LUAI_PAYLOAD_ID " .. cString(payload_id)
     lines[#lines + 1] = "#define LUAI_FILE_COUNT " .. tostring(#files)
     lines[#lines + 1] = "static const struct luai_embedded_file luai_files[] = {"
@@ -1467,7 +1464,7 @@ local function generatePayloadInclude(files, payload_id)
         )
     end
     lines[#lines + 1] = "};"
-    return table.concat(lines, "\n\n") .. "\n"
+    write(table.concat(lines, "\n\n") .. "\n")
 end
 
 local function serializePayloadFiles(files)
@@ -1524,7 +1521,7 @@ local function compileExtractor(c_path, exe_path, profile)
     return nil
 end
 
-function M.bundleOnefile(opts)
+local function bundleOnefile(opts, lifecycle)
     opts = opts or {}
     local profile, profile_err = platform.profile({
         target_os = opts.target_os,
@@ -1533,9 +1530,16 @@ function M.bundleOnefile(opts)
     })
     if not profile then return profile_err end
     local out_path = outputPath(opts, profile)
+    lifecycle.output_path = out_path
     local output_err = validateOutputPath(out_path)
     if output_err then
         return output_err
+    end
+    local parent_snapshot, parent_error = fs.guardOutputParents(out_path)
+    if not parent_snapshot then
+        return makeError("InvalidOutputError", "Onefile output has an unsafe ancestor", {
+            path=out_path, cause=parent_error,
+        })
     end
     local target_ok, target_reason = validateTargetRelative(basename(out_path), profile.target_os)
     if not target_ok then
@@ -1550,6 +1554,7 @@ function M.bundleOnefile(opts)
     if not work_dir then
         return work_err
     end
+    lifecycle.work_dir = work_dir
     local stage_dir = normalizePath(work_dir .. "/inner")
     local build_dir = normalizePath(work_dir .. "/build")
     local c_path = normalizePath(build_dir .. "/extractor.c")
@@ -1560,6 +1565,8 @@ function M.bundleOnefile(opts)
 
     local staged = bundler.bundleOnedir({
         entry = opts.entry,
+        max_source_bytes = opts.max_source_bytes,
+        max_bundle_bytes = opts.max_bundle_bytes,
         out = stage_dir,
         target_os = opts.target_os,
         target_arch = opts.target_arch,
@@ -1603,7 +1610,7 @@ function M.bundleOnefile(opts)
     if err then
         return cleanupDirectory(work_dir, err)
     end
-    local provisional_files, provisional_err = collectFiles(stage_dir, profile.target_os)
+    local provisional_files, provisional_err = collectFiles(stage_dir, profile.target_os, opts.max_bundle_bytes)
     if not provisional_files then
         return cleanupDirectory(work_dir, provisional_err)
     end
@@ -1612,13 +1619,20 @@ function M.bundleOnefile(opts)
         return cleanupDirectory(work_dir, err)
     end
 
-    local files, payload_id = collectFiles(stage_dir, profile.target_os)
+    provisional_files = nil
+    local files, payload_id = collectFiles(stage_dir, profile.target_os, opts.max_bundle_bytes)
     if not files then
         return cleanupDirectory(work_dir, payload_id)
     end
 
-    err = writeFile(normalizePath(build_dir .. "/payload.inc"),
-        generatePayloadInclude(files, payload_id))
+    local payload_path = normalizePath(build_dir .. "/payload.inc")
+    local payload_written, payload_error = fs.writeChunks(payload_path, function(write)
+        generatePayloadInclude(files, payload_id, write)
+    end, math.min(1073741824, (opts.max_bundle_bytes or 134217728) * 7))
+    if not payload_written then
+        err = type(payload_error) == "table" and result.fromThrown(payload_error)
+            or makeError("FilesystemError", "Cannot generate embedded payload", {path=payload_path, cause=payload_error})
+    end
     if err then
         return cleanupDirectory(work_dir, err)
     end
@@ -1632,12 +1646,21 @@ function M.bundleOnefile(opts)
     local output_stage
     if not err then
         output_stage, err = createPrivateDirectory("luai-output", output_parent)
+        lifecycle.output_stage = output_stage
     end
     local staged_exe = output_stage and normalizePath(output_stage .. "/artifact" .. (profile.executable_suffix or "")) or nil
     if not err then
         err = compileExtractor(c_path, staged_exe, profile)
     end
     local published = false
+    if not err then
+        local parents_ok, parents_error = fs.guardOutputParents(out_path, parent_snapshot)
+        if not parents_ok then
+            err = makeError("InvalidOutputError", "Output ancestor changed before publication", {
+                path=out_path, cause=parents_error,
+            })
+        end
+    end
     if not err then
         -- MoveFile provides same-volume, no-replace publication on Windows.
         -- POSIX link(2) retains the same
@@ -1659,6 +1682,7 @@ function M.bundleOnefile(opts)
             end
         else
             published = true
+            lifecycle.committed = true
         end
     end
     if output_stage then
@@ -1686,6 +1710,33 @@ function M.bundleOnefile(opts)
         warnings = staged.warnings,
         toolchain = staged.toolchain,
     }
+end
+
+function M.bundleOnefile(opts)
+    local lifecycle = {}
+    local called, built = xpcall(function() return bundleOnefile(opts, lifecycle) end,
+        function(failure) return failure end)
+    if called then return built end
+    local failure
+    if type(built) == "table" then
+        failure = result.fromThrown(built, "BuildFailedError")
+    else
+        local interrupted = tostring(built):lower():find("interrupted", 1, true) ~= nil
+        failure = makeError(interrupted and "InterruptedError" or "BuildFailedError",
+            interrupted and "Build interrupted" or "Single-file build was interrupted", {cause=tostring(built)})
+    end
+    failure.error.output_path = lifecycle.output_path
+    failure.error.committed = lifecycle.committed or nil
+    for _, directory in ipairs({lifecycle.output_stage or false, lifecycle.work_dir or false}) do
+        if directory then
+            local cleaned, cleanup_result = pcall(cleanupDirectory, directory, failure)
+            if not cleaned then
+                failure.error.cleanup_error = tostring(cleanup_result)
+                failure.error.cleanup_path = directory
+            end
+        end
+    end
+    return failure
 end
 
 return M

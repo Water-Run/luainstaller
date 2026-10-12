@@ -10,7 +10,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local M = {}
@@ -52,12 +52,19 @@ local function validateCommand(executable, arguments, environment)
     if type(executable) ~= "string" or executable == "" or executable:find("\0", 1, true) then
         return nil, "executable must be a nonempty string without NUL bytes"
     end
+    if arguments ~= nil and type(arguments) ~= "table" then return nil, "arguments must be a list" end
+    if environment ~= nil and type(environment) ~= "table" then return nil, "environment must be a table" end
     local copied_arguments = {}
     for index, value in ipairs(arguments or {}) do
         if type(value) ~= "string" or value:find("\0", 1, true) then
             return nil, "command arguments must be strings without NUL bytes"
         end
         copied_arguments[index] = value
+    end
+    for key in pairs(arguments or {}) do
+        if type(key) ~= "number" or key < 1 or key ~= math.floor(key) or key > #copied_arguments then
+            return nil, "arguments must be a dense list"
+        end
     end
     local copied_environment = {}
     for name, value in pairs(environment or {}) do
@@ -81,105 +88,151 @@ local function sortedKeys(values)
     return keys
 end
 
-local function legacyPosixInvocation(command)
+local function statusToken()
     output_counter = output_counter + 1
-    local identity = tostring({}):gsub("[^%w]", "")
-    local token = string.format(
-        "LUAINSTALLER_EXIT_%s_%d_%d",
-        identity,
-        os.time(),
-        output_counter
-    )
-    local invocation = "(" .. command .. ") 2>&1; "
-        .. "__luainstaller_status=$?; printf '\\n" .. token
-        .. ":%s\\n' \"$__luainstaller_status\""
-    return invocation, token
+    return string.format("LUAI_EXIT_%s_%d_%d", tostring({}):gsub("[^%w]", ""), os.time(), output_counter)
 end
 
-local function legacyWindowsInvocation(command)
-    output_counter = output_counter + 1
-    local identity = tostring({}):gsub("[^%w]", "")
-    local token = string.format(
-        "LUAINSTALLER_EXIT_%s_%d_%d",
-        identity,
-        os.time(),
-        output_counter
-    )
-    local invocation = command .. " 2>&1"
-        .. "&call set LUAI_STATUS=^%errorlevel^%"
-        .. "&echo."
-        .. "&call echo " .. token .. ":^%LUAI_STATUS^%"
-    return invocation, token
+local function commandOptions(opts)
+    opts = opts or {}
+    local timeout = opts.timeout_seconds
+    if timeout == nil then timeout = tonumber(os.getenv("LUAI_CMD_TIMEOUT") or "30") end
+    local limit = opts.max_output_bytes
+    if limit == nil then limit = tonumber(os.getenv("LUAI_MAX_OUTPUT_BYTES") or "8388608") end
+    if type(timeout) ~= "number" or timeout ~= timeout or timeout <= 0 or timeout > 86400 then
+        return nil, "command timeout must be finite and between zero and 86400 seconds"
+    end
+    if type(limit) ~= "number" or limit ~= limit or limit < 1 or limit > 1073741824
+        or limit ~= math.floor(limit) then
+        return nil, "command output limit must be an integer between 1 and 1073741824 bytes"
+    end
+    return {timeout_seconds=timeout, max_output_bytes=limit}
 end
 
-local hasTimeoutUtility
-local timeout_utility_available
-local posixTimeoutRelay
+-- The shell path bootstraps a trusted compiler and serves filesystem queries
+-- before native supervision exists. Runtime code and tool invocations require
+-- the native backend. Its watchdog uses only POSIX host tools.
+local function bootstrapInvocation(command, opts, token)
+    local script = table.concat({
+        "__luai_guard=$$",
+        "__luai_parent=$PPID",
+        "__luai_child=",
+        "__luai_watch=",
+        "__luai_tree() {",
+        '  __luai_targets="$1"',
+        "  __luai_pass=0",
+        '  while test "$__luai_pass" -lt 32; do',
+        [=[    __luai_more=$(LC_ALL=C ps -e -o pid= -o ppid= | awk -v roots="$__luai_targets" 'BEGIN {n=split(roots,a," "); for(i=1;i<=n;i++) r[a[i]]=1} r[$2] && !r[$1] {print $1}')]=],
+        '    test -n "$__luai_more" || break',
+        '    __luai_targets="$__luai_targets $__luai_more"',
+        "    __luai_pass=$((__luai_pass + 1))",
+        "  done",
+        '  for __luai_pid in $__luai_targets; do kill -KILL "$__luai_pid" 2>/dev/null || true; done',
+        "}",
+        "__luai_stop() {",
+        [[  trap '' HUP INT QUIT TERM USR1 USR2]],
+        '  test -z "$__luai_child" || __luai_tree "$__luai_child"',
+        '  test -z "$__luai_watch" || __luai_tree "$__luai_watch"',
+        "  printf '\\n" .. token .. ":%s:%s\\n' \"$1\" \"$2\"",
+        '  exit "$1"',
+        "}",
+        "trap '__luai_stop 129 signal' HUP",
+        "trap '__luai_stop 130 signal' INT",
+        "trap '__luai_stop 131 signal' QUIT",
+        "trap '__luai_stop 143 signal' TERM",
+        "trap '__luai_stop 124 timeout' USR1",
+        "trap '__luai_stop 126 owner-exit' USR2",
+        "printf '" .. token .. ":PID:%s\\n' \"$$\"",
+        "(" .. command .. ") 2>&1 &",
+        "__luai_child=$!",
+        "(",
+        "  __luai_elapsed=0",
+        "  while test \"$__luai_elapsed\" -lt " .. tostring(math.ceil(opts.timeout_seconds)) .. "; do",
+        "    sleep 1",
+        '    if ! kill -0 "$__luai_parent" 2>/dev/null; then kill -USR2 "$__luai_guard" 2>/dev/null; exit; fi',
+        "    __luai_elapsed=$((__luai_elapsed + 1))",
+        "  done",
+        '  kill -USR1 "$__luai_guard" 2>/dev/null',
+        ") >/dev/null 2>&1 &",
+        "__luai_watch=$!",
+        'wait "$__luai_child"',
+        "__luai_status=$?",
+        "__luai_child=",
+        '__luai_tree "$__luai_watch"',
+        'wait "$__luai_watch" 2>/dev/null || true',
+        "__luai_watch=",
+        "printf '\\n" .. token .. ":%s:exit\\n' \"$__luai_status\"",
+        'exit "$__luai_status"',
+    }, "\n")
+    return "exec sh -c " .. M.quote(script)
+end
+
+local function readPipe(invocation, token, opts, bootstrap)
+    local opened, pipe = pcall(io.popen, invocation, "r")
+    if not opened or not pipe then return false, tostring(pipe), {reason="supervisor-error"} end
+    local guardian, oversized, parts, total = nil, false, {}, 0
+    local called, thrown = pcall(function()
+        if bootstrap then
+            local line = pipe:read("*l")
+            guardian = line and line:match("^" .. token .. ":PID:(%d+)$")
+            if not guardian then error("process supervisor did not identify its owner", 0) end
+        end
+        while true do
+            local chunk = pipe:read(8192)
+            if not chunk then break end
+            local accepted = math.min(#chunk, math.max(0, opts.max_output_bytes + 256 - total))
+            if accepted > 0 then parts[#parts + 1] = chunk:sub(1, accepted); total = total + accepted end
+            if accepted < #chunk and not oversized then
+                oversized = true
+                if guardian then os.execute("kill -TERM " .. guardian .. " 2>/dev/null") end
+            end
+        end
+    end)
+    if not called and guardian then
+        os.execute("kill -INT " .. guardian .. " 2>/dev/null")
+    end
+    local closed, close_result = pcall(pipe.close, pipe)
+    if not called then error(thrown, 0) end
+    local output = table.concat(parts)
+    if oversized then return false, output, {code=125, reason="output-limit"} end
+    local captured, code, reason = output:match("^(.*)\n" .. token .. ":(%d+):([a-z%-]+)\r?\n?$")
+    if not code or not closed then return false, output, {reason="supervisor-error"} end
+    code = tonumber(code)
+    if reason == "timeout" then captured = captured .. "\nluainstaller: command timed out" end
+    if reason == "output-limit" then captured = captured .. "\nluainstaller: command output limit exceeded" end
+    return code == 0 and (close_result == true or _VERSION == "Lua 5.1"), captured, {code=code, reason=reason}
+end
+
+local function bootstrapOutput(command, opts)
+    local normalized, err = commandOptions(opts)
+    if not normalized then return false, err, {reason="invalid-options"} end
+    local token = statusToken()
+    return readPipe(bootstrapInvocation(command, normalized, token), token, normalized, true)
+end
+
+function M.currentPid()
+    if IS_WINDOWS then
+        local ok, pid = require("luainstaller.windows_host").call("pid")
+        return ok and pid or nil
+    end
+    -- This fixed shell builtin executes directly below Lua; a supervisor would
+    -- add another parent and therefore report the wrong owner.
+    local opened, pipe = pcall(io.popen, [[printf '%s' "$PPID"]], "r")
+    if not opened or not pipe then return nil end
+    local read, pid = pcall(pipe.read, pipe, 32)
+    local closed, result = pcall(pipe.close, pipe)
+    if read and closed and result and tostring(pid):match("^%d+$") then return pid end
+    return nil
+end
 
 function M.output(command, opts)
-    if type(io.popen) ~= "function" then
-        return false, "io.popen is not available in this Lua runtime"
+    if type(command) ~= "string" or command:find("\0", 1, true) then
+        return false, "command must be a string without NUL bytes", {reason="invalid-options"}
     end
-    -- On Windows the command string is interpreted by cmd.exe, whose
-    -- metacharacter set differs from CreateProcess quoting (see windowsQuote).
-    opts = opts or {}
-    local invocation = command .. " 2>&1"
-    local legacy_token
-    if _VERSION == "Lua 5.1" then
-        if IS_WINDOWS then
-            invocation, legacy_token = legacyWindowsInvocation(command)
-        else
-            invocation, legacy_token = legacyPosixInvocation(command)
-        end
-    end
-    if not IS_WINDOWS and type(opts.timeout_seconds) == "number"
-        and opts.timeout_seconds > 0 and hasTimeoutUtility() then
-        -- Raw shell snippets need timeout's managed process group so a timed
-        -- out pipeline cannot leave descendants holding the output pipe.
-        local seconds = math.max(1, math.floor(opts.timeout_seconds))
-        invocation = "timeout --kill-after=5s "
-            .. tostring(seconds) .. "s sh -c " .. M.quote(invocation)
-        invocation = posixTimeoutRelay(invocation)
-    end
-    local ok, pipe = pcall(io.popen, invocation, "r")
-    if not ok or not pipe then
-        return false, tostring(pipe)
-    end
-    local output = pipe:read("*a") or ""
-    -- pipe:close() succeeds with first result true (Lua 5.1 / 5.2+ / LuaJIT).
-    local close_ok = pipe:close()
-    if legacy_token then
-        local captured, status = output:match(
-            "^(.*)\n" .. legacy_token .. ":(%d+)\r?\n?$"
-        )
-        if not status then
-            return false, output
-        end
-        return tonumber(status) == 0, captured
-    end
-    if close_ok == true then
-        return true, output
-    end
-    return false, output
-end
-
-hasTimeoutUtility = function()
-    if timeout_utility_available == nil then
-        if IS_WINDOWS then
-            timeout_utility_available = false
-        else
-            -- The implementation below deliberately uses GNU timeout's
-            -- --kill-after process-group semantics.  FreeBSD also ships a
-            -- command named timeout, but older releases use a different CLI;
-            -- treating name presence as capability breaks every compiler
-            -- invocation on those hosts.
-            local ok, _ = M.output(
-                "timeout --kill-after=1s 1s sh -c 'exit 0' >/dev/null 2>&1"
-            )
-            timeout_utility_available = (ok == true)
-        end
-    end
-    return timeout_utility_available
+    if IS_WINDOWS then return M.outputCommand("cmd.exe", {"/d", "/s", "/c", command}, {}, opts) end
+    local native = require("luainstaller.posix_host")
+    if not native.ready() and not (opts and opts.timeout_seconds) then return bootstrapOutput(command, opts) end
+    return M.outputCommand("sh", {"-c", command}, {}, opts)
 end
 
 function M.quote(value)
@@ -204,37 +257,6 @@ function M.command(executable, arguments, environment)
     return table.concat(parts, " ")
 end
 
--- GNU timeout puts the monitored command in a separate process group.  That
--- is necessary for killing all descendants on expiry, but it also means an
--- interrupt sent to the caller's process group would otherwise leave the
--- monitor (and a compiler below it) running.  Keep this small supervisor in
--- the caller's group and relay catchable termination signals to timeout.
-posixTimeoutRelay = function(command)
-    local script = table.concat({
-        "__luai_timeout_pid=",
-        "__luai_timeout_relay() {",
-        '  __luai_timeout_signal="$1"',
-        '  __luai_timeout_status="$2"',
-        '  if test -n "$__luai_timeout_pid"; then',
-        '    kill -"$__luai_timeout_signal" "$__luai_timeout_pid" 2>/dev/null || true',
-        '    wait "$__luai_timeout_pid" 2>/dev/null || true',
-        "  fi",
-        '  exit "$__luai_timeout_status"',
-        "}",
-        "trap '__luai_timeout_relay HUP 129' HUP",
-        "trap '__luai_timeout_relay INT 130' INT",
-        "trap '__luai_timeout_relay QUIT 131' QUIT",
-        "trap '__luai_timeout_relay TERM 143' TERM",
-        command .. " &",
-        "__luai_timeout_pid=$!",
-        'wait "$__luai_timeout_pid"',
-        "__luai_timeout_status=$?",
-        "__luai_timeout_pid=",
-        'exit "$__luai_timeout_status"',
-    }, "\n")
-    return "sh -c " .. M.quote(script)
-end
-
 function M.environmentVariable(name)
     if type(name) ~= "string" or not name:match("^[%a_][%w_]*$") then
         return nil, "environment variable name must be portable"
@@ -249,48 +271,56 @@ end
 
 function M.outputCommand(executable, arguments, environment, opts)
     local validated, validation_err = validateCommand(executable, arguments, environment)
-    if not validated then return false, validation_err end
+    if not validated then return false, validation_err, {reason="invalid-options"} end
+    local normalized, option_err = commandOptions(opts)
+    if not normalized then return false, option_err, {reason="invalid-options"} end
     if IS_WINDOWS then
-        local ok, output = require("luainstaller.windows_host").execute(validated.executable,
-            validated.arguments, validated.environment, opts and opts.timeout_seconds)
-        -- Match the text-mode pipe contract of the other process backends;
-        -- filesystem reads remain byte-for-byte native operations.
-        return ok, (tostring(output or ""):gsub("\r\n", "\n"))
+        local ok, output, extra = require("luainstaller.windows_host").execute(validated.executable,
+            validated.arguments, validated.environment, normalized.timeout_seconds, normalized.max_output_bytes)
+        local code, reason = tostring(extra or ""):match("^(%d+):([a-z%-]+)$")
+        return ok, (tostring(output or ""):gsub("\r\n", "\n")),
+            {code=tonumber(code or extra), reason=reason or "exit",
+                timeout_seconds=normalized.timeout_seconds, max_output_bytes=normalized.max_output_bytes}
     end
-    opts = opts or {}
-    if type(opts.timeout_seconds) == "number" and opts.timeout_seconds > 0
-        and hasTimeoutUtility() then
-        -- Invoke the validated argv directly, using env(1) only when
-        -- overrides are present.  Keep GNU timeout's managed process group:
-        -- --foreground explicitly leaves descendants outside timeout's
-        -- control, and those descendants can keep io.popen's output pipe open
-        -- after the direct child exits.
-        local timeout_arguments = {
-            "--kill-after=5s",
-            tostring(math.max(1, math.floor(opts.timeout_seconds))) .. "s",
-        }
-        local environment_names = sortedKeys(validated.environment)
-        if #environment_names > 0 then
-            timeout_arguments[#timeout_arguments + 1] = "env"
-            for _, name in ipairs(environment_names) do
-                timeout_arguments[#timeout_arguments + 1] = name .. "="
-                    .. validated.environment[name]
-            end
-        end
-        timeout_arguments[#timeout_arguments + 1] = validated.executable
-        for _, value in ipairs(validated.arguments) do
-            timeout_arguments[#timeout_arguments + 1] = value
-        end
-        local timeout_command, timeout_err = M.command("timeout", timeout_arguments)
-        if not timeout_command then return false, timeout_err end
-        return M.output(posixTimeoutRelay(timeout_command))
+    local token = statusToken()
+    local invocation, err = require("luainstaller.posix_host").invocation(validated.executable,
+        validated.arguments, validated.environment, normalized, token, bootstrapOutput, M.quote)
+    if not invocation then return false, err, {reason="supervisor-unavailable"} end
+    local ok, output, status = readPipe(invocation, token, normalized, true)
+    status.timeout_seconds, status.max_output_bytes = normalized.timeout_seconds, normalized.max_output_bytes
+    return ok, output, status
+end
+
+function M.prepareNative()
+    if IS_WINDOWS then return require("luainstaller.windows_host").call("pid") end
+    local binary, err = require("luainstaller.posix_host").prepare(bootstrapOutput, M.quote)
+    return binary ~= nil, err
+end
+
+function M.nativeOperation(operation, arguments)
+    if IS_WINDOWS then
+        return require("luainstaller.windows_host").call(operation, (table.unpack or unpack)(arguments or {}))
     end
-    local command = assert(M.command(
-        validated.executable,
-        validated.arguments,
-        validated.environment
-    ))
-    return M.output(command, opts)
+    local native = require("luainstaller.posix_host")
+    local binary, err = native.prepare(bootstrapOutput, M.quote)
+    if not binary then return false, err end
+    local command_arguments = {operation}
+    for _, value in ipairs(arguments or {}) do command_arguments[#command_arguments + 1] = value end
+    return M.outputCommand(binary, command_arguments, {}, {timeout_seconds=10, max_output_bytes=65536})
+end
+
+function M.guardOutputParents(value, previous)
+    local absolute = require("luainstaller.path").absolute(value)
+    local ok, output = M.nativeOperation("output_parents", {absolute})
+    if not ok then return nil, output end
+    local records = {}
+    for record in tostring(output):gmatch("[^\r\n]+") do records[#records + 1] = record end
+    if previous then
+        for index, record in ipairs(previous) do
+            if records[index] ~= record then return nil, "output ancestor changed during the build" end
+        end
+    end
+    return records
 end
 
 function M.firstLine(command)

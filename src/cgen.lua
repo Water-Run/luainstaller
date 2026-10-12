@@ -50,8 +50,12 @@ local function readFile(file_path, opts)
         })
     end
 
-    local content, read_err = fs.readRegularFile(file_path)
+    local content, read_err, state = fs.readRegularFile(file_path, opts and opts.max_source_bytes or 8388608)
     if content == nil then
+        if state and state.limit_exceeded then
+            error({type="ResourceLimitExceededError", resource="source-bytes", limit=state.limit,
+                path=file_path, message="Lua source exceeds its configured byte limit"})
+        end
         if expected_hash ~= nil then
             error({
                 type = "SourceChangedError",

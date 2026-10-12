@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 if package.config:sub(1, 1) == "\\" then
@@ -17,6 +17,12 @@ end
 
 local process = require("luainstaller.process")
 local M = {}
+M.guardOutputParents = process.guardOutputParents
+
+function M.fileSize(value)
+    local ok, output = process.nativeOperation("file_size", {value})
+    return ok and tonumber(output) or nil, not ok and output or nil
+end
 
 
 local function validPath(path)
@@ -52,7 +58,10 @@ local function operationError(operation, path, detail)
 end
 
 
-function M.readFile(path)
+function M.readFile(path, limit)
+    limit = limit or 64 * 1024 * 1024
+    if type(limit) ~= "number" or limit ~= limit or limit < 1 or limit > 1073741824
+        or limit ~= math.floor(limit) then return nil, "file read limit is invalid" end
     local opened, handle, open_err = pcall(io.open, path, "rb")
     if not opened then
         return nil, operationError("open", path, handle)
@@ -61,19 +70,25 @@ function M.readFile(path)
         return nil, operationError("open", path, open_err)
     end
 
-    local read_ok, content, read_err = pcall(handle.read, handle, "*a")
+    local read_ok, content, read_err = pcall(handle.read, handle, limit + 1)
     local close_ok, closed, close_err = pcall(handle.close, handle)
     if not read_ok then
         return nil, operationError("read", path, content)
     end
-    if content == nil then
+    if content == nil and read_err ~= nil then
         return nil, operationError("read", path, read_err)
     end
+    content = content or ""
     if not close_ok then
         return nil, operationError("close", path, closed)
     end
     if not closed then
         return nil, operationError("close", path, close_err)
+    end
+    if #content > limit then
+        return nil, operationError("read", path, "file exceeds read limit"), {
+            limit_exceeded=true, resource="file-bytes", limit=limit, path=path,
+        }
     end
     return content
 end
@@ -82,11 +97,11 @@ function M.isRegularFile(path)
     return M.pathType(path) == "file"
 end
 
-function M.readRegularFile(path)
+function M.readRegularFile(path, limit)
     if not M.isRegularFile(path) then
         return nil, operationError("read", path, "path is not a regular file")
     end
-    return M.readFile(path)
+    return M.readFile(path, limit)
 end
 
 function M.writeFile(path, content)
@@ -125,6 +140,34 @@ function M.writeFile(path, content)
     end
     if not closed then
         return nil, operationError("close", path, close_err)
+    end
+    return true
+end
+
+function M.writeChunks(path, producer, limit)
+    local opened, handle, detail = pcall(io.open, path, "wb")
+    if not opened or not handle then return nil, operationError("open", path, detail or handle) end
+    local total = 0
+    local called, failure = pcall(producer, function(chunk)
+        total = total + #chunk
+        if total > (limit or 1073741824) then
+            error({type="ResourceLimitExceededError", resource="generated-source-bytes", limit=limit or 1073741824,
+                path=path, current_bytes=total, message="Generated source exceeds its byte limit"}, 0)
+        end
+        local called_write, wrote, err = pcall(handle.write, handle, chunk)
+        if not called_write or not wrote then
+            error({type="FilesystemError", path=path,
+                message=operationError("write", path, err or wrote)}, 0)
+        end
+    end)
+    local flushed, flush_result, flush_error = pcall(handle.flush, handle)
+    local closed, close_result, close_error = pcall(handle.close, handle)
+    if not called then return nil, failure end
+    if not flushed or not flush_result then
+        return nil, operationError("flush", path, flush_error or flush_result)
+    end
+    if not closed or not close_result then
+        return nil, operationError("close", path, close_error or close_result)
     end
     return true
 end

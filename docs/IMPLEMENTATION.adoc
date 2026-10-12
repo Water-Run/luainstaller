@@ -74,6 +74,9 @@ discovery.
 |`fs` / `hash` / `path` / `process` / `result`
 |I/O, SHA-256, paths, commands, errors
 
+|`posix_host.lua` / `host/posix_host.c`
+|Bounded subprocess supervision and output-parent identity checks
+
 |`windows_host.lua` / `windows_fs.lua` / `host/windows_host.c`
 |XP-compatible Win32 process and filesystem operations; a compiler-built
 Lua module binds the running official Lua DLL API without installed Lua headers.
@@ -85,6 +88,35 @@ Lua module binds the running official Lua DLL API without installed Lua headers.
 |`logger.lua`
 |Logs under `~/.luainstaller`
 |===
+
+[#implementation-supervision]
+== Process supervision and budgets
+
+Structured command execution uses a native POSIX supervisor or the Windows
+backend. It checks a monotonic deadline and caps captured output; callers
+receive an exit code and reason. POSIX commands have a managed process group,
+with the direct child PID reserved until cleanup. Windows uses Job Objects
+and its legacy watchdog. These mechanisms are not a code sandbox.
+
+`posix_host.lua` builds the standalone helper without Lua headers. Its C source
+and `posix_host_source.lua` are synchronized by
+`tools/generate-posix-host-source.lua`. The bounded shell bootstrap serves
+trusted compiler and filesystem operations before the native helper is ready.
+Static and manual analysis need no POSIX helper.
+
+Options in `init.lua` set byte budgets before parsing. The tracer bounds
+snapshots, records and output, and closes its files before reporting failure.
+Launcher and onefile C arrays are written in chunks; payload hashing is
+incremental. Onefile and trace workspaces unwind unexpected errors as well as
+ordinary failures. A byte budget does not replace the worker's OS memory and
+disk limits.
+
+POSIX output ancestors must belong to the caller or a system administrator;
+untrusted write permissions and links are refused. Protected Android system
+ancestors and system root links have explicit handling. Directory identities
+are compared before publication. Windows pins non-reparse ancestors for each
+file operation and checks volume/file identities before publication. Windows
+workspace ACLs and the configured temporary root are deployment trust boundaries.
 
 [#implementation-discovery]
 == Discovery
@@ -137,6 +169,7 @@ Prefer actionable types: `ScriptNotFoundError`, `LuaSyntaxError`,
 `SourceChangedError`, `DynamicRequireError`, `ModuleNotFoundError`,
 `DuplicateModuleError`, `InvalidOutputError`, `ToolchainError`,
 `CompilationFailedError`, `FilesystemError`, `DiscoveryError`,
+`RuntimeTimeoutError`, `ResourceLimitExceededError`,
 `UnsupportedPlatformError`, `UnsupportedLuaVersionError`, and related.
 
 Quote every path in shell commands. Reject dangerous compiler-flag

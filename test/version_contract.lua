@@ -18,7 +18,7 @@ local compat = require("luainstaller.compat")
 local process = require("luainstaller.process")
 local info = compat.luaVersion()
 local version = require("luainstaller").VERSION
-assert(version == "1.5.2", "unexpected product version: " .. tostring(version))
+assert(version == "1.5.3", "unexpected product version: " .. tostring(version))
 assert(loadfile("luainstaller-" .. version .. "-1.rockspec"))
 local rockspec_text = harness.read_file("luainstaller-" .. version .. "-1.rockspec")
 harness.assert_contains(rockspec_text, 'version = "' .. version .. '-1"')
@@ -169,6 +169,8 @@ local product_files = {
     "src/path.lua",
     "src/platform.lua",
     "src/process.lua",
+    "src/posix_host.lua",
+    "src/posix_host_source.lua",
     "src/result.lua",
     "src/runtime.lua",
     "src/toolchain.lua",

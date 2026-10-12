@@ -151,6 +151,13 @@ static int find_api(void)
 typedef struct allocation { void *data; struct allocation *next; } allocation;
 typedef struct field { const char *data; size_t size; } field;
 typedef struct buffer { char *data; size_t size, capacity; allocation *owner; } buffer;
+typedef struct directory_pin {
+    wchar_t *path;
+    HANDLE handle;
+    BY_HANDLE_FILE_INFORMATION identity;
+    struct directory_pin *next;
+} directory_pin;
+
 typedef struct context {
     allocation *memory;
     HANDLE handles[16];
@@ -161,12 +168,19 @@ typedef struct context {
     char error[256];
     char extra[40];
     int ok;
+    directory_pin *directories;
+    unsigned int directory_count;
 } context;
 
 static void cleanup(context *ctx)
 {
     unsigned int index;
     allocation *item;
+    directory_pin *directory;
+    for (directory = ctx->directories; directory; directory = directory->next) {
+        if (directory->handle) CloseHandle(directory->handle);
+    }
+    ctx->directories = NULL;
     if (ctx->search && ctx->search != INVALID_HANDLE_VALUE) FindClose(ctx->search);
     ctx->search = NULL;
     for (index = 0; index < 16; ++index) {
@@ -413,6 +427,47 @@ static size_t root_length(const wchar_t *value)
     return 0;
 }
 
+static directory_pin *pin_directory(context *ctx, const wchar_t *path)
+{
+    directory_pin *pinned;
+    HANDLE handle;
+    BY_HANDLE_FILE_INFORMATION info;
+    size_t length;
+    for (pinned = ctx->directories; pinned; pinned = pinned->next) {
+        if (pinned->handle && !_wcsicmp(path, pinned->path)) return pinned;
+    }
+    if (ctx->directory_count >= 4096) { fail(ctx, "directory pin limit exceeded"); return NULL; }
+    handle = CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (handle == INVALID_HANDLE_VALUE) { win_fail(ctx, "pin directory ancestor"); return NULL; }
+    if (!GetFileInformationByHandle(handle, &info)) {
+        CloseHandle(handle); win_fail(ctx, "inspect pinned ancestor"); return NULL;
+    }
+    if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        || (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+        CloseHandle(handle); fail(ctx, "unsafe directory ancestor"); return NULL;
+    }
+    pinned = (directory_pin *)allocate(ctx, sizeof(*pinned));
+    if (!pinned) { CloseHandle(handle); return NULL; }
+    length = wcslen(path) + 1;
+    pinned->path = (wchar_t *)allocate(ctx, length * sizeof(wchar_t));
+    if (!pinned->path) { CloseHandle(handle); return NULL; }
+    memcpy(pinned->path, path, length * sizeof(wchar_t));
+    pinned->handle = handle; pinned->identity = info;
+    pinned->next = ctx->directories; ctx->directories = pinned; ++ctx->directory_count;
+    return pinned;
+}
+
+static void unpin_directory(context *ctx, const wchar_t *path)
+{
+    directory_pin *pinned;
+    for (pinned = ctx->directories; pinned; pinned = pinned->next) {
+        if (pinned->handle && !_wcsicmp(path, pinned->path)) {
+            CloseHandle(pinned->handle); pinned->handle = NULL;
+        }
+    }
+}
+
 static int parents(context *ctx, const wchar_t *value, int create)
 {
     wchar_t *path = full_path(ctx, value);
@@ -425,12 +480,26 @@ static int parents(context *ctx, const wchar_t *value, int create)
         if (path[index] != L'\\' && path[index] != L'/') continue;
         path[index] = 0;
         attributes = GetFileAttributesW(path);
-        if (attributes == INVALID_FILE_ATTRIBUTES && create) {
+        if (attributes == INVALID_FILE_ATTRIBUTES && create == 2
+            && (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND)) return 1;
+        if (attributes == INVALID_FILE_ATTRIBUTES && create == 1) {
             if (!CreateDirectoryW(path, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) return win_fail(ctx, "create ancestor");
             attributes = GetFileAttributesW(path);
         }
         if (attributes == INVALID_FILE_ATTRIBUTES) return win_fail(ctx, "inspect ancestor");
         if (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return fail(ctx, "unsafe directory ancestor");
+        {
+            directory_pin *pinned = pin_directory(ctx, path);
+            if (!pinned) return 0;
+            if (create == 2) {
+                char record[96];
+                int length = snprintf(record, sizeof(record), "%lu:%lu:%lu\n",
+                    (unsigned long)pinned->identity.dwVolumeSerialNumber,
+                    (unsigned long)pinned->identity.nFileIndexHigh,
+                    (unsigned long)pinned->identity.nFileIndexLow);
+                if (length < 0 || (size_t)length >= sizeof(record) || !text(ctx, record)) return 0;
+            }
+        }
         path[index] = L'\\';
     }
     return 1;
@@ -516,13 +585,15 @@ static int write_file(context *ctx, const wchar_t *path, field *value, int exclu
     LARGE_INTEGER zero;
     if (!parents(ctx, path, 0)) return 0;
     file = CreateFileW(path, GENERIC_WRITE | FILE_READ_ATTRIBUTES, 0, NULL,
-        exclusive ? CREATE_NEW : OPEN_ALWAYS, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        exclusive < 0 ? OPEN_EXISTING : (exclusive ? CREATE_NEW : OPEN_ALWAYS),
+        FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     if (file == INVALID_HANDLE_VALUE) return win_fail(ctx, "open output file");
     if (!track(ctx, file)) return 0;
     if (!GetFileInformationByHandle(file, &info)) return win_fail(ctx, "inspect output file");
     if (info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) return fail(ctx, "unsafe output file");
     zero.QuadPart = 0;
-    if (!SetFilePointerEx(file, zero, NULL, FILE_BEGIN) || !SetEndOfFile(file)) return win_fail(ctx, "truncate output file");
+    if (!SetFilePointerEx(file, zero, NULL, exclusive < 0 ? FILE_END : FILE_BEGIN)
+        || (exclusive >= 0 && !SetEndOfFile(file))) return win_fail(ctx, "position output file");
     while (offset < value->size) {
         size = (DWORD)(value->size - offset > 65536 ? 65536 : value->size - offset);
         if (!WriteFile(file, value->data + offset, size, &wrote, NULL) || !wrote) return win_fail(ctx, "write file");
@@ -549,7 +620,7 @@ static int private_directory(context *ctx, const wchar_t *parent, const wchar_t 
     size_t length;
     static const wchar_t hex[] = L"0123456789abcdef";
     absolute = full_path(ctx, parent);
-    if (!absolute || !parents(ctx, absolute, 0) || !safe_attributes(ctx, absolute, 1)) return 0;
+    if (!absolute || !parents(ctx, absolute, 0) || !pin_directory(ctx, absolute)) return 0;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return win_fail(ctx, "open user token");
     if (!track(ctx, token)) return 0;
     GetTokenInformation(token, TokenUser, NULL, 0, &required);
@@ -654,7 +725,10 @@ static int tree(context *ctx, const wchar_t *root, int remove_all, int recursive
                 || !safe_attributes(ctx, entries[count].path, (entries[count].attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)) return 0;
             if (!(entries[count].attributes & FILE_ATTRIBUTE_DIRECTORY)) {
                 if (!DeleteFileW(entries[count].path)) return win_fail(ctx, "remove file");
-            } else if (!RemoveDirectoryW(entries[count].path)) return win_fail(ctx, "remove directory");
+            } else {
+                unpin_directory(ctx, entries[count].path);
+                if (!RemoveDirectoryW(entries[count].path)) return win_fail(ctx, "remove directory");
+            }
         }
         return 1;
     }
@@ -870,7 +944,8 @@ done:
     return result;
 }
 
-static int drain(context *ctx, HANDLE pipe, buffer *output, int *closed)
+static int drain(context *ctx, HANDLE pipe, buffer *output, int *closed,
+    DWORD *remaining, int *exceeded)
 {
     DWORD available, read;
     char chunk[65536];
@@ -884,6 +959,8 @@ static int drain(context *ctx, HANDLE pipe, buffer *output, int *closed)
         if (GetLastError() == ERROR_BROKEN_PIPE) { *closed = 1; return 1; }
         return win_fail(ctx, "read child output");
     }
+    if (read > *remaining) { read = *remaining; *exceeded = 1; }
+    *remaining -= read;
     return append(ctx, output, chunk, read);
 }
 
@@ -893,6 +970,8 @@ static int child_text(context *ctx, buffer *value)
     wchar_t *converted;
     if (!value->size) return 1;
     if (value->size > INT_MAX) return fail(ctx, "child output is too large");
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value->data, (int)value->size, NULL, 0))
+        return append(ctx, &ctx->result, value->data, value->size);
     length = MultiByteToWideChar(CP_ACP, 0, value->data, (int)value->size, NULL, 0);
     if (!length) return win_fail(ctx, "decode child output");
     converted = (wchar_t *)allocate(ctx, ((size_t)length + 1) * sizeof(wchar_t));
@@ -915,17 +994,20 @@ static int execute(context *ctx)
 {
     wchar_t *program = argument(ctx, 1), *value, *env = NULL;
     buffer command = {0}, output = {0}, diagnostic = {0};
-    DWORD timeout, count, env_count, index, started, status = 0;
+    DWORD timeout, count, env_count, index, started, status = 0, output_limit, remaining;
     HANDLE out_read, out_write, err_read, err_write, job = NULL, input, finished = NULL, guard = NULL;
     SECURITY_ATTRIBUTES security;
     STARTUPINFOW startup;
     PROCESS_INFORMATION child;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
-    int out_closed = 0, err_closed = 0, timed_out = 0, failed = 0, legacy = legacy_jobs();
+    int out_closed = 0, err_closed = 0, timed_out = 0, failed = 0, exceeded = 0, legacy = legacy_jobs();
     int command_shell = 0, shell_body = 0;
-    if (!program || !decimal(ctx, 2, &timeout) || !decimal(ctx, 3, &count)
-        || count > ctx->count - 4 || !decimal(ctx, 4 + count, &env_count)
-        || env_count > (ctx->count - 5 - count) / 2 || 5 + count + env_count * 2 != ctx->count) return fail(ctx, "invalid process request");
+    if (!program || ctx->count < 6 || !decimal(ctx, 2, &timeout) || !decimal(ctx, 3, &count)
+        || count > ctx->count - 6 || !decimal(ctx, 4 + count, &env_count)
+        || env_count > (ctx->count - 6 - count) / 2 || 6 + count + env_count * 2 != ctx->count
+        || !decimal(ctx, 5 + count + env_count * 2, &output_limit)
+        || !output_limit || output_limit > 1073741824) return fail(ctx, "invalid process request");
+    remaining = output_limit;
     if (!quote_argument(ctx, &command, program)) return 0;
     {
         const wchar_t *base = program, *position;
@@ -991,16 +1073,19 @@ static int execute(context *ctx)
     close_handle(ctx, child.hThread);
     started = GetTickCount();
     while (!out_closed || !err_closed || WaitForSingleObject(child.hProcess, 0) == WAIT_TIMEOUT) {
-        if (!drain(ctx, out_read, &output, &out_closed) || !drain(ctx, err_read, &diagnostic, &err_closed)) { failed = 1; break; }
+        if (!drain(ctx, out_read, &output, &out_closed, &remaining, &exceeded)
+            || !drain(ctx, err_read, &diagnostic, &err_closed, &remaining, &exceeded)) { failed = 1; break; }
+        if (exceeded) break;
         if (timeout && GetTickCount() - started >= timeout) { timed_out = 1; break; }
         Sleep(1);
     }
-    if (timed_out || failed) {
+    if (timed_out || failed || exceeded) {
         if (legacy || !job) kill_descendants(child.dwProcessId, 0);
         if (job) TerminateJobObject(job, 124);
         else TerminateProcess(child.hProcess, 124);
     }
-    WaitForSingleObject(child.hProcess, INFINITE);
+    if (WaitForSingleObject(child.hProcess, 5000) != WAIT_OBJECT_0)
+        return fail(ctx, "cannot confirm child shutdown within five seconds");
     if (!GetExitCodeProcess(child.hProcess, &status)) return win_fail(ctx, "read process status");
     if (legacy || !job) kill_descendants(child.dwProcessId, 0);
     if (finished) {
@@ -1012,9 +1097,20 @@ static int execute(context *ctx)
     if (job) close_handle(ctx, job);
     if (failed) return 0;
     if (!child_text(ctx, &output) || !child_text(ctx, &diagnostic)) return 0;
+    if (ctx->result.size > output_limit) {
+        size_t length = output_limit;
+        while (length && ((unsigned char)ctx->result.data[length] & 0xc0) == 0x80) --length;
+        ctx->result.size = length;
+        ctx->result.data[length] = 0;
+        exceeded = 1;
+    }
     if (timed_out && !text(ctx, "\nluainstaller: command timed out")) return 0;
-    if (_snprintf(ctx->extra, sizeof(ctx->extra), "%lu", (unsigned long)(timed_out ? 124 : status)) < 0) return fail(ctx, "cannot format process status");
-    ctx->ok = !timed_out && status == 0;
+    if (exceeded && !text(ctx, "\nluainstaller: command output limit exceeded")) return 0;
+    if (_snprintf(ctx->extra, sizeof(ctx->extra), "%lu:%s",
+        (unsigned long)(timed_out ? 124 : exceeded ? 125 : status),
+        timed_out ? "timeout" : exceeded ? "output-limit" : "exit") < 0)
+        return fail(ctx, "cannot format process status");
+    ctx->ok = !timed_out && !exceeded && status == 0;
     return 1;
 }
 
@@ -1110,7 +1206,21 @@ static int dispatch(context *ctx)
     path = file_path(ctx, path);
     if (!path) return 0;
     if (equals(op, "owner")) return owned_path(ctx, path);
+    if (equals(op, "output_parents")) return parents(ctx, path, 2);
     if (equals(op, "type")) return path_type(ctx, path);
+    if (equals(op, "file_size")) {
+        if (!parents(ctx, path, 0)) return 0;
+        handle = CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
+            NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (handle == INVALID_HANDLE_VALUE) return win_fail(ctx, "open file size");
+        if (!track(ctx, handle)) return 0;
+        if (!GetFileInformationByHandle(handle, &info)
+            || (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
+            return fail(ctx, "file size requires a regular file");
+        value = ((ULONGLONG)info.nFileSizeHigh << 32) | info.nFileSizeLow;
+        close_handle(ctx, handle);
+        return number(ctx, value);
+    }
     if (equals(op, "read")) {
         value = 0;
         if (ctx->count > 2 && !decimal(ctx, 2, &value)) return 0;
@@ -1119,6 +1229,10 @@ static int dispatch(context *ctx)
     if (equals(op, "write")) {
         if (ctx->count != 3) return fail(ctx, "missing file contents");
         return write_file(ctx, path, &ctx->fields[2], 0);
+    }
+    if (equals(op, "append")) {
+        if (ctx->count != 3) return fail(ctx, "missing file contents");
+        return write_file(ctx, path, &ctx->fields[2], -1);
     }
     if (equals(op, "mkdir") || equals(op, "create_dir")) {
         int recursive = equals(op, "mkdir");
@@ -1145,7 +1259,7 @@ static int dispatch(context *ctx)
     if (equals(op, "copy") || equals(op, "rename") || equals(op, "link")) {
         other = argument(ctx, 2);
         if (other) other = file_path(ctx, other);
-        if (!other || !parents(ctx, other, 0)) return 0;
+        if (!other || !parents(ctx, path, 0) || !parents(ctx, other, 0)) return 0;
         attributes = GetFileAttributesW(path);
         if (attributes == INVALID_FILE_ATTRIBUTES) return win_fail(ctx, "inspect source");
         if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return fail(ctx, "source is a reparse point");

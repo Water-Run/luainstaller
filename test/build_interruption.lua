@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-08-16
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -96,7 +96,11 @@ exec "$LUAI_REAL_CC" "$@"
             "  sleep 0.025",
             "  attempt=$((attempt + 1))",
             "done",
-            "test \"$ready_seen\" -eq 1",
+            "if test \"$ready_seen\" -ne 1; then",
+            "  set +e; wait \"$build\"; failed_status=$?; set -e",
+            "  printf 'build exited before compiler readiness: %s\\n' \"$failed_status\"",
+            "  exit 1",
+            "fi",
             -- POSIX kill accepts a negative operand after an explicit signal.
             -- dash's builtin does not accept the otherwise common `--`
             -- separator and misparses it as an empty process-group id.
@@ -107,9 +111,11 @@ exec "$LUAI_REAL_CC" "$@"
             "set -e",
             "printf 'status=%s\\n' \"$status\"",
         }, "\n")
-        local interrupted_ok, interrupted_output = process.output(script)
+        local interrupted_ok, interrupted_output, interrupted_status = process.output(script)
         local diagnostic = fs.readRegularFile(diagnostic_path) or ""
-        assert(interrupted_ok, tostring(interrupted_output) .. "\nbuild log:\n" .. diagnostic)
+        assert(interrupted_ok, tostring(interrupted_output) .. "\ncommand status: "
+            .. tostring(interrupted_status and interrupted_status.code) .. " "
+            .. tostring(interrupted_status and interrupted_status.reason) .. "\nbuild log:\n" .. diagnostic)
         local compiler_pid = tonumber((fs.readRegularFile(marker) or ""):match("^(%d+)"))
         assert(compiler_pid, "compiler marker did not contain a PID")
         return tonumber(interrupted_output:match("status=(%d+)")), diagnostic, compiler_pid

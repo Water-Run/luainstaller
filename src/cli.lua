@@ -56,6 +56,8 @@ local function installSourcePreloads()
         "luainstaller.windows_host_source",
         "luainstaller.hash",
         "luainstaller.process",
+        "luainstaller.posix_host",
+        "luainstaller.posix_host_source",
         "luainstaller.path",
         "luainstaller.result",
         "luainstaller.lock_owner",
@@ -85,7 +87,8 @@ local function installSourcePreloads()
     package.preload["luainstaller.fs"] = package.preload["luainstaller.fs"] or function()
         return dofile(sourcePath("fs.lua"))
     end
-    for _, leaf in ipairs({ "windows_fs", "windows_host", "windows_host_source" }) do
+    for _, leaf in ipairs({ "windows_fs", "windows_host", "windows_host_source",
+        "posix_host", "posix_host_source" }) do
         local module_name, filename = "luainstaller." .. leaf, leaf .. ".lua"
         package.preload[module_name] = package.preload[module_name] or function()
             return dofile(sourcePath(filename))
@@ -155,7 +158,7 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.5.2"
+local VERSION = "1.5.3"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
@@ -186,6 +189,10 @@ Options:
                         static, manual, or runtime
   --no-depscan          manual dependencies only
   --max-deps <n>        dependency count limit
+  --runtime-timeout <s> runtime discovery time limit
+  --max-source-bytes <n> Lua source size limit
+  --max-bundle-bytes <n> combined bundle size limit
+  --max-trace-bytes <n> runtime trace size limit
   --verbose             more detail
 
 Log options:
@@ -223,6 +230,10 @@ Build options:
                                Dependency discovery mode: static, manual, runtime.
   --no-depscan                 Manual dependencies only.
   --max-deps <n>               Dependency count limit (default: 36).
+  --runtime-timeout <seconds>  Runtime discovery time limit.
+  --max-source-bytes <n>       Lua source size limit.
+  --max-bundle-bytes <n>       Combined bundle size limit.
+  --max-trace-bytes <n>        Runtime trace size limit.
   --verbose                    Show additional details.
 
 Examples:
@@ -272,6 +283,8 @@ local KNOWN_OPTION_TOKENS = {
     ["--target-os"] = true, ["--lua"] = true, ["--lua-prefix"] = true,
     ["--discovery-mode"] = true, ["--no-depscan"] = true, ["--max-deps"] = true,
     ["--verbose"] = true, ["--"] = true,
+    ["--runtime-timeout"] = true, ["--max-source-bytes"] = true,
+    ["--max-bundle-bytes"] = true, ["--max-trace-bytes"] = true,
 }
 
 function ArgumentParser:consumeValue(option_name)
@@ -472,6 +485,15 @@ local function parseActionOptions(parser, action)
                 return nil, err
             end
             opts.max_deps = number
+        elseif item == "--runtime-timeout" or item == "--max-source-bytes"
+            or item == "--max-bundle-bytes" or item == "--max-trace-bytes" then
+            local value, value_err = parser:consumeValue(item)
+            if not value then return nil, value_err end
+            local number = tonumber(value)
+            if not number or number ~= number or number <= 0 or number == math.huge then
+                return nil, item .. " must be finite and positive"
+            end
+            opts[item:sub(3):gsub("-", "_")] = number
         elseif item == "--verbose" then
             opts.verbose = true
         elseif item == "--" then

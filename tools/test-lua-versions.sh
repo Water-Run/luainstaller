@@ -584,7 +584,7 @@ run_version() {
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.5.2-1.rockspec
+    "$luarocks" lint luainstaller-1.5.3-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/standalone_install.lua
     "$lua" test/toolchain_native.lua
@@ -598,6 +598,10 @@ run_version() {
     "$lua" test/build_interruption.lua
     "$lua" test/output_transaction.lua
     "$lua" test/lock_identity.lua
+    "$lua" test/process_bounds.lua
+    "$lua" test/resource_bounds.lua
+    "$lua" test/output_parents.lua
+    "$lua" test/build_cleanup.lua
     "$lua" test/distribution_licenses.lua
     "$lua" test/reproducible_artifacts.lua
     run_production_edges "$lua"

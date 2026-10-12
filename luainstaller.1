@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.5.2" "User Commands"
+.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.5.3" "User Commands"
 .SH NAME
 luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
@@ -133,6 +133,18 @@ Disable automatic discovery; equivalent to manual mode.
 .TP
 .BI \-\-max-deps " number"
 Set the maximum discovered Lua source dependency count. Default: 36.
+.TP
+.BI \-\-runtime-timeout " seconds"
+Bound runtime discovery. Default: 30 seconds.
+.TP
+.BI \-\-max-source-bytes " bytes"
+Limit each Lua source. Default: 8388608.
+.TP
+.BI \-\-max-bundle-bytes " bytes"
+Limit combined inputs and the staged bundle. Default: 134217728.
+.TP
+.BI \-\-max-trace-bytes " bytes"
+Limit runtime trace data. Default: 33554432.
 .TP
 .BI \-\-lua " path"
 Select the Lua interpreter used by runtime discovery. It must report exactly

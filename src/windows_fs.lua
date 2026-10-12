@@ -8,11 +8,20 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local host = require("luainstaller.windows_host")
 local M = {}
+
+function M.guardOutputParents(value, previous)
+    return require("luainstaller.process").guardOutputParents(value, previous)
+end
+
+function M.fileSize(value)
+    local ok, output = host.call("file_size", value)
+    return ok and tonumber(output) or nil, not ok and output or nil
+end
 
 local function valid(value)
     return type(value) == "string" and value ~= "" and not value:find("\0", 1, true)
@@ -35,16 +44,22 @@ function M.isRegularFile(value)
     return M.pathType(value) == "file"
 end
 
-function M.readFile(value)
+function M.readFile(value, limit)
     if not valid(value) then return nil, "file path is invalid" end
-    local ok, output = host.call("read", value)
-    if not ok then return nil, output end
+    limit = limit or 64 * 1024 * 1024
+    if type(limit) ~= "number" or limit ~= limit or limit < 1 or limit > 1073741824
+        or limit ~= math.floor(limit) then return nil, "file read limit is invalid" end
+    local ok, output = host.call("read", value, tostring(limit))
+    if not ok then
+        return nil, output, tostring(output):find("file exceeds read limit", 1, true)
+            and {limit_exceeded=true, resource="file-bytes", limit=limit, path=value} or nil
+    end
     return output
 end
 
-function M.readRegularFile(value)
+function M.readRegularFile(value, limit)
     if not M.isRegularFile(value) then return nil, "path is not a regular file: " .. tostring(value) end
-    return M.readFile(value)
+    return M.readFile(value, limit)
 end
 
 function M.writeFile(value, content)
@@ -81,6 +96,34 @@ function M.temporaryRoot()
         if ok and output ~= "" then return output end
     end
     return "."
+end
+
+function M.writeChunks(path, producer, limit)
+    local made, err = M.writeFile(path, "")
+    if not made then return nil, err end
+    local chunks, bytes, total = {}, 0, 0
+    local function flush()
+        if bytes == 0 then return end
+        local wrote, detail = operation("append", path, table.concat(chunks))
+        if not wrote then error({type="FilesystemError", path=path, message=detail}, 0) end
+        chunks, bytes = {}, 0
+    end
+    local called, failure = pcall(function()
+        producer(function(chunk)
+            if type(chunk) ~= "string" then error("write chunk must be a string", 0) end
+            total = total + #chunk
+            if total > (limit or 1073741824) then
+                error({type="ResourceLimitExceededError", resource="generated-source-bytes",
+                    limit=limit or 1073741824, path=path, current_bytes=total,
+                    message="Generated source exceeds its byte limit"}, 0)
+            end
+            chunks[#chunks + 1], bytes = chunk, bytes + #chunk
+            if bytes >= 262144 then flush() end
+        end)
+        flush()
+    end)
+    if not called then return nil, failure end
+    return true
 end
 
 function M.makePrivateDirectory(label, parent)

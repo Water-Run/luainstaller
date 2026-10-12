@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -54,6 +54,23 @@ assert(flooded and flood_output == string.rep("a", 64 * 4096) .. string.rep("b",
     "simultaneous stdout/stderr capture failed")
 local timed, timeout_output = process.outputCommand(fixture, { "sleep" }, {}, { timeout_seconds = 0.1 })
 assert(not timed and timeout_output:find("timed out", 1, true), timeout_output)
+local limited, limited_output, limit_status = process.outputCommand(fixture, {"flood"}, {},
+    {timeout_seconds=10, max_output_bytes=4096})
+assert(not limited and #limited_output <= 4096 + 256
+    and limit_status.reason == "output-limit", "Windows output budget was not enforced")
+local utf8_bytes = string.char(228,184,150,231,149,140)
+local unicode_source = path.join(root, utf8_bytes .. "-source.lua")
+local unicode_content = "return 'unicode-source'\n"
+assert(fs.writeFile(unicode_source, unicode_content))
+local unicode_hash = require("luainstaller.hash")
+assert(unicode_hash.sha256File(unicode_source) == unicode_hash.sha256(unicode_content),
+    "source hashing did not use a Unicode-safe file path")
+local unicode_analysis = require("luainstaller").analyze({entry=unicode_source, discovery_mode="static"})
+assert(unicode_analysis.ok, unicode_analysis.error and unicode_analysis.error.message)
+local utf8_script = path.join(root, "utf8-output.lua")
+assert(fs.writeFile(utf8_script, "io.write(string.char(228,184,150,231,149,140))\n"))
+local preserved, utf8_output = process.outputCommand(lua, {utf8_script})
+assert(preserved and utf8_output == utf8_bytes, "UTF-8 child output was converted as ANSI")
 
 local concurrent_root = path.join(root, "private-directory-concurrency")
 assert(fs.makeDirectory(concurrent_root))

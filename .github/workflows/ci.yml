@@ -102,6 +102,10 @@ jobs:
           lua test/build_interruption.lua
           lua test/output_transaction.lua
           lua test/lock_identity.lua
+          lua test/process_bounds.lua
+          lua test/resource_bounds.lua
+          lua test/output_parents.lua
+          lua test/build_cleanup.lua
 
       - name: Install pinned sample dependencies
         run: sh tools/ci-install-sample-deps.sh
@@ -187,6 +191,10 @@ jobs:
           "$LUAI_TEST_LUA" test/onefile_lifecycle.lua
           "$LUAI_TEST_LUA" test/output_transaction.lua
           "$LUAI_TEST_LUA" test/lock_identity.lua
+          "$LUAI_TEST_LUA" test/process_bounds.lua
+          "$LUAI_TEST_LUA" test/resource_bounds.lua
+          "$LUAI_TEST_LUA" test/output_parents.lua
+          "$LUAI_TEST_LUA" test/build_cleanup.lua
 
   windows-version-matrix:
     name: official Lua ${{ matrix.lua }} (Windows MSVC)

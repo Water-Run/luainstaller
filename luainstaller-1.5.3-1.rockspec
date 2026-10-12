@@ -1,10 +1,10 @@
 rockspec_format = "3.0"
 package = "luainstaller"
-version = "1.5.2-1"
+version = "1.5.3-1"
 
 source = {
     url = "git+https://github.com/Water-Run/luainstaller.git",
-    tag = "v1.5.2",
+    tag = "v1.5.3",
 }
 
 description = {
@@ -52,6 +52,8 @@ build = {
         ["luainstaller.path"]     = "src/path.lua",
         ["luainstaller.platform"] = "src/platform.lua",
         ["luainstaller.process"]  = "src/process.lua",
+        ["luainstaller.posix_host"] = "src/posix_host.lua",
+        ["luainstaller.posix_host_source"] = "src/posix_host_source.lua",
         ["luainstaller.toolchain"] = "src/toolchain.lua",
         ["luainstaller.result"]   = "src/result.lua",
         ["luainstaller.lock_owner"] = "src/lock_owner.lua",

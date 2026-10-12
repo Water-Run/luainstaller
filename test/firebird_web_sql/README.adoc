@@ -27,14 +27,15 @@ luarocks install luaossl           # server crypto capability
 `server.lua` is the entry and route table. `config.lua` reads environment
 configuration. `db.lua` implements mock and Firebird adapters. `history.lua`
 tracks queries, `security.lua` reports available security capabilities, and
-`web.lua` contains the browser page.
+`web.lua` contains the browser page. Cross-origin access is off unless an
+explicit origin is configured; wildcard origins are refused.
 
 == Run in mock mode
 
 [source,sh]
 ----
 FIREBIRD_WEB_SQL_PORT=9090 \
-FIREBIRD_WEB_SQL_TOKEN='replace-this-token' \
+FIREBIRD_WEB_SQL_TOKEN="$(openssl rand -hex 32)" \
 lua test/firebird_web_sql/server.lua
 ----
 
@@ -54,7 +55,7 @@ FIREBIRD_HOST='127.0.0.1' \
 FIREBIRD_DATABASE='/srv/firebird/example.fdb' \
 FIREBIRD_USER='app_user' \
 FIREBIRD_PASSWORD='from-a-secret-store' \
-FIREBIRD_WEB_SQL_TOKEN='replace-this-token' \
+FIREBIRD_WEB_SQL_TOKEN="$(openssl rand -hex 32)" \
 lua test/firebird_web_sql/server.lua
 ----
 
@@ -62,6 +63,11 @@ Do not put production credentials in shell history, source files, logs, or a
 bundle. Supply them through the deployment environment or a secret manager.
 
 == Security boundary
+
+The server requires an explicit token of at least 32 bytes and listens on
+loopback only. Request bodies are limited to 64 KiB, SQL to 16 KiB and results
+to 500 rows. It does not implement client-key authentication or application
+encryption. Real database execution still needs database-side statement timeouts.
 
 The token is application authentication, not transport security. Browser
 WebCrypto or optional application-layer encryption does not protect against an
@@ -97,11 +103,11 @@ Probe a packaged server:
 [source,sh]
 ----
 FIREBIRD_WEB_SQL_PORT=19090 \
-FIREBIRD_WEB_SQL_TOKEN=testtoken \
+FIREBIRD_WEB_SQL_TOKEN=testtoken012345678901234567890123 \
 build/firebird-web-sql/firebird-web-sql &
 pid=$!
 curl -fsS http://127.0.0.1:19090/api/status \
-  -H 'X-Auth-Token: testtoken'
+  -H 'X-Auth-Token: testtoken012345678901234567890123'
 kill "$pid"
 ----
 

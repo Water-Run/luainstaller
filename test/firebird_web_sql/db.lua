@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-12
 Updated:
-    2026-06-12
+    2026-10-12
 ]]
 
 local M = {}
@@ -153,13 +153,16 @@ function Connection:connect()
         return true
     end
 
+    local fb = self.firebird or {}
+    if type(fb.password) ~= "string" or fb.password == "" or fb.password == "masterkey" then
+        return false, "Set a private Firebird password; empty and default passwords are refused"
+    end
     local luasql, err = load_luasql_firebird()
     if not luasql then
         return false, "luasql.firebird not available: " .. tostring(err)
     end
 
     local env = luasql.firebird()
-    local fb = self.firebird or {}
     local database = fb.database or ""
     if database == "" then
         return false, "Firebird database path is required"
@@ -202,6 +205,12 @@ function Connection:query(sql, opts)
     opts = opts or {}
     sql = trim(sql)
     local max_rows = tonumber(opts.max_rows) or self.max_rows or 500
+    if max_rows ~= max_rows or max_rows < 1 or max_rows > 500
+        or max_rows ~= math.floor(max_rows) then
+        return nil, "max_rows must be an integer between 1 and 500"
+    end
+    max_rows = math.min(max_rows, self.max_rows)
+    if #sql > self.max_sql_bytes then return nil, "SQL exceeds the byte limit" end
     if sql == "" then
         return nil, "SQL is empty"
     end
@@ -318,9 +327,13 @@ end
 
 function M.new(opts)
     opts = opts or {}
+    local max_rows = tonumber(opts.max_rows) or 500
+    if max_rows ~= max_rows or max_rows < 1 or max_rows > 500
+        or max_rows ~= math.floor(max_rows) then max_rows = 500 end
     return setmetatable({
         driver = opts.driver or "mock",
-        max_rows = tonumber(opts.max_rows) or 500,
+        max_rows = max_rows,
+        max_sql_bytes = 16 * 1024,
         firebird = opts.firebird or {},
         connected = false,
     }, Connection)

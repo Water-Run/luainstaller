@@ -43,6 +43,10 @@ local function check_cli_surfaces_contract()
     assert(code == 0)
     assert_contains(out, "Usage: luai")
     assert_contains(out, "luai -l [log options]")
+    for _, option in ipairs({"--runtime-timeout", "--max-source-bytes",
+        "--max-bundle-bytes", "--max-trace-bytes"}) do
+        assert_contains(out, option)
+    end
     assert(err == "")
 
     assert_contains(read_file("docs/USAGE.adoc"), "luai -l --level error --limit 20")
@@ -53,6 +57,7 @@ local function check_cli_surfaces_contract()
     code, out, err = invoke_cli("luainstaller", { "help" })
     assert(code == 0)
     assert_contains(out, "Usage: luainstaller")
+    assert_contains(out, "--runtime-timeout")
     assert(err == "")
 
     code, out, err = invoke_cli("luai", { "build", "app.lua" })
@@ -95,6 +100,35 @@ end
     remove_tree(root)
 
     print("cli surfaces contract ok")
+end
+
+local function check_resource_contracts()
+    for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
+        local usage = read_file(prefix .. "USAGE.adoc")
+        assert_contains(usage, "[#usage-limits]")
+        assert_contains(usage, "--runtime-timeout 120")
+        assert_contains(usage, "8 MiB")
+        assert_contains(usage, "128 MiB")
+        assert_contains(usage, "32 MiB")
+        for _, field in ipairs({"runtime_timeout", "max_source_bytes",
+            "max_bundle_bytes", "max_trace_bytes", "ResourceLimitExceededError"}) do
+            assert_contains(usage, field)
+        end
+        local troubleshooting = read_file(prefix .. "TROUBLESHOOTING.adoc")
+        assert_contains(troubleshooting, "[#troubleshooting-install]")
+        assert_contains(troubleshooting, "[#troubleshooting-limits]")
+        assert_contains(troubleshooting, "--only-server=https://luarocks.org")
+        assert_contains(troubleshooting, "check_certificates true")
+    end
+    local root = make_temp_dir("documented-resource-limit")
+    local entry = root .. "/main.lua"
+    write_file(entry, "return 'larger than eight bytes'\n")
+    local rejected = luainstaller.analyze({entry=entry, discovery_mode="static",
+        max_source_bytes=8})
+    assert_error(rejected, "ResourceLimitExceededError")
+    assert(rejected.error.resource == "source-bytes" and rejected.error.limit == 8)
+    remove_tree(root)
+    print("resource documentation contract ok")
 end
 
 local function check_discovery_contracts()
@@ -654,7 +688,7 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.5.2-1.rockspec")
+    local rockspec = read_file("luainstaller-1.5.3-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -667,7 +701,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.5.2-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.5.3-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",
@@ -690,6 +724,7 @@ local function check_documentation_contract()
 end
 
 check_cli_surfaces_contract()
+check_resource_contracts()
 check_discovery_contracts()
 check_manual_exclude_contracts()
 check_runtime_discovery_contract()

@@ -8,8 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-07-29
-    2026-07-29
+    2026-10-12
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -101,9 +100,9 @@ local LUA_IDENTITY_PROBE = table.concat({
     }, ";")
 
 local function validateLuaInterpreter(interpreter, expected_abi)
-    local ok, output = process.outputCommand(interpreter, {
+    local ok, output, status = process.outputCommand(interpreter, {
         "-e", LUA_IDENTITY_PROBE,
-    })
+    }, {}, {timeout_seconds=10, max_output_bytes=4096})
     local actual_abi = lua_abi.normalize(output)
     if not ok or actual_abi ~= expected_abi then
         return nil, makeError(
@@ -114,6 +113,7 @@ local function validateLuaInterpreter(interpreter, expected_abi)
                 expected_abi = expected_abi,
                 actual_abi = actual_abi,
                 output = output,
+                command_status = status,
             }
         )
     end
@@ -280,8 +280,11 @@ local function applyManualInputs(result, opts)
                 script_path = normalized,
             })
         end
-        local content, read_err = fs.readRegularFile(normalized)
+        local content, read_err, state = fs.readRegularFile(normalized, opts.max_source_bytes)
         if content == nil then
+            if state and state.limit_exceeded then
+                return nil, result.resourceLimit("source-bytes", opts.max_source_bytes, normalized)
+            end
             return nil, makeError("ScriptNotFoundError", string.format("Included path not found: %s", normalized), {
                 script_path = normalized,
                 cause = read_err,
@@ -319,6 +322,8 @@ end
 local function staticPlan(opts)
     local ok, result = pcall(analyzer.traceDependencies, opts.entry, {
         max_dependencies = opts.max_deps or DEFAULT_MAX_DEPS,
+        max_source_bytes = opts.max_source_bytes,
+        max_bundle_bytes = opts.max_bundle_bytes,
     })
     if not ok then
         return nil, fromThrownError(result)
@@ -348,6 +353,7 @@ local function finalizeSourceSnapshots(plan, opts, initial_source_hashes)
     end
 
     local verified = {}
+    local total_bytes = 0
     for _, source_path in ipairs(selected) do
         local canonical = normalizePath(absolutePath(source_path))
         if not verified[canonical] then
@@ -358,11 +364,22 @@ local function finalizeSourceSnapshots(plan, opts, initial_source_hashes)
                     cause = "path is not a regular file",
                 })
             end
-            local actual_hash, hash_err = hash.sha256File(canonical)
+            local source_limit = canonical:lower():match("%.lua$")
+                and (opts.max_source_bytes or 8388608) or (opts.max_bundle_bytes or 134217728)
+            local actual_hash, hash_err, state = hash.sha256File(canonical, source_limit)
             if actual_hash == nil then
+                if state and state.limit_exceeded then
+                    return nil, result.resourceLimit(canonical:lower():match("%.lua$")
+                        and "source-bytes" or "bundle-bytes", source_limit, canonical)
+                end
                 return nil, sourceChanged(canonical, expected_hash, nil, {
                     cause = hash_err,
                 })
+            end
+            total_bytes = total_bytes + state.bytes
+            if total_bytes > (opts.max_bundle_bytes or 134217728) then
+                return nil, result.resourceLimit("bundle-bytes", opts.max_bundle_bytes or 134217728,
+                    canonical, total_bytes)
             end
             if expected_hash and expected_hash ~= actual_hash then
                 return nil, sourceChanged(canonical, expected_hash, actual_hash)
@@ -376,12 +393,18 @@ end
 -- Generated tracer for --discovery-mode runtime.
 -- Limits: modules that capture require before this patch runs are not traced;
 -- use --include for those. os.exit is wrapped so records are flushed first.
-local function traceScript(entry, output_path)
+local function traceScript(entry, output_path, opts)
     local entry_dir = dirname(absolutePath(entry))
     return string.format([[
 local output_path = %q
 local entry = %q
 local entry_dir = %q
+local source_limit = %d
+local bundle_limit = %d
+local trace_limit = %d
+local record_limit = %d
+local snapshot_bytes = 0
+local written_bytes = 0
 local original_require = require
 local original_exit = os.exit
 local original_load = load
@@ -419,10 +442,17 @@ local function hex(value)
     end))
 end
 local function write_all(out, ...)
+    local added = 0
+    for index = 1, select("#", ...) do added = added + #select(index, ...) end
+    written_bytes = written_bytes + added
+    if written_bytes > trace_limit then
+        error("LUAINSTALLER_RESOURCE_LIMIT:trace-bytes:" .. trace_limit, 0)
+    end
     local wrote, write_err = out:write(...)
     if not wrote then error(tostring(write_err or "trace write failed"), 0) end
 end
 local function flush_records()
+    written_bytes = 0
     local out, open_err = io.open(output_path, "wb")
     if not out then error(tostring(open_err or "cannot open trace output"), 0) end
     local ok, write_err = pcall(function()
@@ -469,10 +499,18 @@ end
 local function read_all(source_path)
     local input, open_err = original_io_open(source_path, "rb")
     if not input then return nil, open_err end
-    local content, read_err = input:read("*a")
+    local content, read_err = input:read(source_limit + 1)
     local closed, close_err = input:close()
-    if content == nil then return nil, read_err end
+    if content == nil and read_err then return nil, read_err end
     if not closed then return nil, close_err end
+    content = content or ""
+    if #content > source_limit then
+        error("LUAINSTALLER_RESOURCE_LIMIT:source-bytes:" .. source_limit, 0)
+    end
+    snapshot_bytes = snapshot_bytes + #content
+    if snapshot_bytes > bundle_limit then
+        error("LUAINSTALLER_RESOURCE_LIMIT:bundle-bytes:" .. bundle_limit, 0)
+    end
     return content
 end
 local function capture_loader_snapshot(record, loader, loader_path)
@@ -579,6 +617,9 @@ require = function(name)
     -- to the earlier loader snapshot and do not get recorded twice.
     if not inflight_names[module_key]
         and (not cached or not recorded_names[module_key]) then
+        if #records >= record_limit then
+            error("LUAINSTALLER_RESOURCE_LIMIT:trace-records:" .. record_limit, 0)
+        end
         record = { name = module_key, source = source, cached = cached }
         records[#records + 1] = record
     end
@@ -616,12 +657,17 @@ flush_records()
 if not ok then
     error(err)
 end
-]], output_path, entry, entry_dir)
+]], output_path, entry, entry_dir, opts.max_source_bytes or 8388608,
+        opts.max_bundle_bytes or 134217728, opts.max_trace_bytes or 33554432,
+        (opts.max_deps or DEFAULT_MAX_DEPS) + 64)
 end
 
-local function parseTraceOutput(path)
-    local content, read_err = fs.readFile(path)
+local function parseTraceOutput(path, opts)
+    local content, read_err, state = fs.readRegularFile(path, opts.max_trace_bytes or 33554432)
     if content == nil then
+        if state and state.limit_exceeded then
+            return nil, result.resourceLimit("trace-bytes", opts.max_trace_bytes or 33554432, path)
+        end
         return nil, makeError("DiscoveryError", "Runtime require trace output was not written", {
             path = path,
             cause = read_err,
@@ -677,7 +723,7 @@ local function parseTraceOutput(path)
     return records
 end
 
-local function runtimePlan(opts)
+local function runtimePlan(opts, lifecycle)
     local expected_abi, abi_err = lua_abi.current()
     if not expected_abi then
         return nil, makeError("ToolchainError", tostring(abi_err), {
@@ -692,9 +738,10 @@ local function runtimePlan(opts)
     if not work_dir then
         return nil, work_err
     end
+    lifecycle.work_dir = work_dir
     local script_path = normalizePath(work_dir .. "/trace.lua")
     local output_path = normalizePath(work_dir .. "/trace.txt")
-    local err = writeFile(script_path, traceScript(opts.entry, output_path))
+    local err = writeFile(script_path, traceScript(opts.entry, output_path, opts))
     if err then
         return nil, cleanupWorkDir(work_dir, err)
     end
@@ -705,8 +752,24 @@ local function runtimePlan(opts)
     end
     local command = process.command(identity.path, args) or identity.path
 
-    local ok, output = process.outputCommand(identity.path, args)
+    local timeout = opts.runtime_timeout or 30
+    local ok, output, status = process.outputCommand(identity.path, args, {}, {timeout_seconds=timeout})
     if not ok then
+        local resource, limit = tostring(output):match("LUAINSTALLER_RESOURCE_LIMIT:([a-z%-]+):(%d+)")
+        if resource then
+            return nil, cleanupWorkDir(work_dir, result.resourceLimit(resource, tonumber(limit), opts.entry))
+        end
+        if status and status.reason == "timeout" then
+            return nil, cleanupWorkDir(work_dir, makeError("RuntimeTimeoutError",
+                "Runtime discovery exceeded its time limit; use static discovery or increase runtime_timeout", {
+                    command=command, output=output, timeout_seconds=timeout, command_status=status,
+                }))
+        end
+        if status and status.reason == "output-limit" then
+            local limited = result.resourceLimit("command-output-bytes", status.max_output_bytes, opts.entry)
+            limited.error.command_status = status
+            return nil, cleanupWorkDir(work_dir, limited)
+        end
         local message = "Runtime require tracing failed"
         if tostring(output):find(
             "LUAINSTALLER_RUNTIME_LOADER_UNVERIFIABLE:",
@@ -718,11 +781,12 @@ local function runtimePlan(opts)
         local trace_err = makeError("DiscoveryError", message, {
             command = command,
             output = output,
+            command_status = status,
         })
         return nil, cleanupWorkDir(work_dir, trace_err)
     end
 
-    local records, parse_err = parseTraceOutput(output_path)
+    local records, parse_err = parseTraceOutput(output_path, opts)
     local cleanup_err = cleanupWorkDir(work_dir, parse_err)
     if cleanup_err then
         return nil, cleanup_err
@@ -904,7 +968,13 @@ function M.plan(opts, config)
     elseif mode == "manual" then
         raw = { scripts = {}, libraries = {}, trace = {} }
     elseif mode == "runtime" then
-        raw, err = runtimePlan(opts)
+        local lifecycle = {}
+        local called, runtime_result, runtime_error = pcall(runtimePlan, opts, lifecycle)
+        if called then
+            raw, err = runtime_result, runtime_error
+        else
+            return nil, cleanupWorkDir(lifecycle.work_dir, fromThrownError(runtime_result))
+        end
     else
         return nil, makeError("InvalidOptionsError", "Unknown discovery mode: " .. tostring(mode), {
             discovery_mode = mode,

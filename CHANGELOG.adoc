@@ -15,6 +15,22 @@ truth for the exact contents of a published version.
 * Introduction video link in the READMEs: bilibili in the Chinese README,
   YouTube in the English one.
 
+== 1.5.3 - 2026-10-12
+
+=== Fixed
+
+* Native command supervision enforces deadlines and output budgets without GNU
+  timeout. Runtime discovery reports timeout and resource failures explicitly.
+* Source and bundle byte budgets reject oversized inputs. Generated C is written
+  in chunks, avoiding per-byte tables and duplicate payload buffers.
+* Unexpected runtime and onefile interruptions return structured failures and
+  clean their private workspaces.
+* Output ancestor identities are checked before publishing. POSIX refuses
+  untrusted writable ancestors; Windows pins non-reparse ancestors during I/O.
+* Windows keeps valid UTF-8 tool output and uses native paths for source hashing.
+* Installation troubleshooting covers stale mirror fallback and HTTPS download
+  failures that can cause an older LuaRocks package to be selected.
+
 == 1.5.2 - 2026-10-12
 
 === Fixed

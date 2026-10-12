@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-12
 Updated:
-    2026-06-12
+    2026-10-12
 ]]
 
 local M = {}
@@ -164,7 +164,7 @@ th { background: #eef2f6; position: sticky; top: 0; }
         <label>Host</label><input id="host" value="127.0.0.1">
         <label>Database</label><input id="database" placeholder="/path/to/database.fdb">
         <label>User</label><input id="user" value="SYSDBA">
-        <label>Password</label><input id="password" type="password" value="masterkey">
+        <label>Password</label><input id="password" type="password" value="">
         <label>Charset</label><input id="charset" value="UTF8">
         <div class="toolbar"><button class="primary" id="connect">Connect</button><button id="refreshTables">Tables</button></div>
       </div>

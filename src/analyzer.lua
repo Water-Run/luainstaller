@@ -13,7 +13,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-08-16
+    2026-10-12
 ]]
 
 local fs = require("luainstaller.fs")
@@ -67,9 +67,13 @@ end
 --@param path: string - Absolute file path
 --@return: string - File content
 --@raise: error table when the file cannot be opened
-local function readFileContent(path)
-    local content, read_err = fs.readRegularFile(path)
+local function readFileContent(path, limit)
+    local content, read_err, state = fs.readRegularFile(path, limit)
     if content == nil then
+        if state and state.limit_exceeded then
+            error({type="ResourceLimitExceededError", resource="source-bytes", limit=limit,
+                path=path, message="Lua source exceeds its configured byte limit"})
+        end
         error({
             type    = "ScriptNotFoundError",
             message = string.format("Cannot read file: %s", path),
@@ -1694,7 +1698,7 @@ DependencyAnalyzer.__index = DependencyAnalyzer
 --@return: DependencyAnalyzer - New analyzer instance
 --@raise: ScriptNotFoundError when the entry script does not exist
 --@usage: local da = DependencyAnalyzer.new("main.lua", 100)
-function DependencyAnalyzer.new(entry_script, max_dependencies)
+function DependencyAnalyzer.new(entry_script, max_dependencies, opts)
     local resolved = resolvePath(entry_script)
     if not fileExists(resolved) then
         error(errors.scriptNotFound(entry_script))
@@ -1703,6 +1707,9 @@ function DependencyAnalyzer.new(entry_script, max_dependencies)
     local self            = setmetatable({}, DependencyAnalyzer)
     self.entry_script     = resolved
     self.max_dependencies = max_dependencies or DEFAULT_MAX_DEPS
+    self.max_source_bytes = opts and opts.max_source_bytes or 8388608
+    self.max_bundle_bytes = opts and opts.max_bundle_bytes or 134217728
+    self.source_bytes = 0
     self.resolver         = ModuleResolver.new(pathParent(resolved))
     self.visited          = {}
     self.stack            = {}
@@ -1795,7 +1802,13 @@ function DependencyAnalyzer:analyzeRecursive(script_path)
         error(errors.scriptNotFound(script_path))
     end
 
-    local source_bytes = readFileContent(script_path)
+    local source_bytes = readFileContent(script_path, self.max_source_bytes)
+    self.source_bytes = self.source_bytes + #source_bytes
+    if self.source_bytes > self.max_bundle_bytes then
+        error({type="ResourceLimitExceededError", resource="bundle-bytes", limit=self.max_bundle_bytes,
+            path=script_path, current_bytes=self.source_bytes,
+            message="Combined Lua sources exceed the configured bundle byte limit"})
+    end
     self.source_hashes[normalizePath(script_path)] = hash.sha256(source_bytes)
     local source_code = validateSource(source_bytes, script_path)
     local lexer = LuaLexer.new(source_code, script_path)
@@ -1900,7 +1913,7 @@ M.validateSource     = validateSource
 function M.analyzeDependencies(entry_script, opts)
     opts = opts or {}
 
-    local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies)
+    local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies, opts)
     return da:analyze()
 end
 
@@ -1911,7 +1924,7 @@ end
 function M.traceDependencies(entry_script, opts)
     opts = opts or {}
 
-    local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies)
+    local da = DependencyAnalyzer.new(entry_script, opts.max_dependencies, opts)
     local result = da:analyze()
     result.trace = da.trace
     return result

@@ -73,6 +73,9 @@ CLI / Lua API
 |`fs` / `hash` / `path` / `process` / `result`
 |I/O、SHA-256、路径、命令、错误
 
+|`posix_host.lua` / `host/posix_host.c`
+|有界子进程监督与输出祖先身份检查
+
 |`windows_host.lua` / `windows_fs.lua` / `host/windows_host.c`
 |兼容 XP 的 Win32 进程与文件操作；由编译器生成的 Lua 模块连接当前官方
 Lua DLL 的 API，不需要安装 Lua 头文件。
@@ -84,6 +87,29 @@ Lua DLL 的 API，不需要安装 Lua 头文件。
 |`logger.lua`
 |在 `~/.luainstaller` 下记录日志
 |===
+
+[#implementation-supervision]
+== 进程监督与资源预算
+
+结构化命令执行使用原生 POSIX 监督器或 Windows 后端，检查单调时钟时限、限制
+捕获输出，并向调用者返回退出码及原因。POSIX 为命令建立受管理的进程组，
+保留直接子进程 PID 至清理结束。Windows 使用 Job Object 和旧系统 watchdog。
+这些机制不构成代码沙箱。
+
+`posix_host.lua` 无需 Lua 头文件即可编译独立 helper。其 C 源码与
+`posix_host_source.lua` 由 `tools/generate-posix-host-source.lua` 同步。
+原生 helper 就绪前，有界 shell 启动流程只用于可信的编译器和文件操作。
+静态、手动分析不需要 POSIX helper。
+
+`init.lua` 在解析前设置字节预算。tracer 限制快照、记录及输出，关闭文件后才
+返回失败。启动器与单文件的 C 数组分块写入，payload 哈希采用增量计算。
+单文件和跟踪工作区在意外异常与普通失败时均执行清理。字节预算不能代替构建
+worker 的操作系统内存和磁盘限额。
+
+POSIX 输出祖先目录由调用者或系统管理员持有，拒绝不可信写权限与链接，
+并单独处理受保护的 Android 系统祖先及系统根链接。发布前比较目录身份。
+Windows 在每次文件操作期间固定非重解析祖先，并在发布前核对卷及文件身份。
+Windows 工作区 ACL 和配置的临时根目录属于部署信任边界。
 
 [#implementation-discovery]
 == 发现
@@ -120,7 +146,7 @@ Lua DLL 的 API，不需要安装 Lua 头文件。
 `LuaSyntaxError`、`SourceChangedError`、`DynamicRequireError`、
 `ModuleNotFoundError`、`DuplicateModuleError`、`InvalidOutputError`、
 `ToolchainError`、`CompilationFailedError`、`FilesystemError`、
-`DiscoveryError`、`UnsupportedPlatformError`、`UnsupportedLuaVersionError` 及相关类型。
+`DiscoveryError`、`RuntimeTimeoutError`、`ResourceLimitExceededError`、`UnsupportedPlatformError`、`UnsupportedLuaVersionError` 及相关类型。
 
 shell 命令中的每个路径都要加引号。拒绝编译器标志中的危险元字符。
 

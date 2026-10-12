@@ -9,8 +9,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-07-29
-    2026-06-27
+    2026-10-12
 ]]
 
 local M = {}
@@ -39,6 +38,15 @@ function M.fromThrown(err, default_type)
         return M.error(err.type or default_type, err.message or tostring(err), err)
     end
     return M.error(default_type, tostring(err))
+end
+
+function M.resourceLimit(resource, limit, path, current)
+    return M.error("ResourceLimitExceededError", resource .. " exceeds its configured limit", {
+        resource = resource,
+        limit = limit,
+        path = path,
+        current_bytes = current,
+    })
 end
 
 return M

@@ -28,6 +28,51 @@ luai -b --file app/main.lua -o build/app-onefile   # 5. does the single file wor
 
 toc::[]
 
+[#troubleshooting-install]
+== LuaRocks installs an older version
+
+A mirror can lag behind the official server. Check the sources used by
+the same command you install with, then select the official server:
+
+[source,bash]
+----
+sudo luarocks config rocks_servers
+sudo luarocks install --only-server=https://luarocks.org luainstaller
+luai -v
+----
+
+`sudo` reads root's configuration. It can differ from your user's settings.
+Remove an outdated mirror from that configuration: a failed official download
+can otherwise fall back to an older package.
+
+If the download reports `unexpected eof while reading`, use the system
+HTTPS downloader and enable certificate checks:
+
+[source,bash]
+----
+sudo luarocks config --scope=user fs_use_modules false
+sudo luarocks config --scope=user check_certificates true
+sudo luarocks install --only-server=https://luarocks.org luainstaller
+----
+
+[#troubleshooting-limits]
+== A scan times out or the input is too large
+
+Runtime discovery executes the script. A server or interactive program
+usually needs static discovery. For a finite task, increase
+`--runtime-timeout` to allow it to finish.
+
+Size errors name the resource and byte limit. Adjust the corresponding
+option described in xref:USAGE.adoc#usage-limits[Time and size limits].
+`LUAI_CMD_TIMEOUT` controls command deadlines and `LUAI_MAX_OUTPUT_BYTES`
+controls captured tool output (default 8 MiB).
+
+Build into a directory you control. Linked or shared writable output
+ancestors are refused on POSIX. In Termux, use private app storage for
+output. Directory identity is checked again before publishing. Windows
+checks reparse points and holds ancestor handles during file operations;
+use a workspace with access restricted to trusted users.
+
 [#troubleshooting-cli]
 == "unknown option" or "unknown command"
 

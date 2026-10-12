@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-08-16
+    2026-10-12
 ]]
 
 local compat = require("luainstaller.compat")
@@ -316,13 +316,20 @@ end
 --@description: Hash a regular file in bounded memory
 --@param path: string - File path
 --@return: string|nil - Hex digest, or nil plus an error message
-function M.sha256File(path)
+function M.sha256File(path, limit)
+    limit = limit or 1073741824
+    if package.config:sub(1, 1) == "\\" then
+        local content, read_error, read_state = require("luainstaller.fs").readRegularFile(path, limit)
+        if content == nil then return nil, read_error, read_state end
+        return portableSha256(content), nil, {bytes=#content}
+    end
     local opened, handle, open_err = pcall(io.open, path, "rb")
     if not opened or not handle then
         return nil, "cannot open file for hashing: "
             .. tostring(opened and open_err or handle)
     end
     local state = newSha256State()
+    local total = 0
     while true do
         local read_ok, chunk, read_err = pcall(handle.read, handle, 64 * 1024)
         if not read_ok or (chunk == nil and read_err ~= nil) then
@@ -332,6 +339,13 @@ function M.sha256File(path)
         end
         if chunk == nil then
             break
+        end
+        total = total + #chunk
+        if total > limit then
+            pcall(handle.close, handle)
+            return nil, "file exceeds hashing byte limit", {
+                limit_exceeded=true, resource="file-bytes", limit=limit, path=path,
+            }
         end
         local updated, update_err = updateSha256(state, chunk)
         if not updated then
@@ -344,7 +358,7 @@ function M.sha256File(path)
         return nil, "cannot close file after hashing: "
             .. tostring(close_ok and close_err or closed)
     end
-    return finalizeSha256(state)
+    return finalizeSha256(state), nil, {bytes=total}
 end
 
 function M.backend()

@@ -1876,6 +1876,7 @@ validateOutputDirectory = function(path, allowed_generated_entries, declared_out
     if location_err then
         return location_err
     end
+
     local normalized = normalizePath(path)
     if pathExists(normalized) then
         local inventory, inventory_err = listTree(normalized)
@@ -2083,6 +2084,13 @@ local function bundleOnedir(opts, lifecycle)
         return location_err
     end
 
+    local parent_snapshot, parent_error = fs.guardOutputParents(final_out_dir)
+    if not parent_snapshot then
+        return makeError("InvalidOutputError", "Output directory has an unsafe ancestor", {
+            path=final_out_dir, cause=parent_error,
+        })
+    end
+
     if type(io.popen) ~= "function" then
         return makeError("ToolchainError", "io.popen is required to build onedir bundles")
     end
@@ -2179,8 +2187,7 @@ local function bundleOnedir(opts, lifecycle)
     if not source_hashes then
         return abandon(source_hash_err)
     end
-    local c_source
-    local ok_generate, generated = pcall(launcher.generateSource, {
+    local generation_opts = {
         entry = entry,
         dependencies = dependencies,
         module_names = lua_names,
@@ -2189,15 +2196,18 @@ local function bundleOnedir(opts, lifecycle)
         source_hash_algorithm = manifest.hash_algorithm,
         native_dir = ".luai/native",
         lua_version = lua_version,
-    })
-    if not ok_generate then
-        return abandon(fromThrownError(generated))
-    end
-    c_source = generated
-
-    err = writeFile(c_path, c_source)
-    if err then
-        return abandon(err)
+        max_source_bytes = opts.max_source_bytes,
+    }
+    local written, generation_err = fs.writeChunks(c_path, function(write)
+        local called_generate, generated = pcall(launcher.generateSource, generation_opts, write)
+        if not called_generate then error(fromThrownError(generated).error, 0) end
+        if type(generated) == "string" then write(generated) end
+    end, opts.max_bundle_bytes or 134217728)
+    if not written then
+        return abandon(type(generation_err) == "table" and fromThrownError(generation_err)
+            or makeError("FilesystemError", "Cannot generate launcher source", {
+                path=c_path, cause=generation_err,
+            }))
     end
     local material_records
     material_records, err = writeDistributionFiles(out_dir, profile.target_os)
@@ -2441,11 +2451,36 @@ local function bundleOnedir(opts, lifecycle)
     if err then
         return abandon(err)
     end
+    local inventory, inventory_error = fs.listTree(out_dir)
+    if not inventory then
+        return abandon(makeError("FilesystemError", "Cannot measure staged bundle", {cause=inventory_error}))
+    end
+    local staged_bytes, byte_limit = 0, opts.max_bundle_bytes or 134217728
+    for _, item in ipairs(inventory) do
+        if item.type == "file" then
+            local size, size_error = fs.fileSize(path.join(out_dir, item.path))
+            if not size then
+                return abandon(makeError("FilesystemError", "Cannot measure staged file", {
+                    path=item.path, cause=size_error,
+                }))
+            end
+            staged_bytes = staged_bytes + size
+            if staged_bytes > byte_limit then
+                return abandon(result.resourceLimit("bundle-bytes", byte_limit, out_dir, staged_bytes))
+            end
+        end
+    end
     err = writeGeneratedMarker(out_dir, final_out_dir)
     if err then
         return abandon(err)
     end
 
+    local parents_ok, parents_error = fs.guardOutputParents(final_out_dir, parent_snapshot)
+    if not parents_ok then
+        return abandon(makeError("InvalidOutputError", "Output ancestor changed before publication", {
+            path=final_out_dir, cause=parents_error,
+        }))
+    end
     err = commitStagingDirectory(out_dir, final_out_dir, allowed_generated_entries, output_snapshot, output_lock)
     if err then
         if not err.error or err.error.committed ~= true then
@@ -2489,6 +2524,12 @@ function M.recoverOutput(opts)
     local lock_id = hash_mod.sha256(normalizePath(final_path))
     local lock_path = path.join(dirname(final_path), transactionSiblingName("lock", lock_id))
     if fs.pathType(lock_path) == "missing" then return {ok=true} end
+    local parents_ok, parents_error = fs.guardOutputParents(final_path)
+    if not parents_ok then
+        return makeError("InvalidOutputError", "Cannot recover output through an unsafe ancestor", {
+            path=final_path, cause=parents_error,
+        })
+    end
     local called, recovered = pcall(recoverStaleOutputLock, final_path, lock_path, lock_id)
     if called and recovered then return {ok=true} end
     return makeError("FilesystemError", "Output has an active or unrecoverable build transaction", {

@@ -2198,7 +2198,11 @@ test("Source changed during compiler execution is rejected", function()
     writeFile(entry, "assert(require('dependency').value == 41)\n")
     writeFile(dependency, "return { value = 41 }\n")
     writeFile(fake_bin .. "/cc", [[#!/bin/sh
-printf '%s\n' 'return { value = 99 }' > "$LUAI_MUTATE_SOURCE"
+for value in "$@"; do
+    case "$value" in
+        */launcher.c) printf '%s\n' 'return { value = 99 }' > "$LUAI_MUTATE_SOURCE" ;;
+    esac
+done
 exec "$LUAI_REAL_CC" "$@"
 ]])
     runCommand("chmod +x " .. shellQuote(fake_bin .. "/cc"))
@@ -2598,7 +2602,8 @@ test("backup cleanup never unlinks a directory-name file replacement", function(
 
     local original_remove = os.remove
     local original_rename = os.rename
-    local original_popen = io.popen
+    local guard_fs = require("luainstaller.fs")
+    local original_rmdir = guard_fs.removeDirectory
     local injected = false
     local replaced_path
     local user_content = "directory-name replacement must survive\n"
@@ -2618,15 +2623,14 @@ test("backup cleanup never unlinks a directory-name file replacement", function(
         if isTarget(candidate) then replaceDirectory(candidate) end
         return original_remove(candidate)
     end)
-    rawset(io, "popen", function(command, mode)
-        local candidate = command:match("rmdir '([^']+)'", 1)
+    rawset(guard_fs, "removeDirectory", function(candidate)
         if isTarget(candidate) then replaceDirectory(candidate) end
-        return original_popen(command, mode)
+        return original_rmdir(candidate)
     end)
 
     local call_ok, rebuilt = pcall(luainstaller.bundle, opts)
     rawset(os, "remove", original_remove)
-    rawset(io, "popen", original_popen)
+    rawset(guard_fs, "removeDirectory", original_rmdir)
     rawset(os, "rename", original_rename)
 
     assert(call_ok, rebuilt)
@@ -2643,7 +2647,8 @@ test("empty backup cleanup never unlinks a regular-file replacement", function()
     makeDirectory(out)
     local original_remove = os.remove
     local original_rename = os.rename
-    local original_popen = io.popen
+    local guard_fs = require("luainstaller.fs")
+    local original_rmdir = guard_fs.removeDirectory
     local injected = false
     local backup_path
     local user_content = "empty-backup replacement must survive\n"
@@ -2663,10 +2668,9 @@ test("empty backup cleanup never unlinks a regular-file replacement", function()
         if isTarget(candidate) then replaceDirectory(candidate) end
         return original_remove(candidate)
     end)
-    rawset(io, "popen", function(command, mode)
-        local candidate = command:match("rmdir '([^']+)'", 1)
+    rawset(guard_fs, "removeDirectory", function(candidate)
         if isTarget(candidate) then replaceDirectory(candidate) end
-        return original_popen(command, mode)
+        return original_rmdir(candidate)
     end)
 
     local call_ok, result = pcall(require("luainstaller").bundle, {
@@ -2674,7 +2678,7 @@ test("empty backup cleanup never unlinks a regular-file replacement", function()
         out = out,
     })
     rawset(os, "remove", original_remove)
-    rawset(io, "popen", original_popen)
+    rawset(guard_fs, "removeDirectory", original_rmdir)
     rawset(os, "rename", original_rename)
 
     assert(call_ok, result)
@@ -3621,6 +3625,9 @@ fi
 exec "$LUAI_REAL_PKG_CONFIG" "$@"
 ]], mismatched_release))
     writeFile(fake_bin .. "/cc", [[#!/bin/sh
+for value in "$@"; do
+    case "$value" in */host.c) exec "$LUAI_REAL_CC" "$@" ;; esac
+done
 : > "$LUAI_COMPILER_MARKER"
 exec "$LUAI_REAL_CC" "$@"
 ]])
@@ -3672,6 +3679,9 @@ esac
 exit 2
 ]], shellQuote(module_release)))
     writeFile(fake_bin .. "/cc", [[#!/bin/sh
+for value in "$@"; do
+    case "$value" in */host.c) exit 2 ;; esac
+done
 : > "$LUAI_COMPILER_MARKER"
 exit 2
 ]])

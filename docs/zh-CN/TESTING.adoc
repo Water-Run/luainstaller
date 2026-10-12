@@ -36,11 +36,15 @@ LUA=${LUA:-lua}
 "$LUA" test/build_interruption.lua
 "$LUA" test/output_transaction.lua
 "$LUA" test/lock_identity.lua
+"$LUA" test/process_bounds.lua
+"$LUA" test/resource_bounds.lua
+"$LUA" test/output_parents.lua
+"$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.5.2-1.rockspec
+luarocks lint luainstaller-1.5.3-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -98,6 +102,18 @@ x86_64 生成 C 代码和 PE 审计
 |`test/lock_identity.lua`
 |进程启动身份、PID 重用、跨主机及命名空间的拒绝恢复，
 以及旧所有权记录的兼容性
+
+|`test/process_bounds.lua`
+|无 GNU timeout 时的时限、子进程输出上限、退出码与参数原样传递
+
+|`test/resource_bounds.lua`
+|单个源码和总量上限、无效上限及空文件读取
+
+|`test/output_parents.lua`
+|两个宿主的链接祖先拒绝、POSIX 共享写入目录及用户文件保留
+
+|`test/build_cleanup.lua`
+|运行时和单文件构建的意外异常不遗留本次持有的临时工作区
 
 |`test/onefile_lifecycle.lua`
 |POSIX 进程身份与信号，以及 Windows 子进程遏制

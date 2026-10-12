@@ -169,6 +169,24 @@ Lua 是同一个版本
 `--verbose`:: 工作时输出更多细节
 `-- ARGS`:: 运行时发现期间传给脚本的参数
 
+[#usage-limits]
+== 时间和大小限制
+
+运行时发现会在 30 秒后停止脚本。需要运行更久时，用
+`--runtime-timeout 120` 调整，或改用静态发现。
+
+[cols="2m,2,3",options="header"]
+|===
+|选项 |默认值 |限制对象
+|--max-source-bytes |8 MiB |每个 Lua 源文件
+|--max-bundle-bytes |128 MiB |输入总量和暂存包
+|--max-trace-bytes |32 MiB |运行时跟踪记录
+|===
+
+Lua API 使用 `runtime_timeout`、`max_source_bytes`、`max_bundle_bytes`
+和 `max_trace_bytes`。超限时返回 `ResourceLimitExceededError`，包含
+`resource`、`limit` 和 `path`。
+
 [#usage-logs]
 == 日志
 

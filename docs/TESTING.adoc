@@ -38,11 +38,15 @@ LUA=${LUA:-lua}
 "$LUA" test/build_interruption.lua
 "$LUA" test/output_transaction.lua
 "$LUA" test/lock_identity.lua
+"$LUA" test/process_bounds.lua
+"$LUA" test/resource_bounds.lua
+"$LUA" test/output_parents.lua
+"$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.5.2-1.rockspec
+luarocks lint luainstaller-1.5.3-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -104,6 +108,18 @@ interrupted recovery, concurrent retries, and preservation of changed user files
 |`test/lock_identity.lua`
 |Process start identity, PID reuse, foreign host and namespace refusal,
 and compatibility with existing ownership records
+
+|`test/process_bounds.lua`
+|Deadlines without GNU timeout, capped child output, exit codes and literal arguments
+
+|`test/resource_bounds.lua`
+|Per-source and aggregate budgets, invalid limits and empty-file reads
+
+|`test/output_parents.lua`
+|Linked ancestors on both hosts, POSIX shared writers and preservation of user files
+
+|`test/build_cleanup.lua`
+|Unexpected runtime and single-file exceptions leave no owned temporary workspace
 
 |`test/onefile_lifecycle.lua`
 |POSIX process identity and signals, and Windows child containment

@@ -9,7 +9,7 @@ File:
 Date:
     2026-06-12
 Updated:
-    2026-06-12
+    2026-10-12
 ]]
 
 local SOURCE_DIR = (arg and arg[0] or ""):match("^(.*)[/\\][^/\\]+$") or "."
@@ -23,11 +23,15 @@ local history = require("history")
 local security = require("security")
 local web = require("web")
 
+local configured, configuration_error = security.validateConfiguration(config)
+if not configured then error(configuration_error, 0) end
+
 local VERSION = "2.0.0"
 local state = {
     connection = db.new({
         driver = config.default_driver,
         max_rows = config.max_rows,
+        max_sql_bytes = config.max_sql_bytes,
         firebird = config.firebird,
     }),
     history = history.new(config.history_limit),
@@ -49,7 +53,9 @@ end
 
 local function set_common_headers(resp, content_type)
     resp:addHeader("Content-Type", content_type or "application/json; charset=utf-8")
-    resp:addHeader("Access-Control-Allow-Origin", config.cors_origin or "*")
+    if config.cors_origin ~= "" then
+        resp:addHeader("Access-Control-Allow-Origin", config.cors_origin)
+    end
     resp:addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     resp:addHeader("Access-Control-Allow-Headers", "Content-Type, X-Auth-Token")
 end
@@ -67,26 +73,10 @@ local function text_resp(resp, status, content_type, body)
 end
 
 local function parse_json_body(req)
-    local headers = req:headers()
-    local len = tonumber(headers["content-length"]) or 0
-    if len <= 0 then
-        return {}
-    end
-    local raw = req:receiveBody(len)
-    if not raw or raw == "" then
-        return nil, "failed to read body"
-    end
-    local ok, obj = pcall(cjson.decode, raw)
-    if not ok or type(obj) ~= "table" then
-        return nil, "body must be a JSON object"
-    end
-    return obj
+    return security.readJsonBody(req, cjson.decode, config.max_body_bytes)
 end
 
 local function authenticated(req)
-    if config.token == "" then
-        return true
-    end
     local headers = req:headers()
     return headers["x-auth-token"] == config.token
 end
@@ -129,6 +119,7 @@ local function route_connect(req, resp)
     local next_conn = db.new({
         driver = body.driver or config.default_driver,
         max_rows = tonumber(body.max_rows) or config.max_rows,
+        max_sql_bytes = config.max_sql_bytes,
         firebird = {
             host = body.host or config.firebird.host,
             database = body.database or config.firebird.database,
@@ -273,10 +264,6 @@ local function dispatch(req, resp)
     end
 
     return true
-end
-
-if config.token == "changeme_PLEASE" then
-    log("WARN", "default token in use; set FIREBIRD_WEB_SQL_TOKEN for real use")
 end
 
 log("INFO", "Firebird Web SQL Shell %s", VERSION)

@@ -119,7 +119,7 @@ function M.currentPid()
         pid, err = windowsParentProcessId()
     else
         local own = procRecord("self")
-        pid = own and own.pid or process.firstLine([[printf '%s' "$PPID"]])
+        pid = own and own.pid or process.currentPid()
         if not validInteger(pid) then
             err = "cannot identify the owning POSIX process"
             pid = nil

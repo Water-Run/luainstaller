@@ -35,6 +35,8 @@ package.preload["luainstaller.logger"] = function() return dofile("src/logger.lu
 package.preload["luainstaller.manifest"] = function() return dofile("src/manifest.lua") end
 package.preload["luainstaller.compat"] = function() return dofile("src/compat.lua") end
 package.preload["luainstaller.process"] = function() return dofile("src/process.lua") end
+package.preload["luainstaller.posix_host"] = function() return dofile("src/posix_host.lua") end
+package.preload["luainstaller.posix_host_source"] = function() return dofile("src/posix_host_source.lua") end
 package.preload["luainstaller.toolchain"] = function() return dofile("src/toolchain.lua") end
 package.preload["luainstaller.path"] = function() return dofile("src/path.lua") end
 package.preload["luainstaller.result"] = function() return dofile("src/result.lua") end
@@ -1079,8 +1081,13 @@ print("failed rebuild reported")
     run("mkdir -p " .. shell_quote(racing_bin))
     write_file(racing_bin .. "/cc", [[
 #!/bin/sh
-mkdir -p "$LUAI_RACE_OUT"
-printf '%s\n' 'user data created during build' > "$LUAI_RACE_OUT/sentinel.txt"
+for value in "$@"; do
+    case "$value" in
+        */launcher.c)
+            mkdir -p "$LUAI_RACE_OUT"
+            printf '%s\n' 'user data created during build' > "$LUAI_RACE_OUT/sentinel.txt" ;;
+    esac
+done
 exec "$LUAI_REAL_CC" "$@"
 ]])
     run("chmod +x " .. shell_quote(racing_bin .. "/cc"))
@@ -1107,7 +1114,11 @@ print("onedir output race rejected")
     run("mkdir -p " .. shell_quote(racing_cc_bin))
     write_file(racing_cc_bin .. "/cc", [[
 #!/bin/sh
-printf '%s\n' 'user file created during build' > "$LUAI_RACE_ONEFILE_OUT"
+for value in "$@"; do
+    case "$value" in
+        */launcher.c) printf '%s\n' 'user file created during build' > "$LUAI_RACE_ONEFILE_OUT" ;;
+    esac
+done
 exec "$LUAI_REAL_CC" "$@"
 ]])
     run("chmod +x " .. shell_quote(racing_cc_bin .. "/cc"))
@@ -1190,7 +1201,7 @@ print(result.executable)
 end
 
 local function check_release_metadata_contract()
-    local rockspec = read_file("luainstaller-1.5.2-1.rockspec")
+    local rockspec = read_file("luainstaller-1.5.3-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
@@ -1234,7 +1245,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luai", { "-v" })),
-        "luai 1.5.2\n"
+        "luai 1.5.3\n"
     )
 
     local full_help = run(cli_command("luainstaller", { "help" }))
@@ -1248,7 +1259,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luainstaller", { "version" })),
-        "luainstaller 1.5.2  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.5.3  LGPL 3.0 by WaterRun\n"
     )
 
     local bad_luai = run(cli_command("luai", { "build", "test/single_file/01_hello_luainstaller.lua" }), {
@@ -1631,13 +1642,13 @@ assert_bundle({
             "set -e",
             "EXE=" .. shell_quote(firebird_out .. "/firebird-web-sql"),
             "LOG=" .. shell_quote(root .. "/firebird.log"),
-            "FIREBIRD_WEB_SQL_PORT=" .. port .. " FIREBIRD_WEB_SQL_TOKEN=testtoken \"$EXE\" >\"$LOG\" 2>&1 &",
+            "FIREBIRD_WEB_SQL_PORT=" .. port .. " FIREBIRD_WEB_SQL_TOKEN=testtoken012345678901234567890123 \"$EXE\" >\"$LOG\" 2>&1 &",
             "PID=$!",
             "cleanup() { kill \"$PID\" >/dev/null 2>&1 || true; wait \"$PID\" >/dev/null 2>&1 || true; }",
             "trap cleanup EXIT",
             "i=0",
             "while [ \"$i\" -lt 30 ]; do",
-            "  if curl -fsS http://127.0.0.1:" .. port .. "/api/status -H 'X-Auth-Token: testtoken' | grep -F '\"ok\":true' >/dev/null; then exit 0; fi",
+            "  if curl -fsS http://127.0.0.1:" .. port .. "/api/status -H 'X-Auth-Token: testtoken012345678901234567890123' | grep -F '\"ok\":true' >/dev/null; then exit 0; fi",
             "  sleep 0.2",
             "  if ! kill -0 \"$PID\" >/dev/null 2>&1; then cat \"$LOG\"; exit 1; fi",
             "  i=$((i + 1))",
@@ -1817,10 +1828,10 @@ local function check_installed_cli_bundle()
     local root = make_temp_dir("installed-cli")
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
-    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.5.2-1.rockspec")
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.5.3-1.rockspec")
     assert_equals(
         run(shell_quote(tree .. "/bin/luainstaller") .. " version"),
-        "luainstaller 1.5.2  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.5.3  LGPL 3.0 by WaterRun\n"
     )
     run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")

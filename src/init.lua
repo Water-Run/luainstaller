@@ -26,6 +26,7 @@ local path     = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local discovery = require("luainstaller.discovery")
 local result = require("luainstaller.result")
+local process = require("luainstaller.process")
 
 
 --[[
@@ -43,7 +44,7 @@ local M = {}
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.5.2"
+M.VERSION = "1.5.3"
 
 --@description: Package author name
 --@const: AUTHOR
@@ -113,6 +114,8 @@ M.ErrorTypes = {
     INVALID_MANIFEST      = "InvalidManifestError",
     BUILD_FAILED          = "BuildFailedError",
     INTERRUPTED           = "InterruptedError",
+    RESOURCE_LIMIT        = "ResourceLimitExceededError",
+    RUNTIME_TIMEOUT       = "RuntimeTimeoutError",
 }
 
 
@@ -233,6 +236,10 @@ local ALLOWED_OPTIONS = {
     lua = true,
     lua_prefix = true,
     max_deps = true,
+    max_source_bytes = true,
+    max_bundle_bytes = true,
+    max_trace_bytes = true,
+    runtime_timeout = true,
     mode = true,
     out = true,
     run_args = true,
@@ -335,6 +342,28 @@ local function normalizeOptions(opts)
     normalized.include = include
     normalized.exclude = exclude
     normalized.run_args = run_args
+    for _, budget in ipairs({
+        {"max_source_bytes", "LUAI_MAX_SOURCE_BYTES", 8388608},
+        {"max_bundle_bytes", "LUAI_MAX_BUNDLE_BYTES", 134217728},
+        {"max_trace_bytes", "LUAI_MAX_TRACE_BYTES", 33554432},
+        {"runtime_timeout", "LUAI_RUNTIME_TIMEOUT", 30},
+    }) do
+        local key, environment_name, default = budget[1], budget[2], budget[3]
+        local value = opts[key]
+        if value == nil then
+            local environment = os.getenv(environment_name)
+            if key == "runtime_timeout" and environment == nil then
+                environment = os.getenv("LUAI_CMD_TIMEOUT")
+            end
+            if environment ~= nil then value = tonumber(environment) else value = default end
+        end
+        local maximum = key == "runtime_timeout" and 86400 or 1073741824
+        if type(value) ~= "number" or value ~= value or value <= 0 or value > maximum
+            or (key ~= "runtime_timeout" and value ~= math.floor(value)) then
+            return nil, invalidOption(key, key .. " must be finite, positive and within " .. maximum)
+        end
+        normalized[key] = value
+    end
     return normalized
 end
 
@@ -402,12 +431,21 @@ local function analyzeContext(opts, config)
         local recovered = bundler.recoverOutput(normalized)
         if not recovered.ok then return nil, recovered end
     end
-    local entry_content, entry_read_err = fs.readRegularFile(normalized.entry)
+    local entry_content, entry_read_err, entry_state = fs.readRegularFile(normalized.entry,
+        normalized.max_source_bytes)
     if entry_content == nil then
+        if entry_state and entry_state.limit_exceeded then
+            return nil, result.resourceLimit("source-bytes", normalized.max_source_bytes, normalized.entry)
+        end
         return nil, makeError("ScriptNotFoundError", string.format("Lua script not found: %s", normalized.entry), {
             script_path = normalized.entry,
             cause = entry_read_err,
         })
+    end
+    if package.config:sub(1, 1) ~= "\\" and (config.default_mode
+        or normalized.discovery_mode == "runtime") then
+        local ready, native_err = process.prepareNative()
+        if not ready then return nil, makeError("ToolchainError", native_err) end
     end
     local syntax_ok, syntax_err = pcall(analyzer.validateSource, entry_content, normalized.entry)
     if not syntax_ok then
@@ -542,6 +580,8 @@ function M.bundle(opts)
     end
 
     local bundle_opts = {
+        max_source_bytes = normalized.max_source_bytes,
+        max_bundle_bytes = normalized.max_bundle_bytes,
         entry = normalized.entry,
         out = normalized.out,
         target_os = normalized.target_os or os.getenv("LUAI_TARGET_OS"),

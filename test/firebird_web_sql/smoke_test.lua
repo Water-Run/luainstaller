@@ -12,7 +12,7 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-06-14
+    2026-10-12
 ]]
 local ROOT = "test/firebird_web_sql"
 package.path = ROOT .. "/?.lua;" .. package.path
@@ -21,6 +21,22 @@ local db = require("db")
 local history = require("history")
 local security = require("security")
 local web = require("web")
+
+assert(type(security.validateConfiguration) == "function", "sample has no startup security policy")
+local safe = {host="127.0.0.1", token=string.rep("test", 8), max_body_bytes=65536}
+assert(security.validateConfiguration(safe))
+for _, token in ipairs({"", "changeme_PLEASE", "short"}) do
+    assert(not security.validateConfiguration({host="127.0.0.1", token=token}),
+        "weak sample token was accepted")
+end
+assert(not security.validateConfiguration({host="0.0.0.0", token=safe.token}),
+    "sample accepted a public listener")
+local received = false
+local body, body_error = security.readJsonBody({
+    headers=function() return {["content-length"]="999999999"} end,
+    receiveBody=function() received=true; return "{}" end,
+}, function() return {} end, 65536)
+assert(body == nil and body_error and not received, "oversized body was read")
 
 local function assert_contains(text, pattern)
     if not tostring(text):find(pattern, 1, true) then
@@ -37,6 +53,9 @@ assert(result.columns[1] == "ID", "expected ID column")
 
 local count = assert(conn:query("select count(*) from employee"))
 assert(count.rows[1].COUNT == 4, "expected employee count")
+assert(not conn:query("select * from employee", {max_rows=math.huge}))
+assert(not conn:query(string.rep("x", 16385)))
+assert(not db.new({driver="luasql-firebird", firebird={password="masterkey"}}):connect())
 
 local tables = assert(conn:tables())
 assert(#tables >= 2, "expected mock tables")
@@ -56,7 +75,9 @@ assert(#hist:list() == 0, "expected cleared history")
 
 local caps = security.capabilities({ enabled = true, trusted_public_keys = "client.pem" })
 assert(caps.password_header == true, "expected password header support")
-assert(caps.key_auth.enabled == true, "expected key auth flag")
+assert(caps.key_auth.enabled == false and caps.key_auth.requested == true,
+    "unimplemented client-key authentication was reported as enabled")
+assert(caps.app_encryption == false, "unimplemented application encryption was advertised")
 assert(caps.browser_webcrypto == true, "expected WebCrypto support")
 
 local html = web.index_html()

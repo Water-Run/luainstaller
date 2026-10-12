@@ -9,7 +9,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local M = {}
@@ -93,6 +93,8 @@ local PRELOADS = {
     { "luainstaller.hash", "src/hash.lua" },
     { "luainstaller.path", "src/path.lua" },
     { "luainstaller.process", "src/process.lua" },
+    { "luainstaller.posix_host", "src/posix_host.lua" },
+    { "luainstaller.posix_host_source", "src/posix_host_source.lua" },
     { "luainstaller.toolchain", "src/toolchain.lua" },
     { "luainstaller.result", "src/result.lua" },
     { "luainstaller.lock_owner", "src/lock_owner.lua" },

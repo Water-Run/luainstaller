@@ -27,6 +27,45 @@ luai -b --file app/main.lua -o build/app-onefile   # 5. 单文件可用吗？
 
 toc::[]
 
+[#troubleshooting-install]
+== LuaRocks 安装了旧版本
+
+镜像可能比官方服务器晚同步。先检查安装命令实际使用的源，再选择官方服务器：
+
+[source,bash]
+----
+sudo luarocks config rocks_servers
+sudo luarocks install --only-server=https://luarocks.org luainstaller
+luai -v
+----
+
+`sudo` 读取 root 的配置，可能与你的用户设置不同。从该配置移除过期镜像：
+否则官方源下载失败时，仍可能回退到旧包。
+
+如果下载报 `unexpected eof while reading`，改用系统 HTTPS 下载器并开启证书校验：
+
+[source,bash]
+----
+sudo luarocks config --scope=user fs_use_modules false
+sudo luarocks config --scope=user check_certificates true
+sudo luarocks install --only-server=https://luarocks.org luainstaller
+----
+
+[#troubleshooting-limits]
+== 扫描超时或输入太大
+
+运行时发现会执行脚本。服务器或交互式程序通常适合静态发现。
+如果任务能在有限时间内结束，可调高 `--runtime-timeout`。
+
+大小错误会指出资源和字节上限。对应选项见
+xref:USAGE.adoc#usage-limits[时间和大小限制]。
+`LUAI_CMD_TIMEOUT` 控制命令时限，`LUAI_MAX_OUTPUT_BYTES` 控制工具输出捕获量，
+默认 8 MiB。
+
+把输出放在自己控制的目录中。POSIX 会拒绝链接或共享可写的输出祖先目录。
+Termux 使用应用私有存储作为输出位置。发布前会再次核对目录身份。
+Windows 检查重解析点，并在文件操作期间持有祖先目录句柄；工作目录只向可信用户开放。
+
 [#troubleshooting-cli]
 == "unknown option" 或 "unknown command"
 
