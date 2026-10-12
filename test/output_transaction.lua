@@ -23,6 +23,15 @@ local suffix = package.config:sub(1, 1) == "\\" and ".exe" or ""
 -- Lua 5.1's arithmetic SHA backend needs more time to verify every copied
 -- library and backup. The fault must be reached before the driver is stopped.
 local driver_timeout = _VERSION == "Lua 5.1" and 600 or 120
+local phases = { "before-backup", "after-backup", "after-publish", "during-cleanup",
+    "during-quarantine", "after-marker", "during-directory-cleanup" }
+local diagnostic_phase = os.getenv("LUAI_TEST_PUBLICATION_PHASE")
+if diagnostic_phase then
+    local valid
+    for _, phase in ipairs(phases) do if phase == diagnostic_phase then valid = true end end
+    assert(valid, "unknown diagnostic publication phase")
+    phases = {diagnostic_phase}
+end
 
 assert(fs.writeFile(driver, [[
 local harness = dofile("test/support/harness.lua")
@@ -97,12 +106,16 @@ end
 ]]))
 
 local function runDriver(arguments)
+    if package.config:sub(1, 1) == "\\" then
+        local ok, output, status = require("luainstaller.windows_host").execute(
+            harness.lua_command(), arguments, {}, driver_timeout)
+        return ok, tostring(output or ""):gsub("\r\n", "\n"), status
+    end
     return process.outputCommand(harness.lua_command(), arguments, {}, {timeout_seconds=driver_timeout})
 end
 
 local called, failure = xpcall(function()
-    for _, phase in ipairs({ "before-backup", "after-backup", "after-publish", "during-cleanup",
-        "during-quarantine", "after-marker", "during-directory-cleanup" }) do
+    for _, phase in ipairs(phases) do
         local directory = path.join(root, phase)
         assert(fs.makeDirectory(directory))
         local entry = path.join(directory, "main.lua")
@@ -117,10 +130,11 @@ local called, failure = xpcall(function()
         assert(not survived, "faulted build returned success: " .. tostring(output))
         assert(output:find("fault-injected:" .. phase, 1, true),
             "fault boundary was not reached within the driver budget: " .. phase .. "\n" .. output)
-        local recovered, recovery_output = runDriver({
+        local recovered, recovery_output, recovery_status = runDriver({
             driver, "recover-with-failed-build", entry, out,
         })
-        assert(recovered, recovery_output)
+        assert(recovered, "recovery driver failed: phase=" .. phase
+            .. " status=" .. tostring(recovery_status) .. "\n" .. tostring(recovery_output))
         local ran, result = process.outputCommand(path.join(out, "app" .. suffix), {}, {
             LUA_PATH="", LUA_CPATH="",
         })
@@ -135,6 +149,10 @@ local called, failure = xpcall(function()
             end
         end
         print("output transaction recovered: " .. phase)
+    end
+    if diagnostic_phase then
+        print("diagnostic publication phase only: " .. diagnostic_phase)
+        return
     end
     local directory = path.join(root, "missing-source")
     assert(fs.makeDirectory(directory))

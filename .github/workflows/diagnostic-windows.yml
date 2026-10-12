@@ -1,0 +1,32 @@
+name: Windows publication diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      lua:
+        type: choice
+        default: "5.2.4"
+        options: ["5.1.5", "5.2.4", "5.3.6", "5.4.9", "5.5.1"]
+      phase:
+        type: choice
+        default: before-backup
+        options: [before-backup, after-backup, after-publish, during-cleanup,
+          during-quarantine, after-marker, during-directory-cleanup]
+permissions:
+  contents: read
+jobs:
+  publication:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Diagnose one publication boundary with native MSVC
+        shell: powershell
+        timeout-minutes: 30
+        env:
+          LUA_VERSION: ${{ inputs.lua }}
+          LUAI_TEST_PUBLICATION_PHASE: ${{ inputs.phase }}
+        run: |
+          & powershell.exe -NoLogo -NoProfile -NonInteractive `
+            -ExecutionPolicy Bypass -File .\tools\test-lua-versions.ps1 `
+            -HostLabel ci-windows-diagnostic `
+            -VersionFilter $env:LUA_VERSION -PublicationDiagnostic
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

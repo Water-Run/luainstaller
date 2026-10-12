@@ -4,7 +4,8 @@ param(
     [string]$WorkRoot = (Join-Path $env:TEMP 'luainstaller-lua-matrix'),
     [string]$EvidenceDir = (Join-Path $env:TEMP 'luainstaller-lua-evidence'),
     [string]$HostLabel = $env:COMPUTERNAME,
-    [string[]]$VersionFilter = @()
+    [string[]]$VersionFilter = @(),
+    [switch]$PublicationDiagnostic
 )
 
 $ErrorActionPreference = 'Stop'
@@ -323,6 +324,10 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
     $env:LUA_CPATH = ''
     $env:PATH = "$(Split-Path -Parent $LuaRocks);$luaPrefix;$luaPrefix\bin;$env:PATH"
     Set-Location $ProjectRoot
+    if ($PublicationDiagnostic) {
+        Invoke-Native $lua @('test/output_transaction.lua')
+        return
+    }
     Invoke-Native $luac @('-p','luainstaller.lua')
     foreach ($tree in @('src','test','tools','bin')) {
         foreach ($file in Get-ChildItem -LiteralPath $tree -Recurse -Filter '*.lua' -File) {
