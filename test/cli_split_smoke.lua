@@ -201,7 +201,7 @@ code, out, err = run_cli("luainstaller", {
     "--max-deps",
     "250",
 }, { color = true, animations = false })
-assert(code == 0)
+assert(code == 0, "modern analysis failed: " .. err)
 assert_contains(out, "\27[")
 assert_contains(out, "Analysis complete")
 assert_contains(out, "Lua scripts")

@@ -102,6 +102,8 @@ and its legacy watchdog. These mechanisms are not a code sandbox.
 and `posix_host_source.lua` are synchronized by
 `tools/generate-posix-host-source.lua`. The bounded shell bootstrap serves
 trusted compiler and filesystem operations before the native helper is ready.
+It uses a detected GNU timeout when available, retaining the shell watchdog
+fallback otherwise. User-code execution always uses the native supervisor.
 Static and manual analysis need no POSIX helper.
 
 Options in `init.lua` set byte budgets before parsing. The tracer bounds

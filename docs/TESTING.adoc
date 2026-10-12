@@ -141,6 +141,11 @@ version. Shared test helpers live under `test/support/`.
 `test/contract_docs.lua` is the executable form of the public
 documentation promises.
 
+Whole-build test drivers use a 600-second budget on Lua 5.1 and 5.2,
+and 120 seconds on newer ABIs. Signal tests wait for compiler readiness
+before injecting the signal. These driver budgets do not change the
+product's command or runtime-discovery limits.
+
 [#testing-install]
 == Install
 

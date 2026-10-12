@@ -72,6 +72,9 @@ exec "$LUAI_REAL_CC" "$@"
         return count
     end
     local function interruptBuild(target, signal_name, label, timeout_seconds)
+        local old_abi = _VERSION == "Lua 5.1" or _VERSION == "Lua 5.2"
+        local readiness_attempts = old_abi and 4800 or 1200
+        local driver_timeout = old_abi and 600 or 120
         local marker = path.join(root, "compiler-ready-" .. label)
         local diagnostic_path = path.join(root, "interrupted-" .. label .. ".log")
         local script = table.concat({
@@ -90,7 +93,7 @@ exec "$LUAI_REAL_CC" "$@"
             "build=$!",
             "ready_seen=0",
             "attempt=0",
-            "while test \"$attempt\" -lt 400; do",
+            "while test \"$attempt\" -lt " .. readiness_attempts .. "; do",
             "  if test -f " .. harness.shell_quote(marker) .. "; then ready_seen=1; break; fi",
             "  if ! kill -0 \"$build\" 2>/dev/null; then break; fi",
             "  sleep 0.025",
@@ -111,7 +114,8 @@ exec "$LUAI_REAL_CC" "$@"
             "set -e",
             "printf 'status=%s\\n' \"$status\"",
         }, "\n")
-        local interrupted_ok, interrupted_output, interrupted_status = process.output(script)
+        local interrupted_ok, interrupted_output, interrupted_status = process.output(script,
+            {timeout_seconds=driver_timeout})
         local diagnostic = fs.readRegularFile(diagnostic_path) or ""
         assert(interrupted_ok, tostring(interrupted_output) .. "\ncommand status: "
             .. tostring(interrupted_status and interrupted_status.code) .. " "

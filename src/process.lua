@@ -206,11 +206,57 @@ local function readPipe(invocation, token, opts, bootstrap)
     return code == 0 and (close_result == true or _VERSION == "Lua 5.1"), captured, {code=code, reason=reason}
 end
 
+local gnu_timeout
+
+local function gnuBootstrapInvocation(command, opts, token)
+    local script = table.concat({
+        "__luai_timeout_pid=",
+        "__luai_stop() {",
+        "  trap '' HUP INT QUIT TERM",
+        '  test -z "$__luai_timeout_pid" || kill -TERM "$__luai_timeout_pid" 2>/dev/null',
+        '  test -z "$__luai_timeout_pid" || wait "$__luai_timeout_pid" 2>/dev/null',
+        '  exit "$1"',
+        "}",
+        "trap '__luai_stop 129' HUP",
+        "trap '__luai_stop 130' INT",
+        "trap '__luai_stop 131' QUIT",
+        "trap '__luai_stop 143' TERM",
+        "printf '" .. token .. ":PID:%s\\n' \"$$\"",
+        M.quote(gnu_timeout) .. " --signal=TERM --kill-after=1 " .. tostring(opts.timeout_seconds)
+            .. " sh -c " .. M.quote(command) .. " 2>&1 &",
+        "__luai_timeout_pid=$!",
+        'wait "$__luai_timeout_pid"',
+        "__luai_status=$?",
+        "__luai_timeout_pid=",
+        "__luai_reason=exit",
+        'test "$__luai_status" -ne 124 || __luai_reason=timeout',
+        "printf '\\n" .. token .. ":%s:%s\\n' \"$__luai_status\" \"$__luai_reason\"",
+        'exit "$__luai_status"',
+    }, "\n")
+    return "exec sh -c " .. M.quote(script)
+end
+
 local function bootstrapOutput(command, opts)
     local normalized, err = commandOptions(opts)
     if not normalized then return false, err, {reason="invalid-options"} end
+    if gnu_timeout == nil then
+        gnu_timeout = false
+        local probe_opts = {timeout_seconds=3, max_output_bytes=4096}
+        local probe_token = statusToken()
+        local found, location = readPipe(bootstrapInvocation("command -v timeout", probe_opts,
+            probe_token), probe_token, probe_opts, true)
+        location = tostring(location or ""):match("^%s*(.-)%s*$")
+        if found and location:sub(1, 1) == "/" and not location:find("[%c]") then
+            local version_token = statusToken()
+            local checked, version = readPipe(bootstrapInvocation(M.quote(location) .. " --version",
+                probe_opts, version_token), version_token, probe_opts, true)
+            if checked and version:find("timeout (GNU coreutils)", 1, true) then gnu_timeout = location end
+        end
+    end
     local token = statusToken()
-    return readPipe(bootstrapInvocation(command, normalized, token), token, normalized, true)
+    local invocation = gnu_timeout and gnuBootstrapInvocation(command, normalized, token)
+        or bootstrapInvocation(command, normalized, token)
+    return readPipe(invocation, token, normalized, true)
 end
 
 function M.currentPid()

@@ -91,8 +91,10 @@ if phase == "recover-with-failed-build" then
 end
 local built = api.bundle({entry=entry, out=out, mode="onedir"})
 if phase == "recover-only" then
-    assert(not built.ok and (built.error.type == "ScriptNotFoundError"
-        or built.error.type == "FilesystemError"), "unexpected recovery result")
+        assert(not built.ok and (built.error.type == "ScriptNotFoundError"
+        or built.error.type == "FilesystemError"), "unexpected recovery result: "
+            .. tostring(built.error and built.error.message)
+            .. " cause=" .. tostring(built.error and built.error.cause))
     print("recovery-result:" .. built.error.type)
     return
 end

@@ -41,6 +41,7 @@ local installed, install_output = process.outputCommand("luarocks", {
 assert(installed, install_output)
 
 local windows = package.config:sub(1, 1) == "\\"
+local driver_timeout = (_VERSION == "Lua 5.1" or _VERSION == "Lua 5.2") and 600 or 120
 local command_suffix = windows and ".bat" or ""
 local bin = path.join(tree, "bin")
 local luai = path.join(bin, "luai" .. command_suffix)
@@ -54,7 +55,7 @@ assert(fs.pathType(path.join(
 
 local function installedCommand(command, arguments, environment)
     if not windows then
-        return process.outputCommand(command, arguments, environment)
+        return process.outputCommand(command, arguments, environment, {timeout_seconds=driver_timeout})
     end
     local command_line = { process.quote(command) }
     for _, value in ipairs(arguments or {}) do
@@ -63,7 +64,7 @@ local function installedCommand(command, arguments, environment)
     local comspec = assert(os.getenv("ComSpec") or os.getenv("COMSPEC"))
     return process.outputCommand(comspec, {
         "/d", "/s", "/c", table.concat(command_line, " "),
-    }, environment)
+    }, environment, {timeout_seconds=driver_timeout})
 end
 
 local version_ok, version_output = installedCommand(luai, { "-v" })
