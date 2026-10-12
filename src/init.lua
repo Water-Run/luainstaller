@@ -43,7 +43,7 @@ local M = {}
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.5.1"
+M.VERSION = "1.5.2"
 
 --@description: Package author name
 --@const: AUTHOR
@@ -398,6 +398,10 @@ local function analyzeContext(opts, config)
             return nil, mode_err
         end
     end
+    if config.recover_output and normalized.mode == "onedir" then
+        local recovered = bundler.recoverOutput(normalized)
+        if not recovered.ok then return nil, recovered end
+    end
     local entry_content, entry_read_err = fs.readRegularFile(normalized.entry)
     if entry_content == nil then
         return nil, makeError("ScriptNotFoundError", string.format("Lua script not found: %s", normalized.entry), {
@@ -511,7 +515,7 @@ end
 --@param opts: table - Options table with entry
 --@return: table - Structured bundle result or structured error
 function M.bundle(opts)
-    local context, err = analyzeContext(opts, { default_mode = "onedir" })
+    local context, err = analyzeContext(opts, { default_mode = "onedir", recover_output = true })
     if not context then
         return recordFailure("bundle", err)
     end

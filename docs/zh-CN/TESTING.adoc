@@ -34,11 +34,13 @@ LUA=${LUA:-lua}
 "$LUA" test/native_dependencies.lua
 "$LUA" test/production_edges.lua
 "$LUA" test/build_interruption.lua
+"$LUA" test/output_transaction.lua
+"$LUA" test/lock_identity.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.5.1-1.rockspec
+luarocks lint luainstaller-1.5.2-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -88,6 +90,14 @@ x86_64 生成 C 代码和 PE 审计
 |`test/build_interruption.lua`
 |转发 SIGINT 后的编译器关闭、有界的 SIGKILL 子进程、属主死亡后的
 恢复，以及干净重试
+
+|`test/output_transaction.lua`
+|发布、备份隔离及部分清理边界的强制退出；恢复过程中再次中断、并发重试，
+以及保留用户修改的文件
+
+|`test/lock_identity.lua`
+|进程启动身份、PID 重用、跨主机及命名空间的拒绝恢复，
+以及旧所有权记录的兼容性
 
 |`test/onefile_lifecycle.lua`
 |POSIX 进程身份与信号，以及 Windows 子进程遏制
@@ -139,7 +149,7 @@ xref:INSTALL.adoc[免 LuaRocks 安装]。
 |5.3.6
 
 |5.4
-|5.4.8
+|5.4.9
 
 |5.5
 |5.5.1

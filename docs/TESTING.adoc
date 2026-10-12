@@ -36,11 +36,13 @@ LUA=${LUA:-lua}
 "$LUA" test/native_dependencies.lua
 "$LUA" test/production_edges.lua
 "$LUA" test/build_interruption.lua
+"$LUA" test/output_transaction.lua
+"$LUA" test/lock_identity.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.5.1-1.rockspec
+luarocks lint luainstaller-1.5.2-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -94,6 +96,14 @@ a bundled dependency and requires execution to fail.
 |`test/build_interruption.lua`
 |Relayed SIGINT compiler shutdown, bounded SIGKILL descendants,
 dead-owner recovery, and clean retry
+
+|`test/output_transaction.lua`
+|Abrupt exits during publication, backup quarantine and partial cleanup;
+interrupted recovery, concurrent retries, and preservation of changed user files
+
+|`test/lock_identity.lua`
+|Process start identity, PID reuse, foreign host and namespace refusal,
+and compatibility with existing ownership records
 
 |`test/onefile_lifecycle.lua`
 |POSIX process identity and signals, and Windows child containment
@@ -149,7 +159,7 @@ no LuaRocks. See xref:INSTALL.adoc[Installation without LuaRocks].
 |5.3.6
 
 |5.4
-|5.4.8
+|5.4.9
 
 |5.5
 |5.5.1

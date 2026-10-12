@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -137,6 +137,35 @@ dofile(%q)
         local generated, output = process.outputCommand(harness.lua_command(), { probe })
         assert(generated and output == vector[2] .. "\n", output)
     end
+    local manifest_path = path.join(fixture, ".luai/build/payload-files.lua")
+    local marker_path = path.join(fixture, "untrusted-manifest-ran")
+    local executable_manifest = string.format(
+        "local f=assert(io.open(%q, 'wb')); f:write('executed'); f:close(); return {}",
+        marker_path
+    )
+    local bytecode = string.dump(assert((loadstring or load)(executable_manifest)))
+    for _, content in ipairs({ executable_manifest, bytecode }) do
+        assert(fs.writeFile(manifest_path, content))
+        local accepted, diagnostic = process.outputCommand(harness.lua_command(), { probe })
+        assert(fs.pathType(marker_path) == "missing",
+            "payload manifest was executed instead of parsed as data")
+        assert(not accepted, "executable payload manifest was accepted: " .. tostring(diagnostic))
+    end
+    for _, content in ipairs({
+        "return {{path='probe', path='probe', executable=false}}",
+        "return {{path='probe', executable=false, extra=true}}",
+        "return {{path='probe', executable=false}}; return {}",
+        "return {{path='../outside', executable=false}}",
+        "return {{path='probe', executable=function() end}}",
+    }) do
+        assert(fs.writeFile(manifest_path, content))
+        local accepted = process.outputCommand(harness.lua_command(), { probe })
+        assert(not accepted, "malformed payload manifest was accepted")
+    end
+    assert(fs.writeFile(manifest_path,
+        "-- generated data\nreturn { { executable = false, path = 'pro\\098e' }, }\n"))
+    local decoded, decode_output = process.outputCommand(harness.lua_command(), { probe })
+    assert(decoded, decode_output)
     assert(hash.sha256(assert(fs.readRegularFile("LICENSES/Lua-MIT.txt")))
         == "a23ad1f0b07e4e59009d8efaaf1f5ed1dcd06e5256c1743a58ca4f1cacad32e0",
         "Lua license differs from the verified Lua 5.5.1 text")

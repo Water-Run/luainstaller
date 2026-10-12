@@ -219,16 +219,16 @@ LUAI_MATRIX_EDGE_COVERAGE_MODE=available \
     SOURCE_CACHE="$MATRIX_SOURCE_CACHE" EVIDENCE_DIR="$MATRIX_EVIDENCE_ROOT" \
     sh tools/test-lua-versions.sh
 
-LUA_PREFIX=$MATRIX_WORK_ROOT/lua-5.4.8
-LUAROCKS_PREFIX=$MATRIX_WORK_ROOT/luarocks-5.4.8
-NATIVE_DEPS=$MATRIX_WORK_ROOT/native-deps-5.4.8
+LUA_PREFIX=$MATRIX_WORK_ROOT/lua-5.4.9
+LUAROCKS_PREFIX=$MATRIX_WORK_ROOT/luarocks-5.4.9
+NATIVE_DEPS=$MATRIX_WORK_ROOT/native-deps-5.4.9
 TEST_LUA=$LUA_PREFIX/bin/lua
 TEST_LUAC=$LUA_PREFIX/bin/luac
 TEST_LUAROCKS=$LUAROCKS_PREFIX/bin/luarocks
 DEPS_LUA_PATH=$NATIVE_DEPS/share/lua/5.4/?.lua\;$NATIVE_DEPS/share/lua/5.4/?/init.lua
 DEPS_LUA_CPATH=$NATIVE_DEPS/lib/lua/5.4/?.so\;$NATIVE_DEPS/lib/lua/5.4/?/init.so
 test "$($TEST_LUA -e 'io.write(_VERSION)')" = "Lua 5.4"
-test "$(PKG_CONFIG_PATH="$LUA_PREFIX/lib/pkgconfig" pkg-config --modversion lua)" = "5.4.8"
+test "$(PKG_CONFIG_PATH="$LUA_PREFIX/lib/pkgconfig" pkg-config --modversion lua)" = "5.4.9"
 find src test tools -type f -name '*.lua' -print | while IFS= read -r file; do
     "$TEST_LUAC" -p "$file"
 done
@@ -239,13 +239,13 @@ LUA_CPATH=$DEPS_LUA_CPATH
 LUAI_TEST_LUA=$TEST_LUA
 LUAI_TEST_LUAC=$TEST_LUAC
 LUAI_LUA_PREFIX=$LUA_PREFIX
-LUAI_LUA_RELEASE=5.4.8
+LUAI_LUA_RELEASE=5.4.9
 PKG_CONFIG_PATH=$LUA_PREFIX/lib/pkgconfig
 export PATH LUA_PATH LUA_CPATH LUAI_TEST_LUA LUAI_TEST_LUAC
 export LUAI_LUA_PREFIX LUAI_LUA_RELEASE PKG_CONFIG_PATH
 
 "$TEST_LUAROCKS" make --force --deps-mode=none --tree "$INSTALL_ROOT" \
-    luainstaller-1.5.1-1.rockspec
+    luainstaller-1.5.2-1.rockspec
 "$INSTALL_ROOT/bin/luai" -v
 "$INSTALL_ROOT/bin/luainstaller" build --dir test/runtime_bundle/main.lua \
     -o "$RUNTIME_ROOT" --max-deps 120
@@ -318,16 +318,16 @@ LUAI_MATRIX_EDGE_COVERAGE_MODE=available \
     SOURCE_CACHE="$MATRIX_SOURCE_CACHE" EVIDENCE_DIR="$MATRIX_EVIDENCE_ROOT" \
     sh tools/test-lua-versions.sh
 
-LUA_PREFIX=$MATRIX_WORK_ROOT/lua-5.4.8
-LUAROCKS_PREFIX=$MATRIX_WORK_ROOT/luarocks-5.4.8
-NATIVE_DEPS=$MATRIX_WORK_ROOT/native-deps-5.4.8
+LUA_PREFIX=$MATRIX_WORK_ROOT/lua-5.4.9
+LUAROCKS_PREFIX=$MATRIX_WORK_ROOT/luarocks-5.4.9
+NATIVE_DEPS=$MATRIX_WORK_ROOT/native-deps-5.4.9
 TEST_LUA=$LUA_PREFIX/bin/lua
 TEST_LUAC=$LUA_PREFIX/bin/luac
 TEST_LUAROCKS=$LUAROCKS_PREFIX/bin/luarocks
 DEPS_LUA_PATH=$NATIVE_DEPS/share/lua/5.4/?.lua\;$NATIVE_DEPS/share/lua/5.4/?/init.lua
 DEPS_LUA_CPATH=$NATIVE_DEPS/lib/lua/5.4/?.so\;$NATIVE_DEPS/lib/lua/5.4/?/init.so
 test "$($TEST_LUA -e 'io.write(_VERSION)')" = "Lua 5.4"
-test "$(PKG_CONFIG_PATH="$LUA_PREFIX/lib/pkgconfig" pkg-config --modversion lua)" = "5.4.8"
+test "$(PKG_CONFIG_PATH="$LUA_PREFIX/lib/pkgconfig" pkg-config --modversion lua)" = "5.4.9"
 find src test tools -type f -name '*.lua' -print | while IFS= read -r file; do
     "$TEST_LUAC" -p "$file"
 done
@@ -338,14 +338,14 @@ LUA_CPATH=$DEPS_LUA_CPATH
 LUAI_TEST_LUA=$TEST_LUA
 LUAI_TEST_LUAC=$TEST_LUAC
 LUAI_LUA_PREFIX=$LUA_PREFIX
-LUAI_LUA_RELEASE=5.4.8
+LUAI_LUA_RELEASE=5.4.9
 PKG_CONFIG_PATH=$LUA_PREFIX/lib/pkgconfig
 export PATH LUA_PATH LUA_CPATH LUAI_TEST_LUA LUAI_TEST_LUAC
 export LUAI_LUA_PREFIX LUAI_LUA_RELEASE PKG_CONFIG_PATH
 
 "$TEST_LUA" -e 'require("cjson"); require("lfs"); require("socket.core"); require("mimetypes"); require("zlib"); require("pegasus"); require("lsqlite3")'
 "$TEST_LUAROCKS" make --force --deps-mode=none --tree "$INSTALL_ROOT" \
-    luainstaller-1.5.1-1.rockspec
+    luainstaller-1.5.2-1.rockspec
 "$INSTALL_ROOT/bin/luai" -v
 "$INSTALL_ROOT/bin/luai" -a test/runtime_bundle/main.lua --max-deps 120
 

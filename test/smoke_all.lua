@@ -906,9 +906,9 @@ local function check_remote_onefile_script_coverage()
     assert_contains(macos, "quote_remote()")
     assert_contains(macos, "copy_tree_macos()")
     assert_contains(macos, "MATRIX_WORK_ROOT=")
-    assert_contains(macos, "lua-5.4.8")
-    assert_contains(macos, "luarocks-5.4.8")
-    assert_contains(macos, "native-deps-5.4.8")
+    assert_contains(macos, "lua-5.4.9")
+    assert_contains(macos, "luarocks-5.4.9")
+    assert_contains(macos, "native-deps-5.4.9")
     assert_not_contains(macos, "command -v lua")
     assert_not_contains(macos, " install --force lua-")
     assert_contains(macos, "git -c tar.umask=0022 archive --format=tar HEAD")
@@ -923,9 +923,9 @@ local function check_remote_onefile_script_coverage()
 
     local linux = read_file("tools/remote-test-linux.sh")
     assert_contains(linux, "MATRIX_WORK_ROOT=")
-    assert_contains(linux, "lua-5.4.8")
-    assert_contains(linux, "luarocks-5.4.8")
-    assert_contains(linux, "native-deps-5.4.8")
+    assert_contains(linux, "lua-5.4.9")
+    assert_contains(linux, "luarocks-5.4.9")
+    assert_contains(linux, "native-deps-5.4.9")
     assert_contains(linux, "make --force --deps-mode=none")
     assert_not_contains(linux, "command -v lua")
     assert_not_contains(linux, " install --force lua-")
@@ -1190,7 +1190,7 @@ print(result.executable)
 end
 
 local function check_release_metadata_contract()
-    local rockspec = read_file("luainstaller-1.5.1-1.rockspec")
+    local rockspec = read_file("luainstaller-1.5.2-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
@@ -1234,7 +1234,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luai", { "-v" })),
-        "luai 1.5.1\n"
+        "luai 1.5.2\n"
     )
 
     local full_help = run(cli_command("luainstaller", { "help" }))
@@ -1248,7 +1248,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luainstaller", { "version" })),
-        "luainstaller 1.5.1  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.5.2  LGPL 3.0 by WaterRun\n"
     )
 
     local bad_luai = run(cli_command("luai", { "build", "test/single_file/01_hello_luainstaller.lua" }), {
@@ -1817,10 +1817,10 @@ local function check_installed_cli_bundle()
     local root = make_temp_dir("installed-cli")
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
-    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.5.1-1.rockspec")
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.5.2-1.rockspec")
     assert_equals(
         run(shell_quote(tree .. "/bin/luainstaller") .. " version"),
-        "luainstaller 1.5.1  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.5.2  LGPL 3.0 by WaterRun\n"
     )
     run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")

@@ -18,7 +18,7 @@ local compat = require("luainstaller.compat")
 local process = require("luainstaller.process")
 local info = compat.luaVersion()
 local version = require("luainstaller").VERSION
-assert(version == "1.5.1", "unexpected product version: " .. tostring(version))
+assert(version == "1.5.2", "unexpected product version: " .. tostring(version))
 assert(loadfile("luainstaller-" .. version .. "-1.rockspec"))
 local rockspec_text = harness.read_file("luainstaller-" .. version .. "-1.rockspec")
 harness.assert_contains(rockspec_text, 'version = "' .. version .. '-1"')
@@ -82,7 +82,7 @@ if exact_release or source_sha256 then
         ["5.1.5"] = "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
         ["5.2.4"] = "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
         ["5.3.6"] = "fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60",
-        ["5.4.8"] = "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
+        ["5.4.9"] = "2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6",
         ["5.5.1"] = "1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce",
     }
     assert(type(exact_release) == "string" and pinned_sources[exact_release],

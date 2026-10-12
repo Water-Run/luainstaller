@@ -23,6 +23,8 @@ fi
 "$LUA" test/native_bundle.lua
 "$LUA" test/native_onefile.lua
 "$LUA" test/onefile_lifecycle.lua
+"$LUA" test/output_transaction.lua
+"$LUA" test/lock_identity.lua
 
 "$LUA" - <<'LUA'
 local harness = dofile("test/support/harness.lua")

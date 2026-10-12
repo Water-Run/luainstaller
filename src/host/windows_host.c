@@ -2,7 +2,7 @@
  * Author: WaterRun
  * File: windows_host.c
  * Date: 2026-10-06
- * Updated: 2026-10-06
+ * Updated: 2026-10-12
  * Keep src/windows_host_source.lua synchronized with this file.
  * Uses Windows XP APIs only; no Lua headers or import library are needed.
  */
@@ -1022,6 +1022,29 @@ static int dispatch(context *ctx)
         return utf8(ctx, &ctx->result, path);
     }
     if (equals(op, "pid")) return number(ctx, GetCurrentProcessId());
+    if (equals(op, "identity")) {
+        FILETIME created, exited, kernel, user;
+        HKEY key;
+        wchar_t machine[128];
+        DWORD kind = 0, bytes = sizeof(machine);
+        char birth[17];
+        if (!decimal(ctx, 1, &value) || !value) return fail(ctx, "invalid process id");
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0,
+            KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return fail(ctx, "cannot read host identity");
+        size = RegQueryValueExW(key, L"MachineGuid", NULL, &kind, (BYTE *)machine, &bytes);
+        RegCloseKey(key);
+        if (size != ERROR_SUCCESS || kind != REG_SZ || bytes < sizeof(wchar_t)
+            || bytes > sizeof(machine) || machine[bytes / sizeof(wchar_t) - 1] != 0)
+            return fail(ctx, "invalid host identity");
+        handle = OpenProcess(PROCESS_QUERY_INFORMATION | SYNCHRONIZE, FALSE, value);
+        if (!handle) return win_fail(ctx, "inspect process identity");
+        size = GetProcessTimes(handle, &created, &exited, &kernel, &user);
+        CloseHandle(handle);
+        if (!size) return win_fail(ctx, "read process start identity");
+        if (_snprintf(birth, sizeof(birth), "%08lx%08lx", (unsigned long)created.dwHighDateTime,
+            (unsigned long)created.dwLowDateTime) != 16) return fail(ctx, "invalid process start time");
+        return utf8(ctx, &ctx->result, machine) && text(ctx, "\n") && text(ctx, birth);
+    }
     if (equals(op, "sleep")) { if (!decimal(ctx, 1, &value)) return 0; Sleep(value); return 1; }
     if (equals(op, "alive")) {
         if (!decimal(ctx, 1, &value) || !value) return fail(ctx, "invalid process id");

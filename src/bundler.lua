@@ -272,15 +272,8 @@ local function listTree(root)
     return entries
 end
 
-local function readGeneratedMarker(path)
+local function parseGeneratedMarker(path, content)
     local marker_path = normalizePath(path .. "/" .. GENERATED_MARKER_RELATIVE)
-    local content, read_err = fs.readFile(marker_path)
-    if content == nil then
-        return nil, invalidOutputInventory(path, "Generated output marker is missing or unreadable", {
-            unexpected_path = marker_path,
-            cause = read_err,
-        })
-    end
     if content:sub(-1) ~= "\n" then
         return nil, invalidOutputInventory(path, "Generated output marker is incomplete", {
             unexpected_path = marker_path,
@@ -346,6 +339,18 @@ local function readGeneratedMarker(path)
         })
     end
     return marker
+end
+
+local function readGeneratedMarker(path)
+    local marker_path = normalizePath(path .. "/" .. GENERATED_MARKER_RELATIVE)
+    local content, read_err = fs.readRegularFile(marker_path)
+    if content == nil then
+        return nil, invalidOutputInventory(path, "Generated output marker is missing or unreadable", {
+            unexpected_path = marker_path,
+            cause = read_err,
+        })
+    end
+    return parseGeneratedMarker(path, content)
 end
 
 local function generatedMarkerMatches(path, allowed, declared_output_dir)
@@ -854,6 +859,9 @@ end
 
 local recoverStaleOutputLock
 local restoreMovedOutputLock
+local recoverJournalData
+local recoverJournalLock
+local releaseRecoveryLease
 
 local function discardUnpublishedOutputLock(lock_path, token, release_token, expected_content)
     local release_path = normalizePath(dirname(lock_path)
@@ -915,6 +923,7 @@ local function acquireOutputLock(final_path)
         token = token,
         pid = pid,
         created = os.time(),
+        identity = lock_owner.currentIdentity(),
         output_hash = lock_id,
         staging = stage_name,
     }
@@ -965,6 +974,7 @@ local function acquireOutputLock(final_path)
     end
     return {
         path = lock_path,
+        output_path = final_path,
         owner_path = owner_path,
         owner_content = owner_content,
         owner = owner,
@@ -993,8 +1003,23 @@ end
 local function readOutputLockOwner(lock_path, expected_output_hash)
     if isSymlink(lock_path) or not directoryExists(lock_path) then return nil end
     local entries = fs.listTree(lock_path)
-    if type(entries) ~= "table" or #entries ~= 1 then return nil end
-    local entry = entries[1]
+    if type(entries) ~= "table" then return nil end
+    local entry
+    for _, item in ipairs(entries) do
+        if item.type == "file" and item.path:match("^owner%.[A-Za-z0-9_.-]+$") then
+            if entry then return nil end
+            entry = item
+        elseif item.type == "file" and (item.path == "transaction"
+            or item.path == "transaction.tmp" or item.path == "released"
+            or item.path:match("^recovery/owner%.[A-Za-z0-9_.-]+$")) then
+            -- Fixed transaction metadata and a separately owned recovery lease.
+        elseif item.type == "directory" and item.path == "recovery" then
+            -- The lease prevents two dead-owner recoveries running together.
+        else
+            return nil
+        end
+    end
+    if not entry then return nil end
     local token = type(entry.path) == "string"
         and entry.path:match("^owner%.([A-Za-z0-9_.-]+)$") or nil
     if entry.type ~= "file" or not token then return nil end
@@ -1010,6 +1035,9 @@ local function readOutputLockOwner(lock_path, expected_output_hash)
         content = content,
         owner = owner,
         owner_path = owner_path,
+        journal = fs.pathType(lock_path .. "/transaction") == "file"
+            and fs.readRegularFile(lock_path .. "/transaction") or nil,
+        released = fs.readRegularFile(lock_path .. "/released") == content,
     }
 end
 
@@ -1061,8 +1089,12 @@ end
 recoverStaleOutputLock = function(final_path, lock_path, expected_output_hash)
     local observed = readOutputLockOwner(lock_path, expected_output_hash)
     if not observed then return recoverEmptyOutputLock(final_path, lock_path) end
-    local alive = lock_owner.isAlive(observed.owner.pid)
-    if alive ~= false then return false end
+    local alive = lock_owner.isAlive(observed.owner.pid, observed.owner.identity)
+    if alive ~= false and not observed.released then return false end
+
+    if observed.journal then
+        return recoverJournalLock(final_path, lock_path, expected_output_hash, observed)
+    end
 
     local checked = readOutputLockOwner(lock_path, expected_output_hash)
     if not checked or checked.content ~= observed.content
@@ -1110,6 +1142,13 @@ recoverStaleOutputLock = function(final_path, lock_path, expected_output_hash)
     end
 
     local stale_owner_path = normalizePath(tombstone .. "/owner." .. moved.owner.token)
+    for _, name in ipairs({ "transaction.tmp", "released" }) do
+        local candidate = tombstone .. "/" .. name
+        if fs.pathType(candidate) == "file" and not removeFile(candidate) then
+            restoreMovedOutputLock(tombstone, lock_path)
+            return false
+        end
+    end
     local owner_quarantine = normalizePath(dirname(lock_path)
         .. "/" .. transactionSiblingName("lock-owner-stale", recovery_token))
     if pathExists(owner_quarantine) or isSymlink(owner_quarantine)
@@ -1135,7 +1174,31 @@ end
 
 local function releaseOutputLock(lock, failure)
     local cleanup_err
+    if lock and lock.journal and not lock.transaction_complete then
+        local recovered, recovery_err, committed = recoverJournalData(
+            lock.output_path, lock, lock.journal
+        )
+        if not recovered then
+            if fs.readRegularFile(lock.owner_path) == lock.owner_content
+                and fs.pathType(lock.path .. "/released") == "missing" then
+                fs.writeFile(lock.path .. "/released", lock.owner_content)
+            end
+            failure = failure or recovery_err
+            failure.error = failure.error or {}
+            failure.error.recovery_required = true
+            failure.error.lock_path = lock.path
+            failure.error.recovery_error = recovery_err and recovery_err.error.message
+            return failure
+        end
+        lock.transaction_complete = true
+        if failure and failure.error and committed then failure.error.committed = true end
+    end
     if lock then
+        if fs.readRegularFile(lock.owner_path) ~= lock.owner_content then
+            return failure or makeError("FilesystemError", "Output lock ownership changed before release", {
+                lock_path=lock.path,
+            })
+        end
         local release_path = normalizePath(dirname(lock.path)
             .. "/" .. transactionSiblingName("release", lock.release_token))
         if pathExists(release_path) or isSymlink(release_path) then
@@ -1170,6 +1233,26 @@ local function releaseOutputLock(lock, failure)
                 restore_error = restored and nil or tostring(restore_err),
             })
         elseif not cleanup_err then
+            if lock.recovery and not releaseRecoveryLease(lock.recovery, release_path) then
+                restoreMovedOutputLock(release_path, lock.path)
+                return makeError("FilesystemError", "Cannot release output recovery lease", {
+                    lock_path=lock.path, release_path=release_path,
+                })
+            end
+            for _, name in ipairs({ "transaction", "transaction.tmp", "released" }) do
+                local candidate = release_path .. "/" .. name
+                if fs.pathType(candidate) ~= "missing" then
+                    local content = fs.readRegularFile(candidate)
+                    local expected = name == "transaction" and lock.journal
+                        or name == "released" and lock.owner_content or content
+                    if content == nil or content ~= expected or not removeFile(candidate) then
+                        restoreMovedOutputLock(release_path, lock.path)
+                        return makeError("FilesystemError", "Cannot release transaction metadata", {
+                            lock_path = lock.path, path = candidate,
+                        })
+                    end
+                end
+            end
             local removed_owner, owner_err = removeFile(release_owner)
             if not removed_owner then
                 cleanup_err = makeError("FilesystemError", "Cannot remove output lock owner record", {
@@ -1237,7 +1320,13 @@ local function outputSnapshotMatches(path_value, allowed, snapshot, declared_out
     return true
 end
 
-local function removeGeneratedBackup(path_value, allowed, snapshot, declared_output_dir)
+local function backupQuarantine(relative, digest, token)
+    local identity = hash_mod.sha256(token .. "\0" .. relative .. "\0" .. digest):sub(1, 24)
+    return path.join(dirname(relative), transactionSiblingName("remove", identity))
+end
+
+local function removeGeneratedBackup(path_value, allowed, snapshot, declared_output_dir,
+    saved_marker, cleanup_token)
     if snapshot.kind == "empty" then
         local removed, remove_err = removeDirectoryOnly(path_value)
         if not removed then
@@ -1255,40 +1344,73 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
         })
     end
 
-    local matches, marker_or_err = generatedMarkerMatches(path_value, allowed, declared_output_dir)
-    if not matches then return marker_or_err end
-    local marker = marker_or_err
+    local marker
+    local remaining
+    local quarantines = {}
+    if saved_marker then
+        marker = parseGeneratedMarker(path_value, saved_marker)
+        if not marker or marker.output_dir ~= normalizePath(declared_output_dir)
+            or hash_mod.sha256(saved_marker) ~= snapshot.marker_hash or not cleanup_token then
+            return invalidOutputInventory(path_value, "Recovery inventory is not valid for this output")
+        end
+        local inventory, inventory_err = listTree(path_value)
+        if not inventory then return inventory_err end
+        local expected_quarantines = {}
+        for relative, item in pairs(marker.entries) do
+            if item.kind == "file" then
+                expected_quarantines[backupQuarantine(relative, item.hash, cleanup_token)] = item.hash
+            end
+        end
+        expected_quarantines[backupQuarantine(GENERATED_MARKER_RELATIVE,
+            snapshot.marker_hash, cleanup_token)] = snapshot.marker_hash
+        remaining = {}
+        for _, item in ipairs(inventory) do
+            local expected = marker.entries[item.path]
+            local quarantine_hash = expected_quarantines[item.path]
+            if item.path == GENERATED_MARKER_RELATIVE then
+                if item.kind ~= "file" or item.hash ~= snapshot.marker_hash then
+                    return invalidOutputInventory(path_value, "Recovery marker changed")
+                end
+            elseif expected and item.kind == expected.kind
+                and (item.kind == "dir" or item.hash == expected.hash) then
+                remaining[item.path] = true
+            elseif quarantine_hash and item.kind == "file" and item.hash == quarantine_hash then
+                quarantines[#quarantines + 1] = item
+            else
+                return invalidOutputInventory(path_value, "Recovery backup contains changed or unowned content", {
+                    unexpected_path = path.join(path_value, item.path),
+                })
+            end
+        end
+    else
+        local matches, marker_or_err = generatedMarkerMatches(path_value, allowed, declared_output_dir)
+        if not matches then return marker_or_err end
+        marker = marker_or_err
+    end
     local marker_path = normalizePath(path_value .. "/" .. GENERATED_MARKER_RELATIVE)
     local marker_content, marker_read_err = fs.readRegularFile(marker_path)
-    if marker_content == nil or hash_mod.sha256(marker_content) ~= snapshot.marker_hash then
+    local marker_absent = saved_marker and fs.pathType(marker_path) == "missing"
+    if not marker_absent and (marker_content == nil
+        or hash_mod.sha256(marker_content) ~= snapshot.marker_hash) then
         return invalidOutputInventory(path_value, "Generated output marker changed before backup cleanup", {
             unexpected_path = marker_path,
             cause = marker_read_err,
         })
     end
 
-    local cleanup_nonce, nonce_err = secureToken(path_value)
+    local cleanup_nonce, nonce_err = cleanup_token
+    if not cleanup_nonce then cleanup_nonce, nonce_err = secureToken(path_value) end
     if not cleanup_nonce then
         return makeError("FilesystemError", "Cannot generate a secure backup quarantine name", {
             path = path_value,
             output = nonce_err,
         })
     end
-    cleanup_nonce = cleanup_nonce:sub(1, 24)
-    local cleanup_index = 0
     local function removeOwnedRegular(candidate, expected_hash)
-        local quarantine_path
-        for _ = 1, 20 do
-            cleanup_index = cleanup_index + 1
-            quarantine_path = normalizePath(dirname(candidate) .. "/"
-                .. transactionSiblingName("remove", cleanup_nonce)
-                .. "-" .. tostring(cleanup_index))
-            if not pathExists(quarantine_path) and not isSymlink(quarantine_path) then
-                break
-            end
-            quarantine_path = nil
-        end
-        if not quarantine_path then
+        local relative = candidate:sub(#normalizePath(path_value) + 2)
+        local quarantine_path = path.join(path_value,
+            backupQuarantine(relative, expected_hash, cleanup_nonce))
+        if pathExists(quarantine_path) or isSymlink(quarantine_path) then
             return makeError("FilesystemError", "Cannot allocate a backup-file quarantine path", {
                 path = candidate,
             })
@@ -1323,7 +1445,9 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
     local files = {}
     local directories = {}
     for _, item in pairs(marker.entries) do
-        if item.kind == "file" then
+        if remaining and not remaining[item.path] then
+            -- A previous cleanup already removed this owned entry.
+        elseif item.kind == "file" then
             files[#files + 1] = item
         else
             directories[#directories + 1] = item
@@ -1341,6 +1465,16 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
         return left.path > right.path
     end)
 
+    for _, item in ipairs(quarantines) do
+        local candidate = path.join(path_value, item.path)
+        local content = fs.readRegularFile(candidate)
+        if content == nil or hash_mod.sha256(content) ~= item.hash or not removeFile(candidate) then
+            return invalidOutputInventory(path_value, "Recovery quarantine changed during cleanup", {
+                unexpected_path = candidate,
+            })
+        end
+    end
+
     for _, item in ipairs(files) do
         local candidate = normalizePath(path_value .. "/" .. item.path)
         local content, read_err = fs.readRegularFile(candidate)
@@ -1355,13 +1489,15 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
     end
 
     local current_marker, current_marker_err = fs.readRegularFile(marker_path)
-    if current_marker == nil or hash_mod.sha256(current_marker) ~= snapshot.marker_hash then
+    if not marker_absent and (current_marker == nil
+        or hash_mod.sha256(current_marker) ~= snapshot.marker_hash) then
         return invalidOutputInventory(path_value, "Generated output marker changed during backup cleanup", {
             unexpected_path = marker_path,
             cause = current_marker_err,
         })
     end
-    local marker_remove_err = removeOwnedRegular(marker_path, snapshot.marker_hash)
+    local marker_remove_err = not marker_absent
+        and removeOwnedRegular(marker_path, snapshot.marker_hash) or nil
     if marker_remove_err then return marker_remove_err end
 
     for _, item in ipairs(directories) do
@@ -1384,15 +1520,224 @@ local function removeGeneratedBackup(path_value, allowed, snapshot, declared_out
     return nil
 end
 
-local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
+local function decodeOutputJournal(content, lock)
+    if type(content) ~= "string" or #content > 4 * 1024 * 1024 then return nil end
+    local token, output_hash, backup, kind, before_hash, after_hash, marker = content:match(
+        "^luainstaller%-output%-transaction%-v1\ntoken=([%w_.-]+)\noutput=([0-9a-f]+)\n"
+        .. "backup=([%w_.-]+)\nbefore=(%a+)\nbefore_hash=([0-9a-f%-]+)\n"
+        .. "after_hash=([0-9a-f]+)\n\n(.*)$"
+    )
+    if token ~= lock.owner.token or output_hash ~= lock.owner.output_hash
+        or type(after_hash) ~= "string" or #after_hash ~= 64 then return nil end
+    if kind ~= "absent" and kind ~= "empty" and kind ~= "generated" then return nil end
+    if backup ~= (kind == "absent" and "-" or transactionSiblingName("backup", token)) then
+        return nil
+    end
+    if kind == "generated" then
+        local parsed = parseGeneratedMarker(lock.output_path, marker)
+        if not parsed or parsed.output_dir ~= normalizePath(lock.output_path)
+            or #before_hash ~= 64 or hash_mod.sha256(marker) ~= before_hash then return nil end
+    elseif before_hash ~= "-" or marker ~= "" then
+        return nil
+    end
+    return {
+        backup_path = backup ~= "-" and path.join(dirname(lock.output_path), backup) or nil,
+        before = { kind = kind, marker_hash = kind == "generated" and before_hash or nil },
+        after = { kind = "generated", marker_hash = after_hash },
+        marker = kind == "generated" and marker or nil,
+    }
+end
+
+local function prepareOutputJournal(lock, stage_path, snapshot)
+    local before_marker = ""
+    if snapshot.kind == "generated" then
+        before_marker = fs.readRegularFile(path.join(lock.output_path, GENERATED_MARKER_RELATIVE))
+        if not before_marker or hash_mod.sha256(before_marker) ~= snapshot.marker_hash then
+            return makeError("InvalidOutputError", "Output marker changed before transaction preparation", {
+                path = lock.output_path,
+            })
+        end
+    end
+    local after_marker = fs.readRegularFile(path.join(stage_path, GENERATED_MARKER_RELATIVE))
+    if not after_marker then
+        return makeError("FilesystemError", "Cannot snapshot the completed staging marker", {
+            path = stage_path,
+        })
+    end
+    local content = table.concat({
+        "luainstaller-output-transaction-v1",
+        "token=" .. lock.token,
+        "output=" .. lock.owner.output_hash,
+        "backup=" .. (snapshot.kind == "absent" and "-" or transactionSiblingName("backup", lock.token)),
+        "before=" .. snapshot.kind,
+        "before_hash=" .. (snapshot.marker_hash or "-"),
+        "after_hash=" .. hash_mod.sha256(after_marker),
+        "", before_marker,
+    }, "\n")
+    if not decodeOutputJournal(content, lock) then
+        return makeError("FilesystemError", "Cannot encode output recovery inventory", {path=lock.path})
+    end
+    local temporary, published = lock.path .. "/transaction.tmp", lock.path .. "/transaction"
+    if fs.pathType(temporary) ~= "missing" or fs.pathType(published) ~= "missing" then
+        return makeError("FilesystemError", "Output transaction metadata already exists", {path=lock.path})
+    end
+    local wrote, write_err = fs.writeFile(temporary, content)
+    if not wrote or fs.readRegularFile(temporary) ~= content then
+        return makeError("FilesystemError", "Cannot write output recovery inventory", {
+            path=temporary, cause=write_err,
+        })
+    end
+    lock.journal = content
+    local moved, move_err = fs.rename(temporary, published)
+    if not moved then
+        return makeError("FilesystemError", "Cannot publish output recovery inventory", {
+            path=published, cause=move_err,
+        })
+    end
+    return nil
+end
+
+local function journalSnapshotMatches(candidate, snapshot, final_path)
+    local allowed = { [".luai"] = true }
+    if snapshot.kind == "generated" then
+        local marker = readGeneratedMarker(candidate)
+        if not marker then return false end
+        for relative in pairs(marker.entries) do allowed[relative:match("^[^/]+")] = true end
+    end
+    return outputSnapshotMatches(candidate, allowed, snapshot, final_path)
+end
+
+recoverJournalData = function(final_path, lock, content)
+    local journal = decodeOutputJournal(content, lock)
+    local function failed(message, candidate)
+        return false, makeError("FilesystemError", message, {
+            path=final_path, lock_path=lock.path,
+            backup_path=journal and journal.backup_path or nil,
+            recovery_path=candidate,
+        })
+    end
+    if not journal or fs.readRegularFile(lock.owner_path) ~= lock.owner_content then
+        return failed("Output recovery ownership or inventory changed", lock.path)
+    end
+    local committed = journalSnapshotMatches(final_path, journal.after, final_path)
+    local backup_exists = journal.backup_path and fs.pathType(journal.backup_path) ~= "missing"
+    if committed then
+        if backup_exists then
+            local cleanup_err = removeGeneratedBackup(journal.backup_path, {}, journal.before,
+                final_path, journal.marker, lock.token)
+            if cleanup_err then return false, cleanup_err end
+        end
+    elseif fs.pathType(final_path) == "missing" and backup_exists then
+        if not journalSnapshotMatches(journal.backup_path, journal.before, final_path) then
+            return failed("Previous output changed before recovery", journal.backup_path)
+        end
+        local restored, restore_err = fs.rename(journal.backup_path, final_path)
+        if not restored then
+            return failed("Cannot restore previous output: " .. tostring(restore_err), journal.backup_path)
+        end
+    elseif backup_exists or not journalSnapshotMatches(final_path, journal.before, final_path) then
+        return failed("Output no longer matches either recorded generation", final_path)
+    end
+    local stage = path.join(dirname(final_path), lock.owner.staging)
+    local cleanup_err = removeTree(stage)
+    if cleanup_err then return false, cleanup_err end
+    return true, nil, committed
+end
+
+releaseRecoveryLease = function(lease, parent)
+    local root = parent and (parent .. "/recovery") or lease.path
+    local owner_path = root .. "/owner." .. lease.token
+    if fs.readRegularFile(owner_path) ~= lease.content then return false end
+    return removeFile(owner_path) and removeDirectoryOnly(root) and true or false
+end
+
+local function claimRecoveryLease(lock_path)
+    local lease_path = lock_path .. "/recovery"
+    if fs.pathType(lease_path) == "directory" then
+        local entries = fs.listTree(lease_path)
+        if not entries then return nil end
+        if #entries == 0 then
+            local modified = fs.modifiedAt(lease_path)
+            if not modified or modified > os.time() - OUTPUT_LOCK_STALE_SECONDS
+                or not removeDirectoryOnly(lease_path) then return nil end
+        elseif #entries == 1 and entries[1].type == "file" then
+            local token = entries[1].path:match("^owner%.([A-Za-z0-9_.-]+)$")
+            local content = token and fs.readRegularFile(lease_path .. "/" .. entries[1].path)
+            local owner = content and lock_owner.decode(content)
+            if not owner or owner.token ~= token
+                or lock_owner.isAlive(owner.pid, owner.identity) ~= false then
+                return nil
+            end
+            local nonce = secureToken(lease_path)
+            local quarantine = nonce and path.join(dirname(lock_path), transactionSiblingName("stale", nonce))
+            if not quarantine or fs.pathType(quarantine) ~= "missing"
+                or not fs.rename(lease_path, quarantine) then return nil end
+            if fs.readRegularFile(quarantine .. "/" .. entries[1].path) ~= content then
+                fs.rename(quarantine, lease_path)
+                return nil
+            end
+            if not removeFile(quarantine .. "/" .. entries[1].path)
+                or not removeDirectoryOnly(quarantine) then return nil end
+        else
+            return nil
+        end
+    end
+    local token = secureToken(lease_path)
+    local pid = lock_owner.currentPid()
+    if not token or not pid or not fs.createDirectory(lease_path) then return nil end
+    local content = lock_owner.encode({token=token, pid=pid, created=os.time(),
+        identity=lock_owner.currentIdentity()})
+    local owner_path = lease_path .. "/owner." .. token
+    if not content or not fs.writeFile(owner_path, content)
+        or fs.readRegularFile(owner_path) ~= content then
+        local actual = fs.readRegularFile(owner_path)
+        if content and actual and content:sub(1, #actual) == actual then removeFile(owner_path) end
+        removeDirectoryOnly(lease_path)
+        return nil
+    end
+    return {path=lease_path, token=token, content=content}
+end
+
+recoverJournalLock = function(final_path, lock_path, output_hash, observed)
+    local lease = claimRecoveryLease(lock_path)
+    if not lease then return false end
+    local checked = readOutputLockOwner(lock_path, output_hash)
+    if not checked or checked.content ~= observed.content or checked.journal ~= observed.journal then
+        releaseRecoveryLease(lease)
+        return false
+    end
+    local lock = {
+        path=lock_path, output_path=final_path,
+        owner=observed.owner, token=observed.owner.token,
+        owner_path=observed.owner_path, owner_content=observed.content,
+        journal=observed.journal,
+        release_token=secureToken(lock_path .. "\0recovered"),
+    }
+    local called, recovered = pcall(function()
+        return lock.release_token and recoverJournalData(final_path, lock, observed.journal)
+    end)
+    if not called or not recovered then
+        releaseRecoveryLease(lease)
+        return false
+    end
+    -- Keep the recovery lease while moving the public lock for release. The
+    -- original lock name stays occupied throughout every data recovery step.
+    lock.transaction_complete = true
+    lock.recovery = lease
+    return releaseOutputLock(lock) == nil
+end
+
+local function commitStagingDirectory(stage_path, final_path, allowed, snapshot, lock)
     local unchanged, changed_err = outputSnapshotMatches(final_path, allowed, snapshot)
     if not unchanged then
         return changed_err
     end
+    local journal_err = prepareOutputJournal(lock, stage_path, snapshot)
+    if journal_err then return journal_err end
     local backup_path
     if pathExists(final_path) then
-        backup_path = uniqueSiblingPath(final_path, "backup")
-        if not backup_path then
+        backup_path = path.join(dirname(final_path), transactionSiblingName("backup", lock.token))
+        if pathExists(backup_path) then
             return makeError("FilesystemError", "Cannot allocate output backup path", {
                 path = final_path,
             })
@@ -1484,7 +1829,8 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
                 }
             )
         end
-        local cleanup_err = removeGeneratedBackup(backup_path, allowed, snapshot, final_path)
+        local cleanup_err = removeGeneratedBackup(backup_path, allowed, snapshot, final_path,
+            nil, lock.token)
         if cleanup_err then
             cleanup_err.error = cleanup_err.error or {}
             cleanup_err.error.path = final_path
@@ -1493,6 +1839,7 @@ local function commitStagingDirectory(stage_path, final_path, allowed, snapshot)
             return cleanup_err
         end
     end
+    lock.transaction_complete = true
     return nil
 end
 
@@ -2099,7 +2446,7 @@ local function bundleOnedir(opts, lifecycle)
         return abandon(err)
     end
 
-    err = commitStagingDirectory(out_dir, final_out_dir, allowed_generated_entries, output_snapshot)
+    err = commitStagingDirectory(out_dir, final_out_dir, allowed_generated_entries, output_snapshot, output_lock)
     if err then
         if not err.error or err.error.committed ~= true then
             return abandon(err)
@@ -2133,6 +2480,22 @@ local function bundleOnedir(opts, lifecycle)
         return release_err
     end
     return success
+end
+
+function M.recoverOutput(opts)
+    local final_path = absolutePath(opts.out or defaultOut(opts.entry))
+    local location_err = validateOutputLocation(final_path)
+    if location_err then return location_err end
+    local lock_id = hash_mod.sha256(normalizePath(final_path))
+    local lock_path = path.join(dirname(final_path), transactionSiblingName("lock", lock_id))
+    if fs.pathType(lock_path) == "missing" then return {ok=true} end
+    local called, recovered = pcall(recoverStaleOutputLock, final_path, lock_path, lock_id)
+    if called and recovered then return {ok=true} end
+    return makeError("FilesystemError", "Output has an active or unrecoverable build transaction", {
+        path=final_path, lock_path=lock_path,
+        cause=not called and tostring(recovered) or nil,
+        recovery_required=true,
+    })
 end
 
 function M.bundleOnedir(opts)

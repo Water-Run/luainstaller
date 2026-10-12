@@ -49,7 +49,7 @@ jobs:
             build-essential bubblewrap ca-certificates curl liblua5.4-dev lua5.4 \
             luarocks unzip zlib1g-dev
 
-      - name: Build pinned shared Lua 5.4.8
+      - name: Build pinned shared Lua 5.4.9
         run: |
           sh tools/ci-build-lua54.sh
           "$HOME/luai-lua/bin/lua" -v
@@ -61,8 +61,8 @@ jobs:
             echo "LUAI_TEST_LUA=$HOME/luai-lua/bin/lua"
             echo "LUAI_TEST_LUAC=$HOME/luai-lua/bin/luac"
             echo "LUAI_LUA_PREFIX=$HOME/luai-lua"
-            echo "LUAI_LUA_RELEASE=5.4.8"
-            echo "LUAI_LUA_SOURCE_SHA256=4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae"
+            echo "LUAI_LUA_RELEASE=5.4.9"
+            echo "LUAI_LUA_SOURCE_SHA256=2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6"
             echo "PKG_CONFIG_PATH=$HOME/luai-lua/lib/pkgconfig"
             echo "LD_LIBRARY_PATH=$HOME/luai-lua/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           } >> "$GITHUB_ENV"
@@ -100,6 +100,8 @@ jobs:
           lua test/distribution_licenses.lua
           lua test/reproducible_artifacts.lua
           lua test/build_interruption.lua
+          lua test/output_transaction.lua
+          lua test/lock_identity.lua
 
       - name: Install pinned sample dependencies
         run: sh tools/ci-install-sample-deps.sh
@@ -126,7 +128,7 @@ jobs:
           - "5.1.5"
           - "5.2.4"
           - "5.3.6"
-          - "5.4.8"
+          - "5.4.9"
           - "5.5.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -143,7 +145,7 @@ jobs:
           VERSION_FILTER='${{ matrix.lua }}' \
             LUAI_MATRIX_EDGE_COVERAGE_MODE=available HOST_LABEL=ci \
             sh tools/test-lua-versions.sh
-        timeout-minutes: 120
+        timeout-minutes: 180
 
   linux-x86-native:
     name: Linux x86 native Lua 5.4
@@ -183,6 +185,8 @@ jobs:
           "$LUAI_TEST_LUA" test/native_bundle.lua
           "$LUAI_TEST_LUA" test/native_onefile.lua
           "$LUAI_TEST_LUA" test/onefile_lifecycle.lua
+          "$LUAI_TEST_LUA" test/output_transaction.lua
+          "$LUAI_TEST_LUA" test/lock_identity.lua
 
   windows-version-matrix:
     name: official Lua ${{ matrix.lua }} (Windows MSVC)
@@ -194,14 +198,14 @@ jobs:
           - "5.1.5"
           - "5.2.4"
           - "5.3.6"
-          - "5.4.8"
+          - "5.4.9"
           - "5.5.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run the pinned Lua version with MSVC
         shell: powershell
-        timeout-minutes: 120
+        timeout-minutes: 180
         env:
           LUA_VERSION: ${{ matrix.lua }}
         run: |

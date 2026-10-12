@@ -8,7 +8,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local fs = require("luainstaller.fs")
@@ -188,6 +188,7 @@ local function ownerContent(token, created)
             token = token,
             pid = pid,
             created = created or os.time(),
+            identity = lock_owner.currentIdentity(),
         })
         if encoded then return encoded end
     end
@@ -200,7 +201,7 @@ local function parseOwner(content)
     end
     local decoded = lock_owner.decode(content)
     if decoded and decoded.output_hash == nil and decoded.staging == nil then
-        return decoded.created, decoded.token, decoded.pid
+        return decoded.created, decoded.token, decoded.pid, decoded.identity
     end
     local created, token = content:match("^created=(%d+)\ntoken=([%w_.-]+)\n$")
     if not created then
@@ -278,7 +279,7 @@ end
 local function lockCreatedAt(lock_path)
     local initial_identity = directoryIdentity(lock_path)
     local function observed(kind, content, token)
-        local created, _, pid = parseOwner(content)
+        local created, _, pid, process_identity = parseOwner(content)
         if initial_identity and directoryIdentity(lock_path) ~= initial_identity then
             return nil, nil
         end
@@ -287,6 +288,7 @@ local function lockCreatedAt(lock_path)
             content = content,
             token = token,
             pid = pid,
+            process_identity = process_identity,
             identity = initial_identity,
         }
     end
@@ -433,7 +435,7 @@ local function recoverStaleLock(lock_path)
         return false
     end
     if observed and observed.pid then
-        local alive = lock_owner.isAlive(observed.pid)
+        local alive = lock_owner.isAlive(observed.pid, observed.process_identity)
         if alive ~= false then return false end
     end
     -- Owner-less recovery is safe only when the platform supplies a stable

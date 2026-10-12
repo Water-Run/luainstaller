@@ -15,6 +15,19 @@ truth for the exact contents of a published version.
 * Introduction video link in the READMEs: bilibili in the Chinese README,
   YouTube in the English one.
 
+== 1.5.2 - 2026-10-12
+
+=== Fixed
+
+* Interrupted directory publication records its old and new inventories.
+  Retrying restores the previous output or completes cleanup of the replacement,
+  including partially removed backups. Changed user files are preserved.
+* Lock ownership includes the process start identity and host scope, so a reused
+  PID doesn't keep a stale lock alive. Existing owner records remain readable.
+* Payload regeneration parses its file list as data instead of executing Lua.
+* CI builders validate dedicated directory ownership before downloading or
+  resetting installation roots. The Lua 5.4 verification baseline is 5.4.9.
+
 == 1.5.1 - 2026-10-12
 
 === Added

@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.5.1-1.rockspec",
+    "luainstaller-1.5.2-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -75,7 +75,7 @@ expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查"
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
-expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.5.1-1.rockspec")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.5.2-1.rockspec")
 expect_contains("docs/TESTING.adoc", "test/no_lua_target.lua")
 expect_contains("docs/zh-CN/TESTING.adoc", "test/no_lua_target.lua")
 expect_contains("docs/INSTALL.adoc", "PowerShell isn't needed")
@@ -91,6 +91,11 @@ expect_contains("docs/TROUBLESHOOTING.adoc",
     "Copying a C module with the same filename doesn't make the dependency discoverable.")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc",
     "复制一个同名的 C 模块，也不代表加载器就能找到该依赖。")
+expect_contains("docs/TROUBLESHOOTING.adoc", "retry with the same output path")
+expect_contains("docs/TROUBLESHOOTING.adoc", "doesn't guarantee durability after power loss")
+expect_not_contains("docs/TROUBLESHOOTING.adoc", "Remove it once you're sure no build is running")
+expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "使用相同的输出路径重试")
+expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "不保证 断电后的持久性")
 
 local structured_contract = "The structured result contract applies to `analyze`, `trace`, "
     .. "`compatibility`, and `bundle` only."

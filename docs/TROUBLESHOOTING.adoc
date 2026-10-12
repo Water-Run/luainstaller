@@ -155,8 +155,15 @@ must be `luainstaller-generated-output-v2`.
 If you edited the folder by hand, or it came from an older version,
 delete it or build to a new `-o` path.
 
-A leftover lock looks like `build/.luai-lock-<hash>`. Remove it once
-you're sure no build is running.
+After a stopped directory build, retry with the same output path. Recovery
+restores the previous program or keeps the completed replacement before
+checking the new source files.
+
+A leftover lock looks like `build/.luai-lock-<hash>`. Keep it and any
+`.luai-backup-*` directory if recovery reports changed or unowned content;
+these paths contain the recovery record and the previous files. Inspect the
+reported paths before removing anything. Recovery covers stopped processes;
+it doesn't guarantee durability after power loss or a gap-free deployment.
 
 [#troubleshooting-onefile]
 == The single file doesn't start

@@ -18,7 +18,7 @@ $Versions = @(
     @{ Version='5.1.5'; Sha256='2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333' },
     @{ Version='5.2.4'; Sha256='b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b' },
     @{ Version='5.3.6'; Sha256='fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60' },
-    @{ Version='5.4.8'; Sha256='4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae' },
+    @{ Version='5.4.9'; Sha256='2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6' },
     @{ Version='5.5.1'; Sha256='1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce' }
 )
 
@@ -188,7 +188,7 @@ function Get-LuaDefaultCompilerFlags([string]$Version) {
     switch ($Version) {
         '5.2.4' { return @('/DLUA_COMPAT_ALL') }
         '5.3.6' { return @('/DLUA_COMPAT_5_2') }
-        '5.4.8' { return @('/DLUA_COMPAT_5_3') }
+        '5.4.9' { return @('/DLUA_COMPAT_5_3') }
         default { return @() }
     }
 }
@@ -332,10 +332,11 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
     foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','release_docs_contract.lua',
         'windows_native.lua','toolchain_native.lua','headerless_build.lua','native_dependencies.lua',
         'luarocks_install.lua','standalone_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
-        'onefile_lifecycle.lua','distribution_licenses.lua','reproducible_artifacts.lua')) {
+        'onefile_lifecycle.lua','output_transaction.lua','lock_identity.lua',
+        'distribution_licenses.lua','reproducible_artifacts.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
-    Invoke-Native $LuaRocks @('lint','luainstaller-1.5.1-1.rockspec')
+    Invoke-Native $LuaRocks @('lint','luainstaller-1.5.2-1.rockspec')
     "PASS host=$HostLabel lua=$version abi=Lua $abi"
 }
 

@@ -13,7 +13,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local root = assert(arg and arg[1], "extracted bundle root is required")
@@ -60,13 +60,15 @@ local function join(left, right)
     return normalize(tostring(left):gsub("/+$", "") .. "/" .. tostring(right))
 end
 
-local function readFile(file_path)
+local function readFile(file_path, max_size)
     local handle, open_err = io.open(native(file_path), "rb")
     assert(handle, open_err)
-    local content, read_err = handle:read("*a")
+    local content, read_err = handle:read(max_size and (max_size + 1) or "*a")
     local closed, close_err = handle:close()
+    if max_size and content == nil and read_err == nil then content = "" end
     assert(content, read_err)
     assert(closed, close_err)
+    assert(not max_size or #content <= max_size, "payload manifest exceeds 16 MiB")
     return content
 end
 
@@ -79,6 +81,127 @@ local function writeFile(file_path, content)
     assert(wrote, write_err)
     assert(flushed, flush_err)
     assert(closed, close_err)
+end
+
+-- payload-files.lua is a data file. Accept the generated table syntax without
+-- loading either Lua source or bytecode, even when the material was edited.
+local function parseManifest(source)
+    assert(#source <= 16 * 1024 * 1024, "payload manifest exceeds 16 MiB")
+    local position = 1
+    local function invalid(message)
+        error("invalid payload manifest at byte " .. position .. ": " .. message, 0)
+    end
+    local function skip()
+        while position <= #source do
+            if source:sub(position, position):match("%s") then
+                position = position + 1
+            elseif source:sub(position, position + 1) == "--" then
+                position = source:find("[\r\n]", position + 2) or (#source + 1)
+            else
+                return
+            end
+        end
+    end
+    local function expect(token)
+        skip()
+        if source:sub(position, position + #token - 1) ~= token then
+            invalid("expected " .. token)
+        end
+        position = position + #token
+    end
+    local function identifier()
+        skip()
+        local value = source:match("^([%a_][%w_]*)", position)
+        if not value then invalid("expected a field name or boolean") end
+        position = position + #value
+        return value
+    end
+    local escapes = {
+        a = "\a", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", v = "\v",
+        ["\\"] = "\\", ['"'] = '"', ["'"] = "'",
+    }
+    local function quoted()
+        skip()
+        local delimiter = source:sub(position, position)
+        if delimiter ~= '"' and delimiter ~= "'" then invalid("expected a quoted path") end
+        position = position + 1
+        local bytes = {}
+        while position <= #source do
+            local value = source:sub(position, position)
+            position = position + 1
+            if value == delimiter then return table.concat(bytes) end
+            if value == "\r" or value == "\n" then invalid("newline in quoted path") end
+            if value == "\\" then
+                local escaped = source:sub(position, position)
+                if escapes[escaped] then
+                    value = escapes[escaped]
+                    position = position + 1
+                elseif escaped:match("%d") then
+                    local digits = source:match("^(%d%d?%d?)", position)
+                    local number = tonumber(digits)
+                    if number > 255 then invalid("decimal escape exceeds one byte") end
+                    value = string.char(number)
+                    position = position + #digits
+                elseif escaped == "x" then
+                    local digits = source:sub(position + 1, position + 2)
+                    if not digits:match("^%x%x$") then invalid("invalid hexadecimal escape") end
+                    value = string.char(tonumber(digits, 16))
+                    position = position + 3
+                elseif escaped == "\n" or escaped == "\r" then
+                    position = position + 1
+                    if escaped == "\r" and source:sub(position, position) == "\n" then
+                        position = position + 1
+                    end
+                    value = "\n"
+                else
+                    invalid("unsupported string escape")
+                end
+            end
+            bytes[#bytes + 1] = value
+        end
+        invalid("unterminated quoted path")
+    end
+    local function separator()
+        skip()
+        local value = source:sub(position, position)
+        if value == "," or value == ";" then
+            position = position + 1
+        elseif value ~= "}" then
+            invalid("expected a separator or closing brace")
+        end
+        skip()
+    end
+    expect("return")
+    expect("{")
+    skip()
+    local records = {}
+    while source:sub(position, position) ~= "}" do
+        expect("{")
+        skip()
+        local record = {}
+        while source:sub(position, position) ~= "}" do
+            local key = identifier()
+            if key ~= "path" and key ~= "executable" then invalid("unknown field") end
+            if record[key] ~= nil then invalid("duplicate field") end
+            expect("=")
+            if key == "path" then
+                record.path = quoted()
+            else
+                local value = identifier()
+                if value ~= "true" and value ~= "false" then invalid("expected a boolean") end
+                record.executable = value == "true"
+            end
+            separator()
+        end
+        expect("}")
+        if record.path == nil or record.executable == nil then invalid("missing required field") end
+        records[#records + 1] = record
+        separator()
+    end
+    expect("}")
+    skip()
+    if position <= #source then invalid("trailing content") end
+    return records
 end
 
 local function packU32(value)
@@ -307,10 +430,7 @@ end
 
 root = normalize(root)
 local manifest_path = join(root, ".luai/build/payload-files.lua")
-local manifest_chunk, load_err = loadfile(native(manifest_path))
-assert(manifest_chunk, load_err)
-local records = manifest_chunk()
-assert(type(records) == "table", "payload manifest is not a table")
+local records = parseManifest(readFile(manifest_path, 16 * 1024 * 1024))
 
 local files = {}
 local hash_parts = {}

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -925,7 +925,7 @@ test("Windows release toolchains close the CRT and select the native machine", f
     for version, compiler_flag in pairs({
         ["5.2.4"] = "/DLUA_COMPAT_ALL",
         ["5.3.6"] = "/DLUA_COMPAT_5_2",
-        ["5.4.8"] = "/DLUA_COMPAT_5_3",
+        ["5.4.9"] = "/DLUA_COMPAT_5_3",
     }) do
         assert(matrix_source:find("'" .. version .. "' { return @('" ..
                 compiler_flag .. "') }", 1, true),
@@ -3611,7 +3611,7 @@ test("pkg-config Lua ABI mismatch stops before compiler invocation", function()
     local compiler_marker = root .. "/compiler-called"
     local out = root .. "/out"
     local current_version = compat.luaVersion().version
-    local mismatched_release = current_version == "Lua 5.4" and "5.3.6" or "5.4.8"
+    local mismatched_release = current_version == "Lua 5.4" and "5.3.6" or "5.4.9"
     makeDirectory(fake_bin)
     writeFile(fake_bin .. "/pkg-config", string.format([[#!/bin/sh
 if [ "$1" = "--modversion" ]; then
@@ -5217,7 +5217,7 @@ test("remote scripts are pinned and non-destructive", function()
     end
     assert(ci_sample_deps:find('require("pegasus")', 1, true),
         "local CI sample install does not load-test the full dependency graph")
-    for _, version in ipairs({ "5.1.5", "5.2.4", "5.3.6", "5.4.8", "5.5.1" }) do
+    for _, version in ipairs({ "5.1.5", "5.2.4", "5.3.6", "5.4.9", "5.5.1" }) do
         assert(posix_matrix:find(version, 1, true), "POSIX matrix omits Lua " .. version)
         assert(windows_matrix:find(version, 1, true), "Windows matrix omits Lua " .. version)
         assert(ci_workflow:find('- "' .. version .. '"', 1, true),
@@ -5329,7 +5329,7 @@ test("remote scripts are pinned and non-destructive", function()
         "2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333",
         "b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b",
         "fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60",
-        "4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae",
+        "2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6",
         "1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce",
     }) do
         assert(posix_matrix:find(pin, 1, true), "POSIX matrix lacks official Lua SHA-256")
@@ -5520,9 +5520,9 @@ test("remote scripts are pinned and non-destructive", function()
         assert(runner:find("MATRIX_WORK_ROOT=", 1, true),
             runner_name .. " does not name its shared ABI-matrix root")
         for _, selected_output in ipairs({
-            "lua-5.4.8",
-            "luarocks-5.4.8",
-            "native-deps-5.4.8",
+            "lua-5.4.9",
+            "luarocks-5.4.9",
+            "native-deps-5.4.9",
         }) do
             assert(runner:find(selected_output, 1, true),
                 runner_name .. " does not reuse matrix output " .. selected_output)
@@ -5566,6 +5566,40 @@ test("remote scripts are pinned and non-destructive", function()
         "Linux runner invokes tests through a bare lua command")
     assert(not macos_runner:find("lua test/", 1, true),
         "macOS runner invokes tests through a bare lua command")
+end)
+
+test("CI Lua builder refuses unowned installation roots before downloading", function()
+    if package.config:sub(1, 1) ~= "/"
+        or commandOutputTrimmed("uname -s") ~= "Linux" then return end
+    local fs = require("luainstaller.fs")
+    local process = require("luainstaller.process")
+    local root = makeTempDir("ci-root-safety")
+    local fake_bin = root .. "/bin"
+    local victim = root .. "/user-files"
+    local marker = root .. "/download-attempted"
+    assert(fs.makeDirectory(fake_bin))
+    assert(fs.makeDirectory(victim))
+    assert(fs.writeFile(victim .. "/keep", "user content"))
+    assert(fs.writeFile(fake_bin .. "/curl", "#!/bin/sh\nprintf reached > "
+        .. shellQuote(marker) .. "\nexit 73\n"))
+    assert(fs.setExecutable(fake_bin .. "/curl"))
+    local called, failure = pcall(function()
+        for _, prefix in ipairs({ victim, "/", root .. "/missing/../escape" }) do
+            local accepted, output = process.outputCommand("sh", {
+                "tools/ci-build-lua54.sh",
+            }, {
+                PATH = fake_bin .. ":" .. tostring(os.getenv("PATH") or "/usr/bin:/bin"),
+                LUAI_CI_LUA_PREFIX = prefix,
+                LUAI_CI_WORK = root .. "/work",
+            }, { timeout_seconds = 10 })
+            assert(not accepted, "unsafe CI prefix accepted: " .. prefix)
+            assert(fs.pathType(marker) == "missing",
+                "CI prefix was not validated before network or destructive work: " .. tostring(output))
+            assert(readFile(victim .. "/keep") == "user content")
+        end
+    end)
+    removeTree(root)
+    assert(called, failure)
 end)
 
 local filter = os.getenv("EDGE_FILTER")

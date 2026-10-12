@@ -6,8 +6,8 @@ set -eu
 # liblua), which hides the runtime from the collision/relink fixtures in
 # test/production_edges.lua. The recipe mirrors the release matrix builder.
 
-VERSION=5.4.8
-SHA256=4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae
+VERSION=5.4.9
+SHA256=2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6
 PREFIX=${LUAI_CI_LUA_PREFIX:-$HOME/luai-lua}
 WORK=${LUAI_CI_WORK:-/tmp/luai-ci-lua}
 BUILD_CC=${LUAI_CI_CC:-cc}
@@ -16,7 +16,11 @@ BUILD_LDFLAGS=${LUAI_CI_LDFLAGS:-}
 ARCHIVE=$WORK/lua-$VERSION.tar.gz
 SOURCE=$WORK/lua-$VERSION
 
-mkdir -p "$WORK"
+. "$(dirname -- "$0")/ci-paths.sh"
+luai_ci_disjoint_roots "$PREFIX" "$WORK"
+luai_ci_claim_root "$PREFIX" lua-prefix
+luai_ci_claim_root "$WORK" lua-build-work
+
 ARCHIVE_PART=$ARCHIVE.part.$$
 rm -f "$ARCHIVE_PART"
 trap 'rm -f "$ARCHIVE_PART"' EXIT HUP INT TERM
@@ -31,7 +35,10 @@ else
 fi
 mv -f "$ARCHIVE_PART" "$ARCHIVE"
 trap - EXIT HUP INT TERM
-rm -rf "$SOURCE" "$PREFIX"
+luai_ci_claim_root "$PREFIX" lua-prefix
+luai_ci_claim_root "$WORK" lua-build-work
+rm -rf -- "$SOURCE" "$PREFIX"
+luai_ci_claim_root "$PREFIX" lua-prefix
 tar -xzf "$ARCHIVE" -C "$WORK"
 
 make -C "$SOURCE/src" all CC="$BUILD_CC" \
@@ -43,8 +50,9 @@ make -C "$SOURCE" INSTALL_TOP="$PREFIX" install
 # The stock Makefile installs only the static archive; relink it into the
 # ABI-versioned shared runtime the fixtures expect.
 members=$(ar t "$SOURCE/src/liblua.a")
-if [ -z "$members" ]; then
-    echo "empty liblua archive member list" >&2
+if [ -z "$members" ] || printf '%s\n' "$members" \
+    | grep -Ev '^[A-Za-z0-9_.-]+$' | grep . >/dev/null; then
+    echo "unsafe or empty liblua archive member list" >&2
     exit 1
 fi
 # Archive members are validated above; intentional word splitting.

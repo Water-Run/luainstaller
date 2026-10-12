@@ -10,6 +10,12 @@ set -eu
 PREFIX=${LUAI_CI_LUA_PREFIX:-$HOME/luai-lua}
 TREE=${LUAI_CI_ROCKS_TREE:-$HOME/luai-rocks}
 WORK=${LUAI_CI_WORK:-/tmp/luai-ci-deps}
+. "$(dirname -- "$0")/ci-paths.sh"
+luai_ci_disjoint_roots "$WORK" "$TREE"
+luai_ci_disjoint_roots "$WORK" "$PREFIX"
+luai_ci_disjoint_roots "$TREE" "$PREFIX"
+luai_ci_claim_root "$WORK" sample-deps-work
+luai_ci_claim_root "$TREE" sample-deps-tree
 ROCK_MIRROR=https://raw.githubusercontent.com/rocks-moonscript-org/moonrocks-mirror/978861950d939eca8e38a4c3a477379b0e5f817e
 
 ROCK_SOURCES='lua-cjson-2.1.0.10-1.src.rock:02dea368d07753647c75bd9e6660dd4d06ff7d09956d90d5afc4c3f5b78ed187
@@ -88,6 +94,7 @@ ROCK_LUA_DIR=$("$LUAROCKS" --lua-dir="$PREFIX" --tree="$TREE" \
 ROCK_LIB_DIR=$("$LUAROCKS" --lua-dir="$PREFIX" --tree="$TREE" \
     config deploy_lib_dir)
 for deploy_dir in "$ROCK_LUA_DIR" "$ROCK_LIB_DIR"; do
+    luai_ci_validate_root "$deploy_dir"
     case "$deploy_dir" in
         "$TREE"/*) ;;
         *) echo "LuaRocks deploy directory escapes the CI tree: $deploy_dir" >&2; exit 2 ;;
