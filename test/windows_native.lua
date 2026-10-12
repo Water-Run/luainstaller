@@ -48,6 +48,25 @@ assert(root, unexpected_root_result)
 assert(unexpected_root_result == nil,
     "successful private-directory creation leaked an auxiliary return value")
 
+local output_script = path.join(root, "output-budget-probe.lua")
+assert(fs.writeFile(output_script, [[
+if arg[1] == "limit" then io.write(string.rep("x", 65536))
+else io.write(string.char(228,184,150,231,149,140)) end
+]]))
+local bounded, bounded_output = process.outputCommand(lua, {output_script, "limit"}, {},
+    {timeout_seconds=10, max_output_bytes=4096})
+local unicode_ok, unicode_output = process.outputCommand(lua, {output_script, "utf8"})
+local expected_unicode = string.char(228,184,150,231,149,140)
+print("WINDOWS_BOUNDS_PROBE output_rejected=" .. tostring(not bounded)
+    .. " output_bytes=" .. tostring(#bounded_output)
+    .. " utf8_preserved=" .. tostring(unicode_ok and unicode_output == expected_unicode)
+    .. " utf8_bytes=" .. tostring(#unicode_output))
+local rejected = not bounded and #bounded_output <= 4096 + 256
+local preserved = unicode_ok and unicode_output == expected_unicode
+assert(fs.removeTree(root))
+assert(rejected and preserved, "native Windows output budget or UTF-8 preservation failed")
+os.exit(0)
+
 local fixture = dofile("test/support/windows_fixture.lua")(root)
 local flooded, flood_output = process.outputCommand(fixture, { "flood" }, {}, { timeout_seconds = 15 })
 assert(flooded and flood_output == string.rep("a", 64 * 4096) .. string.rep("b", 64 * 4096),
