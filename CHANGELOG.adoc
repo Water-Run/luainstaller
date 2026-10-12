@@ -28,6 +28,8 @@ truth for the exact contents of a published version.
 * Output ancestor identities are checked before publishing. POSIX refuses
   untrusted writable ancestors; Windows pins non-reparse ancestors during I/O.
 * Windows keeps valid UTF-8 tool output and uses native paths for source hashing.
+* POSIX log writes read process identity without compiling a native helper while
+  holding the log lock, avoiding cold-start contention between concurrent writers.
 * Installation troubleshooting covers stale mirror fallback and HTTPS download
   failures that can cause an older LuaRocks package to be selected.
 

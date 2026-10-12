@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-06
+    2026-10-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -20,6 +20,7 @@ local api = require("luainstaller")
 local lua = harness.lua_command()
 if lua:find("[/\\]") then lua = path.absolute(lua) end
 local windows = package.config:sub(1, 1) == "\\"
+local driver_timeout = (_VERSION == "Lua 5.1" or _VERSION == "Lua 5.2") and 600 or 120
 local root = assert(fs.makePrivateDirectory("standalone"))
 local prefix = path.join(root, "installed tree")
 local moved = path.join(root, "relocated tree")
@@ -36,8 +37,10 @@ for minor = 1, 5 do
 end
 
 local function checked(executable, arguments, env)
-    local ok, output = process.outputCommand(executable, arguments, env or environment)
-    assert(ok, output)
+    local ok, output, status = process.outputCommand(executable, arguments, env or environment,
+        {timeout_seconds=driver_timeout})
+    assert(ok, tostring(output) .. "\ncommand status: " .. tostring(status and status.code)
+        .. " / " .. tostring(status and status.reason))
     return output
 end
 
@@ -78,9 +81,11 @@ local function cli(name, arguments)
     if windows then
         local command = { "cd /d", process.quote(project), "&&", process.quote(executable) }
         for _, value in ipairs(arguments) do command[#command + 1] = process.quote(value) end
-        local ok, output = process.outputCommand(assert(os.getenv("ComSpec") or os.getenv("COMSPEC")),
-            { "/d", "/s", "/c", table.concat(command, " ") }, environment)
-        assert(ok, output)
+        local ok, output, status = process.outputCommand(assert(os.getenv("ComSpec") or os.getenv("COMSPEC")),
+            { "/d", "/s", "/c", table.concat(command, " ") }, environment,
+            {timeout_seconds=driver_timeout})
+        assert(ok, tostring(output) .. "\ncommand status: " .. tostring(status and status.code)
+            .. " / " .. tostring(status and status.reason))
         return output
     end
     local command = { "-c", 'cd "$1" && shift && exec "$@"', "standalone-test", project, executable }

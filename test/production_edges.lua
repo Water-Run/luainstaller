@@ -4560,6 +4560,25 @@ assert(require("luainstaller.fs").temporaryRoot() == %q,
     removeTree(root)
 end)
 
+test("logger cold writes do not compile a host backend", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    local root = makeTempDir("logger-no-compiler")
+    local home = root .. "/home"
+    makeDirectory(home)
+    local child = harness.loader_prelude() .. [[
+local native = require("luainstaller.posix_host")
+native.prepare = function() error("logging unexpectedly requested a native compiler", 0) end
+local written = require("luainstaller.logger").logInfo("edge", "cold", "without compiler")
+assert(written == true, "cold logging failed")
+assert(not native.ready(), "logging bootstrapped a native backend")
+print("cold logging needs no compiler")
+]]
+    local output = runCommand("HOME=" .. shellQuote(home) .. " "
+        .. luaCommand .. " -e " .. shellQuote(child))
+    assert(output:find("cold logging needs no compiler", 1, true))
+    removeTree(root)
+end)
+
 test("logger retains concurrent writers", function()
     if package.config:sub(1, 1) ~= "/" then
         return

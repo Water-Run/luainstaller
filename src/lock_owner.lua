@@ -66,17 +66,16 @@ local function processScope()
     if cached_scope then return cached_platform, cached_scope end
     if procRecord("self") then
         local boot = readSmall("/proc/sys/kernel/random/boot_id")
-        local ok, namespace = process.outputCommand("readlink", {"/proc/self/ns/pid"},
-            {LC_ALL="C"}, {timeout_seconds=5})
+        -- Fixed host queries use the bounded cold shell path. Obtaining a log
+        -- owner must not compile a process backend while holding the log lock.
+        local ok, namespace = process.output("LC_ALL=C readlink /proc/self/ns/pid")
         namespace = tostring(namespace or ""):match("^(pid:%[%d+%])%s*$")
         if boot and ok and namespace then
             cached_platform, cached_scope = "linux", hash.sha256(boot .. "\0" .. namespace)
         end
     elseif not IS_WINDOWS then
-        local boot_ok, boot = process.outputCommand("sysctl", {"-n", "kern.boottime"},
-            {LC_ALL="C"}, {timeout_seconds=5})
-        local host_ok, hostname = process.outputCommand("uname", {"-n"},
-            {LC_ALL="C"}, {timeout_seconds=5})
+        local boot_ok, boot = process.output("LC_ALL=C sysctl -n kern.boottime")
+        local host_ok, hostname = process.output("LC_ALL=C uname -n")
         if boot_ok and host_ok and boot:find("sec", 1, true) and hostname ~= "" then
             cached_platform, cached_scope = "posix", hash.sha256(hostname .. "\0" .. boot)
         end
@@ -98,8 +97,7 @@ local function processIdentity(pid)
         if not record then return nil, "cannot read process start identity" end
         return platform .. ":" .. scope .. ":" .. record.birth, nil, record.dead
     elseif platform == "posix" then
-        local ok, output = process.outputCommand("ps", {"-p", tostring(pid), "-o", "lstart="},
-            {LC_ALL="C"}, {timeout_seconds=5})
+        local ok, output = process.output("LC_ALL=C ps -p " .. process.quote(pid) .. " -o lstart=")
         output = tostring(output or ""):match("^%s*(.-)%s*$")
         if ok and output ~= "" then return platform .. ":" .. scope .. ":" .. hash.sha256(output) end
     end

@@ -104,6 +104,8 @@ and `posix_host_source.lua` are synchronized by
 trusted compiler and filesystem operations before the native helper is ready.
 It uses a detected GNU timeout when available, retaining the shell watchdog
 fallback otherwise. User-code execution always uses the native supervisor.
+Fixed POSIX process-identity queries use the bounded cold path, so logging
+does not compile a host backend while holding its lock.
 Static and manual analysis need no POSIX helper.
 
 Options in `init.lua` set byte budgets before parsing. The tracer bounds
