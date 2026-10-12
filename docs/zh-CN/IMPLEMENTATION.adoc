@@ -100,6 +100,8 @@ Lua DLL 的 API，不需要安装 Lua 头文件。
 `posix_host_source.lua` 由 `tools/generate-posix-host-source.lua` 同步。
 原生 helper 就绪前，有界 shell 启动流程只用于可信的编译器和文件操作。
 有 GNU timeout 时先使用它，否则保留 shell watchdog。用户代码始终走原生监督器。
+冷启动命令成功后直接终止并收集本次 watcher，避免其信号设置的竞争；
+能力探测使用请求的命令预算，最多 30 秒。
 POSIX 进程身份的固定系统查询使用有界冷启动路径，日志不会在持锁时编译原生助手。
 静态、手动分析不需要 POSIX helper。
 

@@ -161,7 +161,9 @@ local function bootstrapInvocation(command, opts, token)
         'wait "$__luai_child"',
         "__luai_status=$?",
         "__luai_child=",
-        'kill -TERM "$__luai_watch" 2>/dev/null || true',
+        -- The watcher may not have installed its trap when a fast command
+        -- finishes. Kill this unreaped child directly, then collect its status.
+        'kill -KILL "$__luai_watch" 2>/dev/null || true',
         'wait "$__luai_watch" 2>/dev/null || true',
         "__luai_watch=",
         "printf '\\n" .. token .. ":%s:exit\\n' \"$__luai_status\"",
@@ -241,7 +243,10 @@ local function bootstrapOutput(command, opts)
     if not normalized then return false, err, {reason="invalid-options"} end
     if gnu_timeout == nil then
         gnu_timeout = false
-        local probe_opts = {timeout_seconds=3, max_output_bytes=4096}
+        local probe_opts = {
+            timeout_seconds=math.min(30, normalized.timeout_seconds),
+            max_output_bytes=4096,
+        }
         local probe_token = statusToken()
         local found, location = readPipe(bootstrapInvocation("command -v timeout", probe_opts,
             probe_token), probe_token, probe_opts, true)

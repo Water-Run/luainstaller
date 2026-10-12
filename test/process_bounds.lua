@@ -37,6 +37,33 @@ local called, failure = xpcall(function()
         local checked, output = process.outputCommand(harness.lua_command(), {driver},
             {PATH=root .. ":" .. (os.getenv("PATH") or "")}, {timeout_seconds=20})
         assert(checked, output)
+        local found, timeout_path = process.output("command -v timeout")
+        timeout_path = tostring(timeout_path or ""):match("^%s*(.-)%s*$")
+        local checked_timeout, banner = false, ""
+        if found and timeout_path:sub(1, 1) == "/" then
+            checked_timeout, banner = process.outputCommand(timeout_path, {"--version"})
+        end
+        if checked_timeout and banner:find("timeout (GNU coreutils)", 1, true) then
+            local slow_bin = path.join(root, "slow-probe")
+            local marker = path.join(root, "gnu-used")
+            assert(fs.makeDirectory(slow_bin))
+            assert(fs.writeFile(path.join(slow_bin, "timeout"), "#!/bin/sh\n"
+                .. 'if test "$1" = --version; then sleep 4; fi\n'
+                .. 'if test "$1" = --signal=TERM; then printf used > '
+                .. process.shellQuote(marker) .. '; fi\n'
+                .. "exec " .. process.shellQuote(timeout_path) .. ' "$@"\n'))
+            assert(fs.setExecutable(path.join(slow_bin, "timeout")))
+            local cold = path.join(root, "cold.lua")
+            assert(fs.writeFile(cold, harness.loader_prelude() .. [[
+assert(require("luainstaller.process").output("printf cold-command"))
+]]))
+            local ran, cold_output = process.outputCommand(harness.lua_command(), {cold}, {
+                PATH=slow_bin .. ":" .. (os.getenv("PATH") or ""), LUAI_CMD_TIMEOUT="10",
+            }, {timeout_seconds=20})
+            assert(ran, cold_output)
+            assert(fs.readFile(marker) == "used",
+                "a usable GNU timeout was permanently discarded after a short probe deadline")
+        end
     end
     local limited, output, status = process.outputCommand(harness.lua_command(), {
         "-e", "io.write(string.rep('x', 65536)); io.flush()",

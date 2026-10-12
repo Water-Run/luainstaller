@@ -181,14 +181,14 @@ local function uniqueToken()
     }, "-")
 end
 
-local function ownerContent(token, created)
+local function ownerContent(token, created, identity)
     local pid = lock_owner.currentPid()
     if pid then
         local encoded = lock_owner.encode({
             token = token,
             pid = pid,
             created = created or os.time(),
-            identity = lock_owner.currentIdentity(),
+            identity = identity,
         })
         if encoded then return encoded end
     end
@@ -507,8 +507,13 @@ local function acquireLock()
     end
     local lock_path = getLogFilePath() .. ".lock"
     local max_attempts = math.max(1, math.floor(LOCK_TIMEOUT_SECONDS / LOCK_RETRY_SECONDS))
+    -- Cold host queries and random tokens can be slow under contention. Prepare
+    -- them before taking the lock so waiting writers cannot stall its owner.
+    local token = uniqueToken()
+    local release_token = uniqueToken()
+    local identity = lock_owner.currentIdentity()
     local started = os.time()
-    local retry_jitter = (tonumber(lock_owner.currentPid()) or 0) % 11 / 1000
+    local retry_jitter = (tonumber(lock_owner.currentPid()) or 0) % 31 / 100
 
     for attempt = 0, max_attempts do
         local observed_time = os.time()
@@ -516,9 +521,7 @@ local function acquireLock()
             return nil, nil
         end
         if createDirectory(lock_path) then
-            local token = uniqueToken()
-            local release_token = uniqueToken()
-            local content = ownerContent(token)
+            local content = ownerContent(token, nil, identity)
             local sentinel_path = lock_path .. PATH_SEP .. "owner." .. token
             local sentinel_ok = fs.writeFile(sentinel_path, content)
             local permissions_ok = sentinel_ok and chmodPath(sentinel_path, 600)
@@ -535,8 +538,8 @@ local function acquireLock()
         end
         local recovered = inspected and recoverStaleLock(lock_path)
         if not recovered and attempt < max_attempts then
-        waitForLockRetry(math.min(0.2, LOCK_RETRY_SECONDS * (1 + math.floor(attempt / 10)))
-            + retry_jitter)
+            local delay = math.min(1, LOCK_RETRY_SECONDS * 2 ^ math.min(attempt, 5))
+            waitForLockRetry(delay + retry_jitter)
         end
     end
     return nil, nil
