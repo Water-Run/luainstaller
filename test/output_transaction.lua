@@ -20,6 +20,9 @@ local api = require("luainstaller")
 local root = assert(fs.makePrivateDirectory("output-transaction"))
 local driver = path.join(root, "driver.lua")
 local suffix = package.config:sub(1, 1) == "\\" and ".exe" or ""
+-- Lua 5.1's arithmetic SHA backend needs more time to verify every copied
+-- library and backup. The fault must be reached before the driver is stopped.
+local driver_timeout = _VERSION == "Lua 5.1" and 600 or 120
 
 assert(fs.writeFile(driver, [[
 local harness = dofile("test/support/harness.lua")
@@ -93,6 +96,10 @@ else
 end
 ]]))
 
+local function runDriver(arguments)
+    return process.outputCommand(harness.lua_command(), arguments, {}, {timeout_seconds=driver_timeout})
+end
+
 local called, failure = xpcall(function()
     for _, phase in ipairs({ "before-backup", "after-backup", "after-publish", "during-cleanup",
         "during-quarantine", "after-marker", "during-directory-cleanup" }) do
@@ -104,14 +111,15 @@ local called, failure = xpcall(function()
         local built = api.bundle({entry=entry, out=out, mode="onedir"})
         assert(built.ok, built.error and built.error.message)
         assert(fs.writeFile(entry, "print('new-generation')\n"))
-        local survived, output = process.outputCommand(harness.lua_command(), {
+        local survived, output = runDriver({
             driver, phase, entry, out,
-        }, {}, {timeout_seconds=120})
+        })
         assert(not survived, "faulted build returned success: " .. tostring(output))
-        assert(output:find("fault-injected:" .. phase, 1, true), output)
-        local recovered, recovery_output = process.outputCommand(harness.lua_command(), {
+        assert(output:find("fault-injected:" .. phase, 1, true),
+            "fault boundary was not reached within the driver budget: " .. phase .. "\n" .. output)
+        local recovered, recovery_output = runDriver({
             driver, "recover-with-failed-build", entry, out,
-        }, {}, {timeout_seconds=120})
+        })
         assert(recovered, recovery_output)
         local ran, result = process.outputCommand(path.join(out, "app" .. suffix), {}, {
             LUA_PATH="", LUA_CPATH="",
@@ -134,7 +142,7 @@ local called, failure = xpcall(function()
     assert(fs.writeFile(entry, "print('old-generation')\n"))
     local initial = api.bundle({entry=entry, out=out})
     assert(initial.ok, initial.error and initial.error.message)
-    local survived = process.outputCommand(harness.lua_command(), {driver, "after-backup", entry, out})
+    local survived = runDriver({driver, "after-backup", entry, out})
     assert(not survived)
     local failed = api.bundle({entry=entry .. ".missing", out=out})
     assert(not failed.ok and failed.error.type == "ScriptNotFoundError")
@@ -148,8 +156,8 @@ local called, failure = xpcall(function()
     assert(fs.writeFile(entry, "print('old-generation')\n"))
     initial = api.bundle({entry=entry, out=out})
     assert(initial.ok, initial.error and initial.error.message)
-    assert(not process.outputCommand(harness.lua_command(), {driver, "after-backup", entry, out}))
-    assert(not process.outputCommand(harness.lua_command(), {
+    assert(not runDriver({driver, "after-backup", entry, out}))
+    assert(not runDriver({
         driver, "interrupt-recovery", entry .. ".missing", out,
     }))
     failed = api.bundle({entry=entry .. ".missing", out=out})
@@ -167,7 +175,7 @@ local called, failure = xpcall(function()
         initial = api.bundle({entry=entry, out=out})
         assert(initial.ok, initial.error and initial.error.message)
         local phase = injected == "throw" and "after-backup" or "after-publish"
-        local survived, fault_output = process.outputCommand(harness.lua_command(), {driver, phase, entry, out})
+        local survived, fault_output = runDriver({driver, phase, entry, out})
         assert(not survived and fault_output:find("fault-injected:" .. phase, 1, true), fault_output)
         local user_file
         if injected == "throw" then
@@ -209,11 +217,11 @@ local called, failure = xpcall(function()
         assert(fs.writeFile(entry, "print('old-generation')\n"))
         initial = api.bundle({entry=entry, out=out})
         assert(initial.ok, initial.error and initial.error.message)
-        local survived, fault_output = process.outputCommand(harness.lua_command(), {driver, "after-backup", entry, out})
+        local survived, fault_output = runDriver({driver, "after-backup", entry, out})
         assert(not survived and fault_output:find("fault-injected:after-backup", 1, true), fault_output)
         local command = assert(process.command(harness.lua_command(), {driver, "recover-only", entry .. ".missing", out}))
         local concurrent, concurrency_output = process.output(command .. " & p=$!; " .. command
-            .. "; s=$?; wait \"$p\"; t=$?; test \"$s\" -eq 0 && test \"$t\" -eq 0", {timeout_seconds=120})
+            .. "; s=$?; wait \"$p\"; t=$?; test \"$s\" -eq 0 && test \"$t\" -eq 0", {timeout_seconds=driver_timeout})
         assert(concurrent, concurrency_output)
         failed = api.bundle({entry=entry .. ".missing", out=out})
         assert(not failed.ok and failed.error.type == "ScriptNotFoundError", failed.error and failed.error.message)
