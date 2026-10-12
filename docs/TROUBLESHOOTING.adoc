@@ -73,6 +73,9 @@ output. Directory identity is checked again before publishing. Windows
 checks reparse points and holds ancestor handles during file operations;
 use a workspace with access restricted to trusted users.
 
+Concurrent commands share the log lock. Its retry budget is 30 seconds;
+failed log writes do not discard a completed bundle.
+
 [#troubleshooting-cli]
 == "unknown option" or "unknown command"
 

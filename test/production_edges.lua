@@ -4576,7 +4576,15 @@ test("logger retains concurrent writers", function()
     for index = 1, 60 do
         local child = harness.loader_prelude() .. string.format([[
 local logger = require("luainstaller.logger")
-assert(logger.logInfo("edge", "parallel", %q) == true)
+local fs = require("luainstaller.fs")
+local original_write, writes, started = fs.writeFile, 0, os.time()
+fs.writeFile = function(...)
+    writes = writes + 1
+    return original_write(...)
+end
+local written, error_message = logger.logInfo("edge", "parallel", %q)
+assert(written == true, tostring(error_message) .. " writes=" .. writes
+    .. " elapsed=" .. (os.time() - started))
 ]], "worker-" .. index)
         workers[#workers + 1] = table.concat({
             "HOME=" .. shellQuote(home),

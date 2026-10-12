@@ -25,7 +25,7 @@ local LogLevel = {
 }
 
 local MAX_LOGS = 1000
-local LOCK_TIMEOUT_SECONDS = 5
+local LOCK_TIMEOUT_SECONDS = 30
 local LOCK_STALE_SECONDS = 120
 -- PID-less legacy owner records cannot be liveness-probed. Locks are normally
 -- held for milliseconds, so a much longer age floor is required before one of
@@ -506,8 +506,13 @@ local function acquireLock()
     end
     local lock_path = getLogFilePath() .. ".lock"
     local max_attempts = math.max(1, math.floor(LOCK_TIMEOUT_SECONDS / LOCK_RETRY_SECONDS))
+    local started = os.time()
 
     for attempt = 0, max_attempts do
+        local observed_time = os.time()
+        if observed_time < started or observed_time - started >= LOCK_TIMEOUT_SECONDS then
+            return nil, nil
+        end
         if createDirectory(lock_path) then
             local token = uniqueToken()
             local release_token = uniqueToken()
