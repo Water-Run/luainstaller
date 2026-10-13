@@ -4031,6 +4031,7 @@ test("onefile cache repairs an equal-size FNV collision and mode", function()
     local result = require("luainstaller").bundle({
         entry = "test/single_file/01_hello_luainstaller.lua",
         mode = "onefile",
+        onefile_mode = "extract",
         out = out,
     })
     assert(result.ok, result.error and result.error.message)
@@ -4183,10 +4184,11 @@ bundler.bundleOnedir = function(opts)
 end
 local result = onefile.bundleOnefile({
     entry = "test/single_file/01_hello_luainstaller.lua",
+    onefile_mode = "extract",
     out = %q,
 })
 bundler.bundleOnedir = original
-assert(result.ok, result.error and result.error.message)
+assert(result.ok, result.error and (result.error.message .. ": " .. tostring(result.error.cause)))
 ]], out)
     runCommand(table.concat({
         "LUAI_CAPTURE_EXTRACTOR=" .. shellQuote(captured),

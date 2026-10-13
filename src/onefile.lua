@@ -1607,9 +1607,9 @@ end
 
 local function selectFileMode(opts, profile)
     local requested = opts.onefile_mode or "auto"
-    if requested == "extract" then return "extract" end
+    if requested == "extract" then return "extract", nil, nil, "requested-extract" end
     if #(opts.dependencies.libraries or {}) > 0 then
-        if requested == "auto" then return "extract" end
+        if requested == "auto" then return "extract", nil, nil, "native-modules" end
         return nil, makeError("UnsupportedOnefileModeError", "Native C modules require extract mode", {
             onefile_mode=requested, reason="native-modules",
         })
@@ -1617,7 +1617,7 @@ local function selectFileMode(opts, profile)
     local static, static_error = toolchain.resolve({target_os=profile.target_os,
         target_arch=profile.target_arch, lua_prefix=opts.lua_prefix,
         require_static=true})
-    if static then return "no-extract", nil, static end
+    if static then return "no-extract", nil, static, "pure-lua-static" end
     if requested == "auto" then return "extract", nil, nil, "static-lua-unavailable" end
     return nil, makeError("StaticLuaUnavailableError",
         "No matching static Lua runtime; use extract mode or install a matching static Lua archive", {
@@ -1656,7 +1656,7 @@ local function bundleOnefile(opts, lifecycle)
     end
     local selected_mode, selection_error, static_toolchain, selection_reason = selectFileMode(opts, profile)
     if not selected_mode then return selection_error end
-    opts.manifest.onefile_mode = selected_mode
+    if opts.manifest then opts.manifest.onefile_mode = selected_mode end
     local work_dir, work_err = createPrivateDirectory("onefile-work")
     if not work_dir then
         return work_err
