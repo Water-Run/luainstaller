@@ -652,13 +652,14 @@ for _, action in ipairs({"analyze", "trace", "compatibility", "bundle"}) do
         end
         local moon = require("luainstaller.moon")
         local prepared, context, prepare_error = pcall(moon.prepare, normalized)
-        if not prepared then return recordFailure(action_name, result.fromThrown(context)) end
+        if not prepared then return recordFailure(action_name, moon.fromThrown(context, "LuaInstallerError")) end
         if not context then return recordFailure(action_name, prepare_error) end
         moon_contexts[context.options] = context
         local published = false
         local called, value = xpcall(function()
             local response = original(context.options)
-            published = response.ok and action_name == "bundle"
+            published = action_name == "bundle"
+                and (response.ok or (response.error and response.error.committed == true)) or false
             if response.ok and action_name ~= "bundle" then
                 local verified = context.verify()
                 if not verified.ok then response = verified end
@@ -674,15 +675,22 @@ for _, action in ipairs({"analyze", "trace", "compatibility", "bundle"}) do
             return response
         end, function(error_value) return error_value end)
         moon_contexts[context.options] = nil
-        local response = called and value or result.fromThrown(value)
+        local response = called and value or moon.fromThrown(value, "LuaInstallerError")
         if not called and published then response.error.committed = true end
         local cleanup_called, cleaned, cleanup_error = pcall(context.cleanup)
         if not cleanup_called then cleanup_error, cleaned = cleaned, false end
         if not cleaned then
             if response.ok then
-                response = makeError("FilesystemError", "Cannot remove MoonScript workspace", {
-                    cleanup_path=context.workspace, cause=cleanup_error, committed=published,
-                })
+                local cleanup_failure = not cleanup_called and moon.fromThrown(cleanup_error) or nil
+                if cleanup_failure and cleanup_failure.error.type == "InterruptedError" then
+                    response = cleanup_failure
+                    response.error.cleanup_path = context.workspace
+                    response.error.committed = published
+                else
+                    response = makeError("FilesystemError", "Cannot remove MoonScript workspace", {
+                        cleanup_path=context.workspace, cause=cleanup_error, committed=published,
+                    })
+                end
             else
                 response.error.cleanup_error = cleanup_error
                 response.error.cleanup_path = context.workspace

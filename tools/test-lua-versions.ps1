@@ -403,7 +403,7 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         'build_cleanup.lua','process_bounds.lua','process_working_directory.lua','resource_bounds.lua','output_parents.lua',
         'distribution_licenses.lua','reproducible_artifacts.lua','static_windows_image.lua','moonscript.lua',
         'moon_boundaries.lua','moon_compiler_bounds.lua','moon_failure_cleanup.lua',
-        'moon_reproducibility.lua','onefile_modes.lua')) {
+        'moon_interruption.lua','moon_reproducibility.lua','onefile_modes.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
     Invoke-Native $LuaRocks @('lint','luainstaller-1.6.0-1.rockspec')

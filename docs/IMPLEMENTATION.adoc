@@ -182,6 +182,9 @@ to prepared paths without removing a separate Lua file with the same basename.
 Preparation, source verification and path mapping use protected failure
 boundaries. Cleanup also catches thrown filesystem errors and reports a
 committed output when publication completed before cleanup failed.
+Interruptions keep their structured type, including Lua's plain SIGINT error.
+If a lower layer reports a committed output with an error, subsequent diagnostic
+or cleanup failures preserve that committed state.
 
 [#implementation-errors]
 == Errors

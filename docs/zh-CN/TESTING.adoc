@@ -43,6 +43,7 @@ LUA=${LUA:-lua}
 "$LUA" test/moon_boundaries.lua
 "$LUA" test/moon_compiler_bounds.lua
 "$LUA" test/moon_failure_cleanup.lua
+"$LUA" test/moon_interruption.lua
 "$LUA" test/moon_reproducibility.lua
 "$LUA" test/onefile_modes.lua
 "$LUA" test/resource_bounds.lua
@@ -128,6 +129,9 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/moon_compiler_bounds.lua`
 |真实子进程超时和输出配额、编译失败、原始路径诊断、预处理总量预算及已有输出保留
+
+|`test/moon_interruption.lua`
+|预处理各阶段的中断身份、已提交产物状态，以及真实 POSIX SIGINT 的退出码、编译器终止、工作区清理和重试
 
 |`test/moon_reproducibility.lua`
 |MoonScript 跨根产物一致性、路径隐私与导出的原始源码

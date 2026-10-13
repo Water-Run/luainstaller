@@ -25,6 +25,18 @@ local function failure(kind, message, fields)
     return {ok=false, error=error_value}
 end
 
+function M.fromThrown(value, default_type)
+    if type(value) == "table" and value.ok == false and type(value.error) == "table" then return value end
+    if type(value) == "table" and value.type then return result.fromThrown(value, default_type) end
+    local message = type(value) == "table" and value.message or tostring(value)
+    local lowered = type(message) == "string" and message:lower() or ""
+    if lowered == "interrupted" or lowered:find("interrupted!", 1, true) then
+        return failure("InterruptedError", "MoonScript operation interrupted", {cause=message})
+    end
+    if default_type then return result.fromThrown(value, default_type) end
+    return failure("MoonScriptCompilationError", "MoonScript preprocessing failed", {cause=tostring(value)})
+end
+
 local function isMoon(filename)
     return filename:lower():match("%.moon$") ~= nil
 end
@@ -290,8 +302,7 @@ function M.prepare(opts)
     if not called or not value.ok then
         local cleanup_called, cleaned, cleanup_error = pcall(context.cleanup)
         if not cleanup_called then cleanup_error, cleaned = cleaned, false end
-        local error_result = called and value or (type(value) == "table" and value.ok == false and value
-            or failure("MoonScriptCompilationError", "MoonScript preprocessing failed", {cause=tostring(value)}))
+        local error_result = called and value or M.fromThrown(value)
         if not cleaned then error_result.error.cleanup_error = cleanup_error; error_result.error.cleanup_path = workspace end
         return nil, error_result
     end

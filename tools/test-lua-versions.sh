@@ -611,6 +611,7 @@ run_version() {
     "$lua" test/moon_boundaries.lua
     "$lua" test/moon_compiler_bounds.lua
     "$lua" test/moon_failure_cleanup.lua
+    "$lua" test/moon_interruption.lua
     "$lua" test/moon_reproducibility.lua
     "$lua" test/onefile_modes.lua
     "$lua" test/resource_bounds.lua
