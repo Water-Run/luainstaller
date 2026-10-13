@@ -128,6 +128,7 @@ an existing directory:
 
 [source,bash]
 ----
+mkdir materials
 ./application --luainstaller-extract materials
 ----
 

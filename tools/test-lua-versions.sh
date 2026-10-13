@@ -609,6 +609,7 @@ run_version() {
     "$lua" test/static_windows_image.lua
     "$lua" test/moonscript.lua
     "$lua" test/moon_failure_cleanup.lua
+    "$lua" test/moon_reproducibility.lua
     "$lua" test/onefile_modes.lua
     "$lua" test/resource_bounds.lua
     "$lua" test/output_parents.lua

@@ -104,6 +104,7 @@ POSIX 用应用替换外层程序；Windows 等待应用，并管理其子进程
 
 [source,bash]
 ----
+mkdir materials
 ./application --luainstaller-extract materials
 ----
 

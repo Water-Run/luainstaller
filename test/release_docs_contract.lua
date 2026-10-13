@@ -105,7 +105,8 @@ for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
         "moonc", "--no-moon-detect"}) do
         expect_contains(prefix .. "TROUBLESHOOTING.adoc", needle)
     end
-    for _, needle in ipairs({"test/moonscript.lua", "test/moon_failure_cleanup.lua", "test/onefile_modes.lua"}) do
+    for _, needle in ipairs({"test/moonscript.lua", "test/moon_failure_cleanup.lua",
+        "test/moon_reproducibility.lua", "test/onefile_modes.lua"}) do
         expect_contains(prefix .. "TESTING.adoc", needle)
     end
     expect_contains(prefix .. "PLATFORMS-NATIVE-LIMITS.adoc", "--file-mode")

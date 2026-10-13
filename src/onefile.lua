@@ -1565,7 +1565,10 @@ local function noExtractSource(stage_dir, staged, limit)
     -- Keep the program and the optional material exporter in separate C
     -- namespaces. Application bytes already reside in hexadecimal arrays.
     content = content:gsub("%f[%w_]luai_", "luai_program_")
-    local glue = [[#define main luai_materials_main
+    local glue = [[#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+#define main luai_materials_main
 #include "materials-export.c"
 #undef main
 #define main luai_program_main
