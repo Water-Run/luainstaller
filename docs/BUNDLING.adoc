@@ -114,17 +114,24 @@ end. If the build fails, the previous bundle is put back.
 [#bundling-onefile]
 == The single file
 
-A single-file build makes a normal directory bundle first, then wraps it
-in a small extractor program (`extractor.c`).
+Single-file mode defaults to `auto`. Pure Lua with a verified static Lua
+library starts directly from one executable. Dynamic Lua or C modules select
+the self-extracting format. `--file-mode` chooses `auto`, `extract` or `no-extract`.
 
-On first run the extractor unpacks the bundle into a per-user folder under
-the system temporary directory, then hands over to it. Later runs reuse
-that copy if it's byte-for-byte identical.
+In `extract` mode, the program unpacks to a per-user temporary folder and reuses
+a byte-identical copy. POSIX replaces the wrapper with the application;
+Windows waits for it and contains its child processes.
 
-* On Linux and macOS, the extractor replaces itself with the real program,
-  so process ID, signals and exit code behave normally.
-* On Windows, the extractor waits for the program. Closing or killing one
-  ends the other.
+In `no-extract` mode, the application runs in the same process without creating
+an extraction directory. To export licenses and relinking materials, supply
+an existing directory:
+
+[source,bash]
+----
+./application --luainstaller-extract materials
+----
+
+The command prints the created material directory and doesn't run the application.
 
 [CAUTION]
 ====
@@ -138,8 +145,8 @@ need that.
 
 Every bundle carries the Lua license (`Lua-MIT.txt`), the luainstaller
 license (LGPL, plus the GPL text it builds on), `THIRD_PARTY_NOTICES.md`,
-and the generated C source in `.luai/build/`. A single file also includes
-`extractor.c` and the script that rebuilds its payload.
+and the generated C source in `.luai/build/`. The extracting format includes `extractor.c`; direct startup includes
+`no-extract.c` and the material exporter source. Both provide a payload rebuild script.
 
 Keep all of it when you pass the program on. Your own dependencies may
 need additional notices. xref:RELINKING.adoc[Relinking] explains what the

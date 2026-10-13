@@ -114,8 +114,8 @@ modules from your own machine.
 luai -b --file app/main.lua -o build/app-onefile
 ----
 +
-The single file unpacks itself to a temporary folder on first run and starts
-from there.
+Single-file builds default to direct startup for pure Lua with a verified static
+Lua library. Other builds unpack to a temporary folder and start from there.
 
 IMPORTANT: If the single file misbehaves, go back to the directory bundle.
 It shows exactly what was packaged, so problems are much easier to find.

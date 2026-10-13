@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 return {
@@ -960,6 +960,22 @@ the license texts in `../licenses/`.
 * `../licenses/LGPL-3.0-or-later.txt` and
   `../licenses/GPL-3.0-or-later.txt` contain the applicable license
   texts.
+
+== Exporting single-file material
+
+Run `application --luainstaller-extract DIRECTORY` with an existing directory.
+The command prints the private directory containing the material. It doesn't
+run the application or overwrite material you edited in an earlier export.
+
+Direct-start programs include `no-extract.c`, `materials-export.c`, `launcher.c`
+and the matching Lua declarations. Regenerate `payload.inc`, then compile
+`no-extract.c` with the verified static Lua archive and the original platform
+link flags. Extracting programs use `extractor.c` as shown below.
+
+When MoonScript was used, `moon_sources/` contains the original application
+inputs. The generated Lua is already embedded in `launcher.c`; relinking that
+source doesn't require MoonScript. Changing MoonScript inputs requires `moonc`
+and a fresh luainstaller build.
 
 == Relinking the launcher
 

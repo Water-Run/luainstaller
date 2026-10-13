@@ -23,13 +23,19 @@ luafilesystem-1.9.0-1.src.rock:3de68d619f6ad95a27f4728814375447d921305194b7050de
 luasocket-3.1.0-1.src.rock:f4a207f50a3f99ad65def8e29c54ac9aac668b216476f7fae3fae92413398ed2
 mimetypes-1.1.0-2.src.rock:2cf77e0b6575caa6aecb43c9a06f705b1e7d92c19c5da6bb2f07a10feeee9e2f
 lzlib-0.4.1.53-4.src.rock:860c893fc53d0a7830a54fa64f22a2b89260ca39c9a7dcb0890f6d3029f00ca5
-pegasus-1.1.0-0.src.rock:0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746'
+pegasus-1.1.0-0.src.rock:0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746
+lpeg-1.1.0-2.src.rock:836d315b920a5cdd62e21786c6c9fad547c4faa131d5583ebca64f0b6595ee76
+argparse-0.7.2-1.src.rock:c122a25224876e93bd380ceb51af28cd8a72296e098b2eed4f06d85f54f1a0b4
+moonscript-0.6.0-1.src.rock:4fd3146d47e58ea75006e90d9a05e4a2983431dc1bc8951d9c7e344377570ac1'
 ROCK_INSTALL_ORDER='lua-cjson-2.1.0.10-1.src.rock:lua-cjson:2.1.0.10-1
 luafilesystem-1.9.0-1.src.rock:luafilesystem:1.9.0-1
 luasocket-3.1.0-1.src.rock:luasocket:3.1.0-1
 mimetypes-1.1.0-2.src.rock:mimetypes:1.1.0-2
 lzlib-0.4.1.53-4.src.rock:lzlib:0.4.1.53-4
-pegasus-1.1.0-0.src.rock:pegasus:1.1.0-0'
+pegasus-1.1.0-0.src.rock:pegasus:1.1.0-0
+lpeg-1.1.0-2.src.rock:lpeg:1.1.0-2
+argparse-0.7.2-1.src.rock:argparse:0.7.2-1
+moonscript-0.6.0-1.src.rock:moonscript:0.6.0-1'
 VERSIONS='5.1.5:2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
 5.2.4:b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b
 5.3.6:fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60
@@ -563,7 +569,7 @@ run_version() {
         test -L "$lua_prefix/lib/liblua.so"
         test "$(readlink "$lua_prefix/lib/liblua.so")" = "liblua.so.$abi"
     fi
-    export PATH="$luarocks_prefix/bin:$lua_prefix/bin:/usr/bin:/bin"
+    export PATH="$native_deps/bin:$luarocks_prefix/bin:$lua_prefix/bin:/usr/bin:/bin"
     export LUAI_TEST_LUA="$lua"
     export LUAI_TEST_LUAC="$lua_prefix/bin/luac"
     export LUAI_LUA_PREFIX="$lua_prefix"
@@ -584,7 +590,7 @@ run_version() {
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.5.3-1.rockspec
+    "$luarocks" lint luainstaller-1.6.0-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/standalone_install.lua
     "$lua" test/toolchain_native.lua
@@ -600,6 +606,9 @@ run_version() {
     "$lua" test/lock_identity.lua
     "$lua" test/process_bounds.lua
     "$lua" test/process_working_directory.lua
+    "$lua" test/static_windows_image.lua
+    "$lua" test/moonscript.lua
+    "$lua" test/onefile_modes.lua
     "$lua" test/resource_bounds.lua
     "$lua" test/output_parents.lua
     "$lua" test/build_cleanup.lua

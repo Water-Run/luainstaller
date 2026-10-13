@@ -15,6 +15,19 @@ xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
 * `../licenses/LGPL-3.0-or-later.txt` 和
   `../licenses/GPL-3.0-or-later.txt` 包含适用的许可证文本。
 
+== 导出单文件材料
+
+向 `application --luainstaller-extract DIRECTORY` 提供一个已存在的目录。
+命令打印包含材料的私有目录，不运行应用，也不会覆盖之前导出后手工修改的材料。
+
+直接启动的程序包含 `no-extract.c`、`materials-export.c`、`launcher.c` 和匹配的
+Lua 声明。重新生成 `payload.inc` 后，用经过验证的静态 Lua 库和原平台链接选项
+编译 `no-extract.c`。解包格式按下文使用 `extractor.c`。
+
+使用 MoonScript 时，`moon_sources/` 保存原始应用输入。生成的 Lua 已嵌入
+`launcher.c`，重链接该源码不需要 MoonScript。修改 MoonScript 输入后，需要
+`moonc` 和一次新的 luainstaller 构建。
+
 == 重链接启动器
 
 . 使用官方 Lua 解释器和库，其 ABI 主版本与次版本需与 `../manifest.lua` 中所示一致。

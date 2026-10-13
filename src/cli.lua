@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local function localFileExists(path)
@@ -67,6 +67,7 @@ local function installSourcePreloads()
         "luainstaller.analyzer",
         "luainstaller.logger",
         "luainstaller.manifest",
+        "luainstaller.moon",
         "luainstaller.compat",
         "luainstaller.platform",
         "luainstaller.toolchain",
@@ -124,6 +125,9 @@ local function installSourcePreloads()
     package.preload["luainstaller.manifest"] = package.preload["luainstaller.manifest"] or function()
         return dofile(sourcePath("manifest.lua"))
     end
+    package.preload["luainstaller.moon"] = package.preload["luainstaller.moon"] or function()
+        return dofile(sourcePath("moon.lua"))
+    end
     package.preload["luainstaller.compat"] = package.preload["luainstaller.compat"] or function()
         return dofile(sourcePath("compat.lua"))
     end
@@ -158,7 +162,7 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.5.3"
+local VERSION = "1.6.0"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
@@ -178,7 +182,9 @@ Commands:
 
 Options:
   --dir, --onedir       directory bundle mode
-  --file, --onefile     self-extracting single-file mode
+  --file, --onefile     single-file mode (auto)
+  --file-mode <mode>   auto, extract, or no-extract
+  -M                   skip MoonScript detection
   -o, --out <path>      output path
   --include <path>      include an extra file
   --exclude <path>      exclude a dependency
@@ -219,7 +225,9 @@ Commands:
 
 Build options:
   --dir, --onedir              Directory bundle mode (default).
-  --file, --onefile            Self-extracting single-file mode.
+  --file, --onefile            Single-file mode (auto).
+  --file-mode <mode>          auto, extract, or no-extract.
+  --no-moon-detect             Skip MoonScript detection.
   -o, --out <path>             Output path.
   --include <path>             Include an extra file; repeatable.
   --exclude <path>             Exclude a dependency; repeatable.
@@ -277,8 +285,9 @@ end
 
 local KNOWN_OPTION_TOKENS = {
     ["-a"] = true, ["-t"] = true, ["-b"] = true, ["-h"] = true, ["-v"] = true,
-    ["-o"] = true, ["-d"] = true,
+    ["-o"] = true, ["-d"] = true, ["-M"] = true,
     ["--dir"] = true, ["--onedir"] = true, ["--file"] = true, ["--onefile"] = true,
+    ["--file-mode"] = true, ["--no-moon-detect"] = true,
     ["--out"] = true, ["--include"] = true, ["--exclude"] = true,
     ["--target-os"] = true, ["--lua"] = true, ["--lua-prefix"] = true,
     ["--discovery-mode"] = true, ["--no-depscan"] = true, ["--max-deps"] = true,
@@ -422,14 +431,26 @@ end
 
 local function parseActionOptions(parser, action)
     local opts = newOptions()
+    local explicit_mode
     opts.action = action
 
     while parser:hasNext() do
         local item = parser:consume()
         if item == "--dir" or item == "--onedir" then
             opts.mode = "onedir"
+            explicit_mode = "onedir"
         elseif item == "--file" or item == "--onefile" then
             opts.mode = "onefile"
+            explicit_mode = "onefile"
+        elseif item == "--file-mode" then
+            local value, err = parser:consumeValue(item)
+            if not value then return nil, err end
+            if value ~= "auto" and value ~= "extract" and value ~= "no-extract" then
+                return nil, "--file-mode must be auto, extract, or no-extract"
+            end
+            opts.onefile_mode = value
+        elseif item == "--no-moon-detect" or item == "-M" then
+            opts.moon_detect = false
         elseif item == "-o" or item == "--out" then
             local value, err = parser:consumeValue(item)
             if not value then
@@ -510,6 +531,11 @@ local function parseActionOptions(parser, action)
 
     if not opts.entry then
         return nil, string.format("%s requires an entry script", action)
+    end
+    if opts.onefile_mode then
+        if action ~= "bundle" then return nil, "--file-mode is a build option" end
+        if explicit_mode == "onedir" then return nil, "--file-mode cannot be combined with --dir" end
+        opts.mode = "onefile"
     end
 
     return opts
@@ -611,6 +637,10 @@ local function renderClassicBundle(result, opts)
     if result.executable then
         io.write(string.format("executable: %s\n", result.executable))
     end
+    if result.onefile_mode then
+        io.write(string.format("file-mode: %s\n", result.onefile_mode))
+        if opts.verbose and result.selection_reason then io.write("selection: " .. result.selection_reason .. "\n") end
+    end
     if opts.verbose then
         local manifest = result.manifest or {}
         local modules = manifest.modules or {}
@@ -672,6 +702,10 @@ local function renderModernBundle(ui, result, opts)
     io.write(ui:heading("Build complete") .. "\n")
     if result.executable then
         io.write(string.format("  Executable: %s\n", ui:ok(result.executable)))
+    end
+    if result.onefile_mode then
+        io.write(string.format("  File mode: %s\n", result.onefile_mode))
+        if opts.verbose and result.selection_reason then io.write("  Selection: " .. result.selection_reason .. "\n") end
     end
     if opts.verbose then
         local manifest = result.manifest or {}

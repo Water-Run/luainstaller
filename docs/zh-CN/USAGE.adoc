@@ -60,12 +60,22 @@ TIP: 可执行文件以输出目录命名。用 `-o build/myapp` 会得到
 
 |启动方式
 |直接运行
-|先解包到临时目录再运行；之后的启动会复用它
+|静态 Lua 可直接启动；需要动态库时先解包
 
 |适合
 |调试、安装程序、任何你要解压的东西
 |把一个文件交给别人
 |===
+
+单文件默认使用 `auto`。用 `--file-mode extract` 选择自解包格式，
+用 `--file-mode no-extract` 选择直接启动。直接启动需要纯 Lua 依赖和经过验证的
+静态 Lua 库；显式选择 `no-extract` 而条件不满足时，会返回错误。
+构建输出会报告实际选择的模式。
+
+[source,bash]
+----
+luai -b app/main.lua --file-mode no-extract -o build/app
+----
 
 你的脚本和纯 Lua 模块会被编译进可执行文件。原生 C 模块以及某些系统
 上的 Lua 库放在 `.luai/native/` 中。
@@ -140,20 +150,37 @@ ldd build/app/app        # macOS 上用 otool -L
 `luainstaller` 只复制模块文件本身，不复制它可能依赖的系统库。如果
 某个模块需要比如 `libssl`，目标机器上就必须有这个库。
 
+[#usage-moonscript]
+== MoonScript 输入
+
+`.moon` 入口先调用设备上安装的 `moonc` 编译器，再进入相同的分析和构建流程。
+找不到该命令时，先安装 MoonScript：
+
+[source,bash]
+----
+luarocks install moonscript
+luai -b app/main.moon --file-mode auto -o build/app
+----
+
+Lua 和 MoonScript 模块可以混用。生成的程序不需要 MoonScript 环境。
+用 `luai -M` 或 `luainstaller --no-moon-detect` 跳过检测，直接按 Lua 处理输入。
+API 中设置 `moon_detect = false`。
+
 [#usage-options]
 == 全部选项
 
 .输出
 [horizontal]
 `--dir`:: 目录打包（默认）
-`--file`:: 单个可执行文件
+`--file`:: 单个可执行文件，自动选择模式
+`--file-mode MODE`:: `auto`、`extract` 或 `no-extract`
 `-o PATH`:: 输出路径
 
 .依赖
 [horizontal]
 `-d MODE`:: `static`（默认）、`runtime` 或 `manual`
 `--no-depscan`:: 等同于 `-d manual`
-`--include PATH`:: 补上扫描遗漏的 `.lua` 文件
+`--include PATH`:: 补上扫描遗漏的源码文件
 `--exclude NAME`:: 排除某个依赖（路径、文件名或路径后缀）
 `--max-deps N`:: 找到的 Lua 模块超过 N 个就停止（默认 36）
 
@@ -222,6 +249,8 @@ end
 local built = luainstaller.bundle({
     entry = "app/main.lua",
     mode = "onefile",          -- or "onedir" (default)
+    onefile_mode = "auto",     -- "extract" or "no-extract"
+    moon_detect = true,        -- false skips MoonScript detection
     out = "build/app",
 })
 print(built.ok and built.executable or built.error.message)

@@ -61,12 +61,23 @@ to get `build/myapp/myapp`.
 
 |Startup
 |runs directly
-|unpacks to a temporary folder first, then runs; later starts reuse it
+|runs directly with static Lua, or unpacks first when dynamic libraries are needed
 
 |Good for
 |debugging, installers, anything you'll unzip
 |handing someone one file
 |===
+
+Single-file mode defaults to `auto`. Use `--file-mode extract` to keep the
+self-extracting format, or `--file-mode no-extract` for direct startup.
+Direct startup needs pure Lua dependencies and a verified static Lua library;
+if either is missing, explicit `no-extract` reports an error.
+The build output reports the selected mode.
+
+[source,bash]
+----
+luai -b app/main.lua --file-mode no-extract -o build/app
+----
 
 Your script and pure-Lua modules are compiled into the executable. Native C
 modules and, on some systems, the Lua library sit in `.luai/native/`.
@@ -145,20 +156,37 @@ ldd build/app/app        # otool -L on macOS
 depend on. If a module needs, say, `libssl`, that library has to be present
 on the target machine.
 
+[#usage-moonscript]
+== MoonScript input
+
+A `.moon` entry uses the installed `moonc` compiler, then follows the same
+analysis and build workflow. Install MoonScript if the command isn't available:
+
+[source,bash]
+----
+luarocks install moonscript
+luai -b app/main.moon --file-mode auto -o build/app
+----
+
+Lua and MoonScript modules can be mixed. The generated program doesn't need
+MoonScript. Use `luai -M` or `luainstaller --no-moon-detect` to skip detection
+and treat the input as Lua. In the API, set `moon_detect = false`.
+
 [#usage-options]
 == All options
 
 .Output
 [horizontal]
 `--dir`:: directory bundle (default)
-`--file`:: single executable
+`--file`:: single executable, with automatic mode selection
+`--file-mode MODE`:: `auto`, `extract` or `no-extract`
 `-o PATH`:: output path
 
 .Dependencies
 [horizontal]
 `-d MODE`:: `static` (default), `runtime` or `manual`
 `--no-depscan`:: same as `-d manual`
-`--include PATH`:: add a `.lua` file the scan missed
+`--include PATH`:: add a source file the scan missed
 `--exclude NAME`:: leave out a dependency (path, file name or path suffix)
 `--max-deps N`:: stop if more than N Lua modules are found (default 36)
 
@@ -229,6 +257,8 @@ end
 local built = luainstaller.bundle({
     entry = "app/main.lua",
     mode = "onefile",          -- or "onedir" (default)
+    onefile_mode = "auto",     -- "extract" or "no-extract"
+    moon_detect = true,        -- false skips MoonScript detection
     out = "build/app",
 })
 print(built.ok and built.executable or built.error.message)

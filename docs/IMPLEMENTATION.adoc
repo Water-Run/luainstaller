@@ -169,6 +169,13 @@ Only safe relative paths are accepted. POSIX uses `openat` /
 and holds handles until the child exits. The payload ID is sorted path
 plus mode plus size plus content SHA-256.
 
+MoonScript preprocessing invokes the installed `moonc` from a private working
+directory, using controlled snapshot filenames. A separate Lua tree preserves
+module layout. Private API contexts hold the original hashes and verify them
+before both directory and single-file publication. Selected MoonScript inputs
+are included in relinking materials. Disabling detection and ordinary Lua
+entries bypass compiler lookup and preprocessing.
+
 [#implementation-errors]
 == Errors
 

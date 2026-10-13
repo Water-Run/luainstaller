@@ -9,7 +9,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local M = {}
@@ -107,6 +107,7 @@ local PRELOADS = {
     { "luainstaller.compat", "src/compat.lua" },
     { "luainstaller.platform", "src/platform.lua" },
     { "luainstaller.manifest", "src/manifest.lua" },
+    { "luainstaller.moon", "src/moon.lua" },
     { "luainstaller.runtime", "src/runtime.lua" },
     { "luainstaller.cgen", "src/cgen.lua" },
     { "luainstaller.launcher", "src/launcher.lua" },

@@ -15,7 +15,20 @@ truth for the exact contents of a published version.
 * Introduction video link in the READMEs: bilibili in the Chinese README,
   YouTube in the English one.
 
-== 1.5.3 - 2026-10-12
+== 1.6.0 - 2026-10-13
+
+=== Added
+
+* Single-file builds select `auto`, `extract` or `no-extract`. Pure Lua can run
+  directly from one executable with a verified static Lua library; automatic
+  selection retains extraction when native modules or dynamic Lua require it.
+* `.moon` inputs compile through the installed `moonc` command into a private Lua
+  tree. Lua and MoonScript modules can be mixed; original source changes reject
+  publication, and original MoonScript sources accompany relinking materials.
+* `--no-moon-detect`, `luai -M` and `moon_detect = false` skip MoonScript detection.
+* `--luainstaller-extract DIRECTORY` exports single-file relinking materials.
+
+== 1.5.3 - 2026-10-13
 
 === Fixed
 

@@ -23,13 +23,19 @@ luafilesystem-1.9.0-1.src.rock:3de68d619f6ad95a27f4728814375447d921305194b7050de
 luasocket-3.1.0-1.src.rock:f4a207f50a3f99ad65def8e29c54ac9aac668b216476f7fae3fae92413398ed2
 mimetypes-1.1.0-2.src.rock:2cf77e0b6575caa6aecb43c9a06f705b1e7d92c19c5da6bb2f07a10feeee9e2f
 lzlib-0.4.1.53-4.src.rock:860c893fc53d0a7830a54fa64f22a2b89260ca39c9a7dcb0890f6d3029f00ca5
-pegasus-1.1.0-0.src.rock:0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746'
+pegasus-1.1.0-0.src.rock:0f91f10e354183db06c0c2dfa878b97a0f75dc2777f4c971fbd44f848795f746
+lpeg-1.1.0-2.src.rock:836d315b920a5cdd62e21786c6c9fad547c4faa131d5583ebca64f0b6595ee76
+argparse-0.7.2-1.src.rock:c122a25224876e93bd380ceb51af28cd8a72296e098b2eed4f06d85f54f1a0b4
+moonscript-0.6.0-1.src.rock:4fd3146d47e58ea75006e90d9a05e4a2983431dc1bc8951d9c7e344377570ac1'
 ROCK_INSTALL_ORDER='lua-cjson-2.1.0.10-1.src.rock:lua-cjson:2.1.0.10-1
 luafilesystem-1.9.0-1.src.rock:luafilesystem:1.9.0-1
 luasocket-3.1.0-1.src.rock:luasocket:3.1.0-1
 mimetypes-1.1.0-2.src.rock:mimetypes:1.1.0-2
 lzlib-0.4.1.53-4.src.rock:lzlib:0.4.1.53-4
-pegasus-1.1.0-0.src.rock:pegasus:1.1.0-0'
+pegasus-1.1.0-0.src.rock:pegasus:1.1.0-0
+lpeg-1.1.0-2.src.rock:lpeg:1.1.0-2
+argparse-0.7.2-1.src.rock:argparse:0.7.2-1
+moonscript-0.6.0-1.src.rock:moonscript:0.6.0-1'
 LSQLITE3_SOURCE=lsqlite3-0.9.6.c
 LSQLITE3_SHA256=a3de0d56dcdd7df85e334174cd46e70451f996bc843e735ab1d8a8e8804f9486
 LSQLITE3_URL=https://sources.debian.org/data/main/l/lua-lsqlite3/0.9.6-1/lsqlite3.c
@@ -148,6 +154,7 @@ assert(type(require("lsqlite3")) == "table")
 
 if [ -n "${GITHUB_ENV:-}" ]; then
     {
+        printf 'LUAI_SAMPLE_DEPS_TREE=%s\n' "$TREE"
         printf 'LUA_PATH=%s/?.lua;%s/?/init.lua;;\n' \
             "$ROCK_LUA_DIR" "$ROCK_LUA_DIR"
         printf 'LUA_CPATH=%s/?.so;%s/?/init.so;;\n' \

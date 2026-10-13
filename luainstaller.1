@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.5.3" "User Commands"
+.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.6.0" "User Commands"
 .SH NAME
 luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
@@ -106,13 +106,19 @@ Print version information.
 Build an inspectable directory. This is the default.
 .TP
 .BR \-\-file ", " \-\-onefile
-Build a self-extracting executable from a staged onedir bundle.
+Build a single executable using automatic mode selection.
+.TP
+.BI \-\-file-mode " mode"
+Select auto, extract, or no-extract. Direct startup requires pure Lua and a verified static Lua library.
+.TP
+.BR \-M ", " \-\-no-moon-detect
+Skip MoonScript detection and treat the input as Lua.
 .TP
 .BR \-o " " path ", " \-\-out " " path
 Set the output directory or onefile executable path.
 .TP
 .BI \-\-include " path"
-Add a Lua source file not found by automatic discovery. Repeatable.
+Add a source file not found by automatic discovery. Repeatable.
 .TP
 .BI \-\-exclude " value"
 Exclude an exact path, basename, or path suffix. Repeatable. Exclusions take
@@ -249,7 +255,7 @@ directory recursively; replacement requires the exact file set and hashes.
 Legacy v1 output requires one-time explicit review and removal and is never
 overwritten automatically.
 .PP
-Onefile extracts a content-addressed onedir payload below the user temporary
+Extracting onefile mode writes a content-addressed onedir payload below the user temporary
 directory. POSIX caches are separated by effective user ID and require
 owner-only permissions. Unsafe paths, parent symlinks, and Windows reparse
 points are rejected. Cache reuse compares complete bytes with the embedded
@@ -264,6 +270,14 @@ sandbox; verify release bundles with
 and
 .B LUA_CPATH
 cleared.
+.PP
+Pure-Lua no-extract mode loads embedded Lua in the same process and needs no
+extraction directory. Use --luainstaller-extract DIRECTORY to export licenses
+and relinking materials into an existing directory.
+.PP
+MoonScript .moon input uses the device's moonc compiler in a private working
+directory, then follows the Lua workflow. The generated application doesn't
+require MoonScript. The API option moon_detect=false skips detection.
 .SH ENVIRONMENT
 .TP
 .B LUAI_LUA

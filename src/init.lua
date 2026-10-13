@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 
@@ -40,11 +40,12 @@ Module:
     luainstaller
 ]]
 local M = {}
+local moon_contexts = setmetatable({}, {__mode="k"})
 
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.5.3"
+M.VERSION = "1.6.0"
 
 --@description: Package author name
 --@const: AUTHOR
@@ -116,6 +117,9 @@ M.ErrorTypes = {
     INTERRUPTED           = "InterruptedError",
     RESOURCE_LIMIT        = "ResourceLimitExceededError",
     RUNTIME_TIMEOUT       = "RuntimeTimeoutError",
+    MOON_COMPILER_MISSING  = "MoonScriptCompilerNotFoundError",
+    MOON_COMPILATION       = "MoonScriptCompilationError",
+    MOON_COLLISION         = "MoonScriptCollisionError",
 }
 
 
@@ -241,6 +245,8 @@ local ALLOWED_OPTIONS = {
     max_trace_bytes = true,
     runtime_timeout = true,
     mode = true,
+    onefile_mode = true,
+    moon_detect = true,
     out = true,
     run_args = true,
     target_os = true,
@@ -290,7 +296,8 @@ local function normalizeOptions(opts)
     if max_deps_err then
         return nil, max_deps_err
     end
-    for _, key in ipairs({ "action", "discovery_mode", "launcher_profile", "lua", "lua_prefix", "mode", "out", "target_os" }) do
+    for _, key in ipairs({ "action", "discovery_mode", "launcher_profile", "lua", "lua_prefix",
+        "mode", "onefile_mode", "out", "target_os" }) do
         local err = validateOptionalString(opts, key)
         if err then
             return nil, err
@@ -325,7 +332,7 @@ local function normalizeOptions(opts)
     if launcher_profile_err then
         return nil, launcher_profile_err
     end
-    for _, key in ipairs({ "depscan", "verbose" }) do
+    for _, key in ipairs({ "depscan", "verbose", "moon_detect" }) do
         local err = validateOptionalBoolean(opts, key)
         if err then
             return nil, err
@@ -342,6 +349,11 @@ local function normalizeOptions(opts)
     normalized.include = include
     normalized.exclude = exclude
     normalized.run_args = run_args
+    normalized.onefile_mode = opts.onefile_mode or "auto"
+    if normalized.onefile_mode ~= "auto" and normalized.onefile_mode ~= "extract"
+        and normalized.onefile_mode ~= "no-extract" then
+        return nil, invalidOption("onefile_mode", "onefile_mode must be auto, extract or no-extract")
+    end
     for _, budget in ipairs({
         {"max_source_bytes", "LUAI_MAX_SOURCE_BYTES", 8388608},
         {"max_bundle_bytes", "LUAI_MAX_BUNDLE_BYTES", 134217728},
@@ -410,6 +422,7 @@ local function analyzeContext(opts, config)
     if not normalized then
         return nil, err
     end
+    moon_contexts[normalized] = moon_contexts[opts]
     if package.config:sub(1, 1) == "\\" then
         local native = require("luainstaller.windows_host")
         native.configure(normalized.cc)
@@ -580,6 +593,7 @@ function M.bundle(opts)
     end
 
     local bundle_opts = {
+        onefile_mode = normalized.onefile_mode,
         max_source_bytes = normalized.max_source_bytes,
         max_bundle_bytes = normalized.max_bundle_bytes,
         entry = normalized.entry,
@@ -590,12 +604,77 @@ function M.bundle(opts)
         trace = context.trace,
         manifest = built_manifest.manifest,
     }
+    local moon_context = moon_contexts[normalized]
+    if moon_context then
+        bundle_opts.before_publish = moon_context.verify
+        bundle_opts.additional_distribution_files = {}
+        local used = {[path.absolute(normalized.entry)]=true}
+        for _, filename in ipairs(context.dependencies.scripts or {}) do used[path.absolute(filename)] = true end
+        for _, material in ipairs(moon_context.materials) do
+            if used[material.prepared_path] then
+                bundle_opts.additional_distribution_files[#bundle_opts.additional_distribution_files + 1] = material
+            end
+        end
+    end
 
     if normalized.mode == "onefile" then
         return recordFailure("bundle", onefile.bundleOnefile(bundle_opts))
     end
 
     return recordFailure("bundle", bundler.bundleOnedir(bundle_opts))
+end
+
+for _, action in ipairs({"analyze", "trace", "compatibility", "bundle"}) do
+    local original, action_name = M[action], action
+    M[action] = function(opts)
+        if type(opts) ~= "table" or type(opts.entry) ~= "string" or opts.moon_detect == false
+            or not opts.entry:lower():match("%.moon$") then return original(opts) end
+        local version = compat.luaVersion()
+        if not version.official or version.major ~= 5 or version.minor < 1 or version.minor > 5 then
+            return original(opts)
+        end
+        local normalized, invalid = normalizeOptions(opts)
+        if not normalized then return recordFailure(action_name, invalid) end
+        if action_name == "bundle" then
+            normalized.mode = normalized.mode or "onedir"
+            local mode_error = validateBundleMode(normalized.mode)
+            if mode_error then return recordFailure(action_name, mode_error) end
+            if not normalized.out then
+                normalized.out = path.join("build", path.basename(normalized.entry):gsub("%.[mM][oO][oO][nN]$", "")
+                    .. (normalized.mode == "onefile" and "-onefile" or ""))
+            end
+            if normalized.mode == "onedir" then
+                local recovered = bundler.recoverOutput(normalized)
+                if not recovered.ok then return recordFailure(action_name, recovered) end
+            end
+        end
+        local moon = require("luainstaller.moon")
+        local context, prepare_error = moon.prepare(normalized)
+        if not context then return recordFailure(action_name, prepare_error) end
+        moon_contexts[context.options] = context
+        local called, value = xpcall(function() return original(context.options) end,
+            function(error_value) return error_value end)
+        local response = called and value or result.fromThrown(value)
+        if response.ok and action_name ~= "bundle" then
+            local verified = context.verify()
+            if not verified.ok then response = verified end
+        end
+        response = moon.remap(response, context)
+        if response.dependencies and response.dependencies.source_hashes then
+            for filename in pairs(response.dependencies.source_hashes) do
+                if context.originals[filename] then response.dependencies.source_hashes[filename] = context.originals[filename] end
+            end
+        end
+        local cleaned, cleanup_error = context.cleanup()
+        if not cleaned then
+            if response.ok then
+                response = makeError("FilesystemError", "Cannot remove MoonScript workspace", {
+                    cleanup_path=context.workspace, cause=cleanup_error, committed=action_name == "bundle",
+                })
+            else response.error.cleanup_error = cleanup_error; response.error.cleanup_path = context.workspace end
+        end
+        return recordFailure(action_name, response)
+    end
 end
 
 return M

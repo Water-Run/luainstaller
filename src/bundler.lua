@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -475,9 +475,12 @@ local function copyFile(source, destination, expected_hash, hash_algorithm)
     return nil
 end
 
-local function writeDistributionFiles(root, target_os)
+local function writeDistributionFiles(root, target_os, additional)
     local records = {}
-    for _, item in ipairs(distribution_files) do
+    local files = {}
+    for _, item in ipairs(distribution_files) do files[#files + 1] = item end
+    for _, item in ipairs(additional or {}) do files[#files + 1] = item end
+    for _, item in ipairs(files) do
         local relative = normalizePath(item.destination)
         local valid, reason = validateTargetRelative(relative, target_os)
         if not valid then
@@ -507,7 +510,17 @@ local function writeDistributionFiles(root, target_os)
         end
         local directory_err = ensureDirectory(dirname(destination))
         if directory_err then return nil, directory_err end
-        local write_err = writeFile(destination, item.content)
+        local content = item.content
+        if content == nil and item.source_path then
+            local read_error
+            content, read_error = fs.readRegularFile(item.source_path)
+            if content == nil or hash_mod.sha256(content) ~= item.content_hash then
+                return nil, makeError("SourceChangedError", "Cannot verify original MoonScript material", {
+                    source_path=item.source_path, cause=read_error,
+                })
+            end
+        end
+        local write_err = writeFile(destination, content)
         if write_err then return nil, write_err end
         local copied, read_err = fs.readRegularFile(destination)
         if copied == nil then
@@ -2099,12 +2112,14 @@ local function bundleOnedir(opts, lifecycle)
         lua_prefix = opts.lua_prefix,
     })
     if not profile then return profile_err end
-    local native_toolchain, toolchain_err = toolchain.resolve({
+    local native_toolchain, toolchain_err = opts.native_toolchain, nil
+    if not native_toolchain then native_toolchain, toolchain_err = toolchain.resolve({
         target_os = profile.target_os,
         target_arch = profile.target_arch,
         lua_prefix = profile.lua_prefix,
         lua_version = lua_version,
-    })
+        require_static = opts.require_static,
+    }) end
     if not native_toolchain then return toolchain_err end
 
     local exe_name = executableName(final_out_dir, entry, profile)
@@ -2209,7 +2224,7 @@ local function bundleOnedir(opts, lifecycle)
             }))
     end
     local material_records
-    material_records, err = writeDistributionFiles(out_dir, profile.target_os)
+    material_records, err = writeDistributionFiles(out_dir, profile.target_os, opts.additional_distribution_files)
     if err then
         return abandon(err)
     end
@@ -2479,6 +2494,10 @@ local function bundleOnedir(opts, lifecycle)
         return abandon(makeError("InvalidOutputError", "Output ancestor changed before publication", {
             path=final_out_dir, cause=parents_error,
         }))
+    end
+    if opts.before_publish then
+        local verified = opts.before_publish()
+        if not verified.ok then return abandon(verified) end
     end
     err = commitStagingDirectory(out_dir, final_out_dir, allowed_generated_entries, output_snapshot, output_lock)
     if err then

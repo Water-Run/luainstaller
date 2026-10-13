@@ -15,6 +15,12 @@ $LuaRocksVersion = '3.13.0'
 $LuaRocksArchive = "luarocks-$LuaRocksVersion-windows-64.zip"
 $LuaRocksSha256 = '0897ADE5D459D55CD1962A948153745A6749FEB345403C68AAA9207388557AB9'
 $CacheSchema = 'luainstaller-windows-matrix-cache-v2'
+$MoonRocks = @(
+    @{ File='luafilesystem-1.9.0-1.src.rock'; Sha256='3de68d619f6ad95a27f4728814375447d921305194b7050dee6199057c31282f' },
+    @{ File='lpeg-1.1.0-2.src.rock'; Sha256='836d315b920a5cdd62e21786c6c9fad547c4faa131d5583ebca64f0b6595ee76' },
+    @{ File='argparse-0.7.2-1.src.rock'; Sha256='c122a25224876e93bd380ceb51af28cd8a72296e098b2eed4f06d85f54f1a0b4' },
+    @{ File='moonscript-0.6.0-1.src.rock'; Sha256='4fd3146d47e58ea75006e90d9a05e4a2983431dc1bc8951d9c7e344377570ac1' }
+)
 $Versions = @(
     @{ Version='5.1.5'; Sha256='2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333' },
     @{ Version='5.2.4'; Sha256='b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b' },
@@ -208,13 +214,14 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     $lua = Join-Path $prefix 'lua.exe'
     $marker = Join-Path $prefix '.luainstaller-matrix-cache'
     $compilerHash = (Get-FileHash -LiteralPath $Msvc.Cl -Algorithm SHA256).Hash
-    $buildId = "$CacheSchema|component=lua|version=$version|source=$($Spec.Sha256)|host=windows-x86_64|cl=$compilerHash|compat=$compatibilityId|recipe=official-msvc-v4-makefile-compat-luac"
+    $buildId = "$CacheSchema|component=lua|version=$version|source=$($Spec.Sha256)|host=windows-x86_64|cl=$compilerHash|compat=$compatibilityId|recipe=official-msvc-v5-static-and-shared"
     $luac = Join-Path $prefix 'luac.exe'
     $required = @(
         $lua,
         $luac,
         (Join-Path $prefix "lua$compact.dll"),
         (Join-Path $prefix "lua$compact.lib"),
+        (Join-Path $prefix 'lua-static.lib'),
         (Join-Path $prefix 'include\lua.h'),
         (Join-Path $prefix 'include\luaconf.h'),
         (Join-Path $prefix 'include\lualib.h'),
@@ -262,6 +269,20 @@ function Build-Lua([hashtable]$Spec, [hashtable]$Msvc) {
     $library = Join-Path $prefix "lua$compact.lib"
     Invoke-Native $Msvc.Link (@('/nologo','/DLL','/INCREMENTAL:NO','/Brepro','/MACHINE:X64',
         "/OUT:$dll", "/IMPLIB:$library") + $objectFiles) | Out-Host
+    $staticObjects = Join-Path $sourceParent 'static-objects'
+    $null = New-Item -ItemType Directory -Path $staticObjects
+    $staticObjectFiles = @()
+    foreach ($file in Get-ChildItem -LiteralPath $source -Filter '*.c' -File |
+        Where-Object { $_.Name -notin @('lua.c', 'luac.c') }) {
+        $object = Join-Path $staticObjects ($file.BaseName + '.obj')
+        Invoke-Native $Msvc.Cl (@('/nologo','/c','/O2','/MT') + $compatibilityFlags +
+            @("/I$source", "/Fo$object", $file.FullName)) | Out-Host
+        $staticObjectFiles += $object
+    }
+    $librarian = Join-Path (Split-Path -Parent $Msvc.Cl) 'lib.exe'
+    if (-not (Test-Path -LiteralPath $librarian -PathType Leaf)) { throw 'MSVC lib.exe is required for static Lua' }
+    Invoke-Native $librarian (@('/nologo','/MACHINE:X64',"/OUT:$(Join-Path $prefix 'lua-static.lib')") +
+        $staticObjectFiles) | Out-Host
     $luaObject = Join-Path $objects 'lua.obj'
     Invoke-Native $Msvc.Cl (@('/nologo','/c','/O2','/MT') + $compatibilityFlags +
         @("/I$source", "/Fo$luaObject", (Join-Path $source 'lua.c'))) | Out-Host
@@ -328,6 +349,15 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         Invoke-Native $lua @('test/output_transaction.lua')
         return
     }
+    $moonTree = Join-Path $WorkRoot "moon-deps-$version"
+    foreach ($rock in $MoonRocks) {
+        Invoke-Native $LuaRocks @('install','--tree',$moonTree,'--deps-mode=none',
+            (Join-Path $SourceCache $rock.File)) | Out-Host
+    }
+    $moonPath = $moonTree.Replace('\','/')
+    $env:LUA_PATH = "$moonPath/share/lua/$abi/?.lua;$moonPath/share/lua/$abi/?/init.lua;;"
+    $env:LUA_CPATH = "$moonPath/lib/lua/$abi/?.dll;;"
+    $env:PATH = "$(Join-Path $moonTree 'bin');$env:PATH"
     Invoke-Native $luac @('-p','luainstaller.lua')
     foreach ($tree in @('src','test','tools','bin')) {
         foreach ($file in Get-ChildItem -LiteralPath $tree -Recurse -Filter '*.lua' -File) {
@@ -339,10 +369,10 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         'luarocks_install.lua','standalone_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
         'onefile_lifecycle.lua','output_transaction.lua','lock_identity.lua',
         'build_cleanup.lua','process_bounds.lua','process_working_directory.lua','resource_bounds.lua','output_parents.lua',
-        'distribution_licenses.lua','reproducible_artifacts.lua')) {
+        'distribution_licenses.lua','reproducible_artifacts.lua','static_windows_image.lua','moonscript.lua','onefile_modes.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
-    Invoke-Native $LuaRocks @('lint','luainstaller-1.5.3-1.rockspec')
+    Invoke-Native $LuaRocks @('lint','luainstaller-1.6.0-1.rockspec')
     "PASS host=$HostLabel lua=$version abi=Lua $abi"
 }
 
@@ -355,6 +385,10 @@ foreach ($root in @($SourceCache,$WorkRoot,$EvidenceDir)) {
 }
 Stage-Source $LuaRocksArchive `
     "https://luarocks.github.io/luarocks/releases/$LuaRocksArchive" $LuaRocksSha256
+foreach ($rock in $MoonRocks) {
+    Stage-Source $rock.File `
+        "https://raw.githubusercontent.com/rocks-moonscript-org/moonrocks-mirror/978861950d939eca8e38a4c3a477379b0e5f817e/$($rock.File)" $rock.Sha256
+}
 $SelectedVersions = if ($VersionFilter.Count -eq 0) {
     $Versions
 } else {

@@ -1,10 +1,10 @@
 rockspec_format = "3.0"
 package = "luainstaller"
-version = "1.5.3-1"
+version = "1.6.0-1"
 
 source = {
     url = "git+https://github.com/Water-Run/luainstaller.git",
-    tag = "v1.5.3",
+    tag = "v1.6.0",
 }
 
 description = {
@@ -13,8 +13,8 @@ description = {
         luainstaller provides tools for analyzing and packaging Lua projects
         into same-environment executables. The current Lua implementation owns
         dependency analysis, trace-oriented diagnostics, manifest generation,
-        C launcher generation, onedir bundling, and self-extracting onefile
-        bundling for the verified target profiles. It installs two command
+        C launcher generation, onedir bundling, and selectable onefile
+        bundling and optional local MoonScript preprocessing for the verified target profiles. It installs two command
         names over the same Lua API: compact luai and full-word luainstaller.
     ]],
     homepage = "https://github.com/Water-Run/luainstaller",
@@ -49,6 +49,7 @@ build = {
         ["luainstaller.analyzer"] = "src/analyzer.lua",
         ["luainstaller.compat"]   = "src/compat.lua",
         ["luainstaller.manifest"] = "src/manifest.lua",
+        ["luainstaller.moon"] = "src/moon.lua",
         ["luainstaller.path"]     = "src/path.lua",
         ["luainstaller.platform"] = "src/platform.lua",
         ["luainstaller.process"]  = "src/process.lua",

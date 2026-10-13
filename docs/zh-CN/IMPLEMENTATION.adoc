@@ -143,6 +143,11 @@ Windows 工作区 ACL 和配置的临时根目录属于部署信任边界。
 
 只接受安全的相对路径。POSIX 使用 `openat` / `O_NOFOLLOW` 和 UID 缓存。Windows 不跟随重解析点，并持有句柄直到子进程退出。payload ID 由排序后的路径、模式、大小和内容 SHA-256 组合而成。
 
+MoonScript 预处理在私有工作目录调用已安装的 `moonc`，使用受控快照文件名。
+独立 Lua 暂存树保持模块布局。API 私有上下文保存原始哈希，在目录和单文件
+发布前核对；参与打包的 MoonScript 输入保存在重链接材料中。禁用检测或普通
+Lua 入口会绕过编译器查找与预处理。
+
 [#implementation-errors]
 == 错误
 

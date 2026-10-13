@@ -111,7 +111,8 @@ env -u LUA_PATH -u LUA_CPATH build/app/app
 luai -b --file app/main.lua -o build/app-onefile
 ----
 +
-单文件在第一次运行时把自己解包到一个临时目录，然后从那里启动。
+纯 Lua 且具备经过验证的静态 Lua 库时，单文件默认直接启动；
+其他构建先解包到临时目录，再从那里启动。
 
 IMPORTANT: 如果单文件表现异常，回到目录打包。它展示的就是实际打包的
 内容，问题会更容易定位。

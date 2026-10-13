@@ -92,12 +92,22 @@ app/
 [#bundling-onefile]
 == 单文件
 
-单文件构建先制作一个普通的目录打包，然后把它封装进一个小型解包器程序（`extractor.c`）。
+单文件默认使用 `auto`。纯 Lua 且具备经过验证的静态 Lua 库时，一个可执行文件
+直接启动；动态 Lua 或 C 模块则选择自解包格式。`--file-mode` 可选择
+`auto`、`extract` 或 `no-extract`。
 
-首次运行时，解包器把打包解压到系统临时目录下一个按用户区分的文件夹里，然后移交给它。之后的运行在副本逐字节一致时会复用它。
+`extract` 模式先解包到按用户区分的临时目录，再复用逐字节一致的副本。
+POSIX 用应用替换外层程序；Windows 等待应用，并管理其子进程。
 
-* 在 Linux 和 macOS 上，解包器会用真正的程序替换自身，因此进程 ID、信号和退出码都表现正常。
-* 在 Windows 上，解包器会等待程序。关闭或杀死其中一个，另一个也会跟着结束。
+`no-extract` 模式在同一个进程内运行应用，不创建解包目录。
+需要导出许可证和重链接材料时，提供一个已存在的目录：
+
+[source,bash]
+----
+./application --luainstaller-extract materials
+----
+
+命令打印创建的材料目录，不运行应用。
 
 [CAUTION]
 ====
@@ -107,7 +117,7 @@ app/
 [#bundling-licenses]
 == 打包内的许可证
 
-每个打包都带有 Lua 许可证（`Lua-MIT.txt`）、luainstaller 的许可证（LGPL，以及它所基于的 GPL 文本）、`THIRD_PARTY_NOTICES.md`，以及 `.luai/build/` 里生成的 C 源码。单文件还会包含 `extractor.c` 和重建其载荷的脚本。
+每个打包都带有 Lua 许可证（`Lua-MIT.txt`）、luainstaller 的许可证（LGPL，以及它所基于的 GPL 文本）、`THIRD_PARTY_NOTICES.md`，以及 `.luai/build/` 里生成的 C 源码。解包格式包含 `extractor.c`；免解包格式包含 `no-extract.c` 和材料导出器源码。两种格式都提供重建载荷的脚本。
 
 把程序传给别人时请保留所有这些内容。你自己的依赖可能需要额外的声明。xref:RELINKING.adoc[重链接] 说明了这些文件的用途。
 

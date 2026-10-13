@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -190,6 +190,7 @@ dofile(%q)
         entry = entry,
         out = onefile,
         mode = "onefile",
+        onefile_mode = "extract",
     })
     assert(onefile_result.ok, onefile_result.error and onefile_result.error.message)
     local cache = path.join(root, "cache")

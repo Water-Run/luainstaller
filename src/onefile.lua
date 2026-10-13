@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -1075,6 +1075,8 @@ static int luai_temp_root(char *out, size_t out_size) {
 #endif
 }
 
+static const char *luai_material_root;
+
 static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
 #ifdef _WIN32
                             , struct luai_pinned_objects *pins
@@ -1097,13 +1099,29 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
     if (snprintf(cache_name, sizeof(cache_name), "luainstaller-onefile-%lu",
                  (unsigned long)geteuid()) < 0) return -1;
 #endif
-    if (luai_temp_root(temp_root, sizeof(temp_root)) != 0) return -1;
+    if (luai_material_root) {
+#ifdef _WIN32
+        DWORD length = GetFullPathNameA(luai_material_root, (DWORD)sizeof(temp_root), temp_root, NULL);
+        if (!length || length >= sizeof(temp_root)) return -1;
+#else
+        int length;
+        if (luai_material_root[0] == '/') {
+            length = snprintf(temp_root, sizeof(temp_root), "%s", luai_material_root);
+        } else {
+            char current[4096];
+            if (!getcwd(current, sizeof(current))) return -1;
+            length = snprintf(temp_root, sizeof(temp_root), "%s/%s", current, luai_material_root);
+        }
+        if (length < 0 || (size_t)length >= sizeof(temp_root)) return -1;
+#endif
+    } else if (luai_temp_root(temp_root, sizeof(temp_root)) != 0) return -1;
     if (luai_join(base, sizeof(base), temp_root, cache_name) != 0) return -1;
     if (luai_join(bundle_dir, bundle_dir_size, base, LUAI_PAYLOAD_ID) != 0) return -1;
 #ifdef _WIN32
     if (luai_pin_absolute_chain(temp_root, pins) != 0) return -1;
     if (luai_ensure_private_dir(base) != 0
         || luai_open_pinned_directory(base, 1, pins) != 0) return -1;
+    if (luai_material_root && !CreateDirectoryA(bundle_dir, NULL)) return -1;
     if (luai_ensure_private_dir(bundle_dir) != 0
         || luai_open_pinned_directory(bundle_dir, 1, pins) != 0) return -1;
 #else
@@ -1115,6 +1133,10 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
         return -1;
     }
     if (cache_fd < 0) return -1;
+    if (luai_material_root && mkdirat(cache_fd, LUAI_PAYLOAD_ID, 0700) != 0) {
+        close(cache_fd);
+        return -1;
+    }
     payload_fd = luai_open_private_dir_at(cache_fd, LUAI_PAYLOAD_ID);
     if (close(cache_fd) != 0) {
         if (payload_fd >= 0) close(payload_fd);
@@ -1387,6 +1409,13 @@ static int luai_run_inner(char *exe_path, int argc, char **argv) {
 int main(int argc, char **argv) {
     char bundle_dir[4096];
     char exe_path[4096];
+    if (argc > 1 && strcmp(argv[1], "--luainstaller-extract") == 0) {
+        if (argc != 3 || !argv[2][0]) {
+            fputs("usage: application --luainstaller-extract <existing directory>\n", stderr);
+            return 64;
+        }
+        luai_material_root = argv[2];
+    }
 #ifdef _WIN32
     struct luai_pinned_objects pins = { NULL, 0, 0 };
     int result;
@@ -1400,6 +1429,13 @@ int main(int argc, char **argv) {
 #endif
         fputs("luainstaller-onefile: extraction failed\n", stderr);
         return 1;
+    }
+    if (luai_material_root) {
+#ifdef _WIN32
+        luai_close_pins(&pins);
+#endif
+        puts(bundle_dir);
+        return 0;
     }
     if (luai_join(exe_path, sizeof(exe_path), bundle_dir, LUAI_INNER_EXE) != 0) {
         fputs("luainstaller-onefile: inner path is too long\n", stderr);
@@ -1521,6 +1557,74 @@ local function compileExtractor(c_path, exe_path, profile)
     return nil
 end
 
+local function noExtractSource(stage_dir, staged, limit)
+    local material_dir = path.join(stage_dir, ".luai/build")
+    local launcher_path = path.join(material_dir, "launcher.c")
+    local content, read_error = readFile(launcher_path, limit)
+    if not content then return nil, read_error end
+    -- Keep the program and the optional material exporter in separate C
+    -- namespaces. Application bytes already reside in hexadecimal arrays.
+    content = content:gsub("%f[%w_]luai_", "luai_program_")
+    local glue = [[#define main luai_materials_main
+#include "materials-export.c"
+#undef main
+#define main luai_program_main
+#include "launcher.c"
+#undef main
+int main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "--luainstaller-extract") == 0)
+        return luai_materials_main(argc, argv);
+    return luai_program_main(argc, argv);
+}
+]]
+    local source_path = path.join(material_dir, "no-extract.c")
+    local export_source = generateExtractorSource("application")
+    local err = writeFile(launcher_path, content)
+        or writeFile(path.join(material_dir, "materials-export.c"), export_source)
+        or writeFile(source_path, glue)
+        or writeFile(path.join(material_dir, "payload-files.lua"), "return {}\n")
+    if err then return nil, err end
+    local removed, remove_error = fs.removeFile(staged.executable)
+    if not removed then return nil, makeError("FilesystemError", "Cannot remove the intermediate program", {
+        path=staged.executable, cause=remove_error,
+    }) end
+    local manifest_path = path.join(material_dir, "payload-files.lua")
+    local provisional, provisional_error = collectFiles(stage_dir, nil, limit)
+    if not provisional then return nil, provisional_error end
+    err = writeFile(manifest_path, serializePayloadFiles(provisional))
+    if err then return nil, err end
+    provisional = nil
+    local files, identity = collectFiles(stage_dir, nil, limit)
+    if not files then return nil, identity end
+    local payload_path = path.join(material_dir, "payload.inc")
+    local written, write_error = fs.writeChunks(payload_path, function(write)
+        generatePayloadInclude(files, identity, write)
+    end, math.min(1073741824, (limit or 134217728) * 7))
+    if not written then return nil, type(write_error) == "table" and result.fromThrown(write_error)
+        or makeError("FilesystemError", "Cannot embed relinking materials", {path=payload_path, cause=write_error}) end
+    return source_path
+end
+
+local function selectFileMode(opts, profile)
+    local requested = opts.onefile_mode or "auto"
+    if requested == "extract" then return "extract" end
+    if #(opts.dependencies.libraries or {}) > 0 then
+        if requested == "auto" then return "extract" end
+        return nil, makeError("UnsupportedOnefileModeError", "Native C modules require extract mode", {
+            onefile_mode=requested, reason="native-modules",
+        })
+    end
+    local static, static_error = toolchain.resolve({target_os=profile.target_os,
+        target_arch=profile.target_arch, lua_prefix=opts.lua_prefix,
+        require_static=true})
+    if static then return "no-extract", nil, static end
+    if requested == "auto" then return "extract", nil, nil, "static-lua-unavailable" end
+    return nil, makeError("StaticLuaUnavailableError",
+        "No matching static Lua runtime; use extract mode or install a matching static Lua archive", {
+            onefile_mode=requested, cause=static_error and static_error.error,
+        })
+end
+
 local function bundleOnefile(opts, lifecycle)
     opts = opts or {}
     local profile, profile_err = platform.profile({
@@ -1550,6 +1654,9 @@ local function bundleOnefile(opts, lifecycle)
             reason = target_reason,
         })
     end
+    local selected_mode, selection_error, static_toolchain, selection_reason = selectFileMode(opts, profile)
+    if not selected_mode then return selection_error end
+    opts.manifest.onefile_mode = selected_mode
     local work_dir, work_err = createPrivateDirectory("onefile-work")
     if not work_dir then
         return work_err
@@ -1564,6 +1671,7 @@ local function bundleOnefile(opts, lifecycle)
     end
 
     local staged = bundler.bundleOnedir({
+        native_toolchain = static_toolchain,
         entry = opts.entry,
         max_source_bytes = opts.max_source_bytes,
         max_bundle_bytes = opts.max_bundle_bytes,
@@ -1574,6 +1682,8 @@ local function bundleOnefile(opts, lifecycle)
         dependencies = opts.dependencies,
         trace = opts.trace,
         manifest = opts.manifest,
+        before_publish = opts.before_publish,
+        additional_distribution_files = opts.additional_distribution_files,
     })
     if not staged.ok then
         return cleanupDirectory(work_dir, staged)
@@ -1590,55 +1700,61 @@ local function bundleOnefile(opts, lifecycle)
             }
         ))
     end
-    local inner_exe = staged_executable:sub(#stage_root + 2)
-    local c_source = generateExtractorSource(inner_exe)
-    local corresponding_c_path = normalizePath(
-        stage_dir .. "/.luai/build/extractor.c"
-    )
-    err = ensureDirectory(dirname(corresponding_c_path))
-    if not err then
-        err = writeFile(corresponding_c_path, c_source)
-    end
-    if err then
-        return cleanupDirectory(work_dir, err)
-    end
+    if selected_mode == "no-extract" then
+        c_path, err = noExtractSource(stage_dir, staged, opts.max_bundle_bytes)
+        if not c_path then return cleanupDirectory(work_dir, err) end
+    else
+        local inner_exe = staged_executable:sub(#stage_root + 2)
+        local c_source = generateExtractorSource(inner_exe)
+        local corresponding_c_path = normalizePath(
+            stage_dir .. "/.luai/build/extractor.c"
+        )
+        err = ensureDirectory(dirname(corresponding_c_path))
+        if not err then
+            err = writeFile(corresponding_c_path, c_source)
+        end
+        if err then
+            return cleanupDirectory(work_dir, err)
+        end
 
-    local payload_manifest_path = normalizePath(
-        stage_dir .. "/.luai/build/payload-files.lua"
-    )
-    err = writeFile(payload_manifest_path, "-- generated by luainstaller\nreturn {}\n")
-    if err then
-        return cleanupDirectory(work_dir, err)
-    end
-    local provisional_files, provisional_err = collectFiles(stage_dir, profile.target_os, opts.max_bundle_bytes)
-    if not provisional_files then
-        return cleanupDirectory(work_dir, provisional_err)
-    end
-    err = writeFile(payload_manifest_path, serializePayloadFiles(provisional_files))
-    if err then
-        return cleanupDirectory(work_dir, err)
-    end
+        local payload_manifest_path = normalizePath(
+            stage_dir .. "/.luai/build/payload-files.lua"
+        )
+        err = writeFile(payload_manifest_path, "-- generated by luainstaller\nreturn {}\n")
+        if err then
+            return cleanupDirectory(work_dir, err)
+        end
+        local provisional_files, provisional_err = collectFiles(stage_dir, profile.target_os, opts.max_bundle_bytes)
+        if not provisional_files then
+            return cleanupDirectory(work_dir, provisional_err)
+        end
+        err = writeFile(payload_manifest_path, serializePayloadFiles(provisional_files))
+        if err then
+            return cleanupDirectory(work_dir, err)
+        end
 
-    provisional_files = nil
-    local files, payload_id = collectFiles(stage_dir, profile.target_os, opts.max_bundle_bytes)
-    if not files then
-        return cleanupDirectory(work_dir, payload_id)
-    end
+        provisional_files = nil
+        local files, payload_id = collectFiles(stage_dir, profile.target_os, opts.max_bundle_bytes)
+        if not files then
+            return cleanupDirectory(work_dir, payload_id)
+        end
 
-    local payload_path = normalizePath(build_dir .. "/payload.inc")
-    local payload_written, payload_error = fs.writeChunks(payload_path, function(write)
-        generatePayloadInclude(files, payload_id, write)
-    end, math.min(1073741824, (opts.max_bundle_bytes or 134217728) * 7))
-    if not payload_written then
-        err = type(payload_error) == "table" and result.fromThrown(payload_error)
-            or makeError("FilesystemError", "Cannot generate embedded payload", {path=payload_path, cause=payload_error})
-    end
-    if err then
-        return cleanupDirectory(work_dir, err)
-    end
-    err = writeFile(c_path, c_source)
-    if err then
-        return cleanupDirectory(work_dir, err)
+        local payload_path = normalizePath(build_dir .. "/payload.inc")
+        local payload_written, payload_error = fs.writeChunks(payload_path, function(write)
+            generatePayloadInclude(files, payload_id, write)
+        end, math.min(1073741824, (opts.max_bundle_bytes or 134217728) * 7))
+        if not payload_written then
+            err = type(payload_error) == "table" and result.fromThrown(payload_error)
+                or makeError("FilesystemError", "Cannot generate embedded payload", {path=payload_path, cause=payload_error})
+        end
+        if err then
+            return cleanupDirectory(work_dir, err)
+        end
+        err = writeFile(c_path, c_source)
+        if err then
+            return cleanupDirectory(work_dir, err)
+        end
+
     end
 
     local output_parent = dirname(out_path)
@@ -1650,7 +1766,19 @@ local function bundleOnefile(opts, lifecycle)
     end
     local staged_exe = output_stage and normalizePath(output_stage .. "/artifact" .. (profile.executable_suffix or "")) or nil
     if not err then
-        err = compileExtractor(c_path, staged_exe, profile)
+        if selected_mode == "no-extract" then
+            if profile.target_os == "windows" then
+                static_toolchain.link_args[#static_toolchain.link_args + 1] =
+                    static_toolchain.compiler_family == "msvc" and "advapi32.lib" or "-ladvapi32"
+            end
+            local compiled, compiler_output, command = toolchain.compile(static_toolchain, c_path,
+                staged_exe, {work_dir=build_dir})
+            if not compiled then err = makeError("CompilationFailedError", "Cannot compile the non-extracting program", {
+                output=compiler_output, command=command,
+            }) end
+        else
+            err = compileExtractor(c_path, staged_exe, profile)
+        end
     end
     local published = false
     if not err then
@@ -1665,6 +1793,12 @@ local function bundleOnefile(opts, lifecycle)
         -- MoveFile provides same-volume, no-replace publication on Windows.
         -- POSIX link(2) retains the same
         -- no-replace publication guarantee without rename-overwrite races.
+        if opts.before_publish then
+            local verified = opts.before_publish()
+            if not verified.ok then err = verified end
+        end
+    end
+    if not err then
         local publish = profile.target_os == "windows" and fs.rename or fs.hardLink
         local committed, publish_output = publish(staged_exe, out_path)
         if not committed then
@@ -1703,6 +1837,8 @@ local function bundleOnefile(opts, lifecycle)
         ok = true,
         action = "bundle",
         mode = "onefile",
+        onefile_mode = selected_mode,
+        selection_reason = selection_reason,
         entry = opts.entry,
         out = out_path,
         executable = out_path,

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-07-29
+    2026-10-13
 ]]
 
 local M = {}
@@ -45,6 +45,12 @@ function M.acceptsLibrary(profile, candidate)
     local kind = libraryKind(candidate)
     local launcher_profile = profile.launcher_profile
 
+    if profile.require_static then
+        if kind == "static" or (profile.target_os == "windows"
+            and tostring(candidate):lower():match("%.lib$")) then return true end
+        return false, "The selected single-file mode requires a verified static Lua archive"
+    end
+
     if profile.target_os == "windows" or launcher_profile == "windows-shared-lua" then
         local accepted = kind == "shared-windows" or kind == "import-windows"
         if accepted then return true end
@@ -68,6 +74,7 @@ function M.expectedLinkMode(profile, candidate)
         and (candidate.library_path or candidate.runtime_path)
         or candidate
     local mode = M.linkMode(selected)
+    if profile and profile.require_static then return "static" end
     if mode then return mode end
     if profile and profile.target_os == "windows" then return "shared" end
     return nil

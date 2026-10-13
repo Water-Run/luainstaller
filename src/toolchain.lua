@@ -7,7 +7,7 @@ File:
     toolchain.lua
 Date:
 Updated:
-    2026-10-06
+    2026-10-13
 ]]
 
 local compat = require("luainstaller.compat")
@@ -623,6 +623,14 @@ local function prefixCandidate(prefix, lua_version, source, config)
         library_directories[#library_directories + 1] = prefix .. "/lib/" .. triplet
     end
     library_directories[#library_directories + 1] = prefix
+    if config.profile.require_static and config.host.os == "windows" then
+        for _, directory in ipairs(library_directories) do
+            for _, name in ipairs(names) do
+                library_paths[#library_paths + 1] = directory .. "/" .. name .. "-static.lib"
+                library_paths[#library_paths + 1] = directory .. "/" .. name .. "_static.lib"
+            end
+        end
+    end
     for _, directory in ipairs(library_directories) do
         for _, name in ipairs(names) do
             for _, extension in ipairs(extensions) do
@@ -654,7 +662,7 @@ local function prefixCandidate(prefix, lua_version, source, config)
     )
 
     local runtime_path
-    if config.host.os == "windows" then
+    if config.host.os == "windows" and not config.profile.require_static then
         local runtime_paths = {}
         for _, directory in ipairs({ prefix .. "/bin", prefix }) do
             for _, name in ipairs(names) do
@@ -827,8 +835,8 @@ LUAI_EXPORT int luaopen_luai_native_probe(lua_State *state) {
 end
 
 local function probeSource(lua_version, module_pattern)
-    local module_script = "package.cpath = " .. string.format("%q", module_pattern)
-        .. "; assert(require('luai_native_probe') == 'native-probe-ok')"
+    local module_script = module_pattern and ("package.cpath = " .. string.format("%q", module_pattern)
+        .. "; assert(require('luai_native_probe') == 'native-probe-ok')") or "return true"
     local source = [[
 #include <stdio.h>
 #include <string.h>
@@ -1297,6 +1305,95 @@ local function findLinkedRuntime(config, executable, environment)
     return nil, output
 end
 
+local function verifyStaticWindowsImage(executable)
+    local data, read_error = fs.readRegularFile(executable, 16 * 1024 * 1024)
+    if not data then return nil, read_error end
+    local function u16(position)
+        local a, b = data:byte(position, position + 1)
+        return b and a + b * 256 or nil
+    end
+    local function u32(position)
+        local a, b, c, d = data:byte(position, position + 3)
+        return d and a + b * 256 + c * 65536 + d * 16777216 or nil
+    end
+    local pe = u32(61)
+    if data:sub(1, 2) ~= "MZ" or not pe or data:sub(pe + 1, pe + 4) ~= "PE\0\0" then
+        return nil, "invalid PE image"
+    end
+    local count, optional_size = u16(pe + 7), u16(pe + 21)
+    local optional = pe + 25
+    local magic = u16(optional)
+    local directories = magic == 267 and optional + 96 or magic == 523 and optional + 112
+    if not directories or not count or count > 96 or not optional_size
+        or optional + optional_size - 1 > #data then return nil, "invalid PE headers" end
+    local directory_count = u32(directories - 4)
+    local directory_offset = directories - optional
+    if optional_size < directory_offset or not directory_count or directory_count > 16
+        or directory_offset + directory_count * 8 > optional_size then
+        return nil, "PE data directories exceed the optional header"
+    end
+    local sections = optional + optional_size
+    local header_size = u32(optional + 60)
+    if not header_size or header_size > #data or header_size < sections + count * 40 - 1
+        or sections + count * 40 - 1 > #data then return nil, "invalid PE section table" end
+    for index = 0, count - 1 do
+        local section = sections + index * 40
+        local size, raw = u32(section + 16), u32(section + 20)
+        if size > 0 and (raw < header_size or raw + size > #data) then
+            return nil, "PE section exceeds file bounds"
+        end
+    end
+    local function offset(rva)
+        if not rva or rva < 0 then return nil end
+        if rva < header_size then return rva + 1, header_size - rva end
+        for index = 0, count - 1 do
+            local section = sections + index * 40
+            local address, size, raw = u32(section + 12), u32(section + 16), u32(section + 20)
+            if address and size and raw and rva >= address and rva - address < size
+                and raw + rva - address < #data then
+                return raw + rva - address + 1, size - (rva - address)
+            end
+        end
+    end
+    local delayed = directory_count > 13 and u32(directories + 13 * 8) or 0
+    if delayed and delayed ~= 0 then return nil, "delayed DLL imports cannot verify static Lua" end
+    if directory_count < 2 then return true end
+    local imports = u32(directories + 8)
+    local import_size = u32(directories + 12)
+    if not imports then return nil, "missing PE import directory" end
+    if imports == 0 then
+        return import_size == 0 and true or nil, import_size ~= 0 and "invalid empty import directory" or nil
+    end
+    local position, available = offset(imports)
+    if not position or not import_size or import_size < 20 or import_size > available then
+        return nil, "invalid PE import directory"
+    end
+    local last = position + import_size - 1
+    local system = { ["kernel32.dll"]=true, ["ntdll.dll"]=true, ["msvcrt.dll"]=true,
+        ["advapi32.dll"]=true, ["user32.dll"]=true, ["shell32.dll"]=true,
+        ["ole32.dll"]=true, ["ws2_32.dll"]=true, ["ucrtbase.dll"]=true }
+    for _ = 1, 2048 do
+        if position + 19 > last then return nil, "unterminated PE import directory" end
+        local descriptor = data:sub(position, position + 19)
+        if #descriptor ~= 20 then return nil, "truncated PE import descriptor" end
+        if descriptor == string.rep("\0", 20) then return true end
+        local name_offset, name_size = offset(u32(position + 12))
+        local maximum = name_offset and name_offset + math.min(name_size, 257) - 1
+        local finish = maximum and data:sub(name_offset, maximum):find("\0", 1, true)
+        if not finish then return nil, "invalid imported DLL name" end
+        finish = name_offset + finish - 1
+        local name = data:sub(name_offset, finish - 1):lower()
+        if not system[name] and not name:match("^api%-ms%-win%-%w[%w%-]*%.dll$")
+            and not name:match("^ext%-ms%-win%-%w[%w%-]*%.dll$") then
+            return nil, "probe imports a non-system DLL: " .. name
+        end
+        position = position + 20
+    end
+    return nil, "PE import descriptor limit exceeded"
+end
+
+M.verifyStaticWindowsImage = verifyStaticWindowsImage
+
 local function sharedRuntimeInstallName(config, candidate)
     local library_path = candidate and candidate.library_path
     if type(library_path) ~= "string" or library_path == "" then return nil end
@@ -1529,6 +1626,14 @@ function M.inspectNativeDependencies(config, module_path, opts)
 end
 
 local function verifyCandidate(config, candidate)
+    if config.profile.require_static then
+        local archive, archive_error = fs.readRegularFile(candidate.library_path, 64 * 1024 * 1024)
+        if not archive or archive:sub(1, 8) ~= "!<arch>\n" then
+            return nil, makeError("ToolchainError", "A complete static Lua archive is required", {
+                library_path=candidate.library_path, cause=archive_error,
+            })
+        end
+    end
     local directory, directory_err = makeProbeDirectory()
     if not directory then return nil, directory_err end
     local source_path = normalizePath(directory .. "/probe.c")
@@ -1557,12 +1662,19 @@ local function verifyCandidate(config, candidate)
     config.link_args = candidateLinkArgs(config, candidate)
     config.pkg_config_module = candidate.pkg_config_module
     config.discovery_source = candidate.source
-    local module_compiled, module_output, module_command = M.compileNativeModule(
+    local module_compiled, module_output, module_command
+    if config.profile.require_static then
+        config.link_mode = "static"
+        module_pattern = nil
+        module_compiled = true
+    else
+        module_compiled, module_output, module_command = M.compileNativeModule(
         config,
         module_source_path,
         module_path,
         { work_dir = directory }
     )
+    end
     if not module_compiled then
         cleanupProbeDirectory(directory)
         return nil, makeError("ToolchainError", "Lua C-module capability probe did not compile", {
@@ -1619,6 +1731,15 @@ local function verifyCandidate(config, candidate)
             output = run_output,
             expected = config.lua_version.version,
         })
+    end
+    if config.profile.require_static and config.host.os == "windows" then
+        local static_image, image_error = verifyStaticWindowsImage(executable_path)
+        if not static_image then
+            cleanupProbeDirectory(directory)
+            return nil, makeError("ToolchainError", "Lua .lib is not a verified static runtime", {
+                library_path=candidate.library_path, cause=image_error,
+            })
+        end
     end
     local runtime_path, runtime_output, runtime_identity = findLinkedRuntime(
         config,
@@ -1682,7 +1803,7 @@ local function verifyCandidate(config, candidate)
     config.link_mode = expected_link_mode
     config.static_library_path = expected_link_mode == "static"
         and candidate.library_path or nil
-    config.native_module_verified = true
+    config.native_module_verified = not config.profile.require_static
     if not cleanupProbeDirectory(directory) then
         return nil, makeError("FilesystemError", "Cannot remove the completed toolchain probe", {
             path = directory,
@@ -1712,6 +1833,7 @@ function M.resolve(opts)
         executable_suffix = profile.executable_suffix,
         native_extensions = profile.native_extensions,
     }
+    profile.require_static = opts.require_static == true
 
     local candidates = {}
     local active_prefix, active_interpreter = activeLuaPrefix(opts)

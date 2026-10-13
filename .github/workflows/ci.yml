@@ -120,6 +120,14 @@ jobs:
           chmod +x "$HOME/bin/luarocks"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
+      - name: MoonScript and single-file modes
+        run: |
+          echo "$LUAI_SAMPLE_DEPS_TREE/bin" >> "$GITHUB_PATH"
+          export PATH="$LUAI_SAMPLE_DEPS_TREE/bin:$PATH"
+          lua test/static_windows_image.lua
+          lua test/moonscript.lua
+          lua test/onefile_modes.lua
+
       - name: Comprehensive smoke audit
         run: lua test/smoke_all.lua
 

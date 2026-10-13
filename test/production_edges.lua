@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -934,7 +934,7 @@ test("Windows release toolchains close the CRT and select the native machine", f
     end
     assert(matrix_source:find("compat=$compatibilityId", 1, true),
         "Windows matrix cache identity omits official compatibility flags")
-    assert(matrix_source:find("official-msvc-v4-makefile-compat-luac", 1, true),
+    assert(matrix_source:find("official-msvc-v5-static-and-shared", 1, true),
         "Windows matrix does not invalidate pre-compatibility Lua builds")
     assert(not matrix_source:find("Hostx64\\ARM64", 1, true),
         "Windows matrix contains an ARM64 compiler path")

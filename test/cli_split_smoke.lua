@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-24
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -135,6 +135,31 @@ assert(out == "")
 assert_contains(err, "error: unknown luainstaller command: engines")
 
 local api = require("luainstaller")
+local captured_moon_options
+local original_analyze = api.analyze
+api.analyze = function(options)
+    captured_moon_options = options
+    return {ok=true, entry=options.entry, dependencies={scripts={}, libraries={}}, trace={}}
+end
+code, out, err = run_cli("luai", {"-a", "example.moon", "-M"})
+assert(code == 0 and captured_moon_options.moon_detect == false, err)
+code, out, err = run_cli("luainstaller", {"analyze", "example.moon", "--no-moon-detect"}, {color=false})
+assert(code == 0 and captured_moon_options.moon_detect == false, err)
+api.analyze = original_analyze
+local captured_file_options
+local original_mode_bundle = api.bundle
+api.bundle = function(options)
+    captured_file_options = options
+    return {ok=true, out="fixture", executable="fixture", mode="onefile", onefile_mode="no-extract"}
+end
+code, out, err = run_cli("luai", {"-b", "example.lua", "--file-mode", "no-extract"})
+assert(code == 0 and captured_file_options.mode == "onefile"
+    and captured_file_options.onefile_mode == "no-extract", err)
+code, out, err = run_cli("luainstaller", {"build", "example.lua", "--file-mode", "extract"}, {color=false})
+assert(code == 0 and captured_file_options.onefile_mode == "extract", err)
+api.bundle = original_mode_bundle
+code, out, err = run_cli("luai", {"-b", "example.lua", "--file-mode", "--dir"})
+assert(code == 1 and err:find("requires a value", 1, true))
 local original_bundle = api.bundle
 api.bundle = function()
     return {
