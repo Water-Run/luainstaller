@@ -264,3 +264,8 @@ Windows 安装固定 MoonScript 测试依赖时，LuaRocks 因缺少 `VCINSTALLD
 一次后续执行因测试进程遗漏已安装样例依赖的 Lua 搜索路径失败，恢复相同的依赖环境后
 重跑末尾 suite，smoke、无 Lua 目标、LuaRocks 安装和文档契约均通过。
 最终发布仍要求新提交的 13 个门禁和 GitHub/LuaRocks 安装身份验收。
+
+第二轮 `38340318414` 确认 Windows 已选中 MSVC，LFS 编译和安装成功，
+随后 LuaRocks 正常的 stderr 清单重建提示被 PowerShell 5.1 当作致命 ErrorRecord。
+测试驱动改为合并保留诊断并检查真实退出码；原生自检覆盖 stderr 成功与非零失败。
+这次没有修改产品超时或忽略失败退出码，最终门禁以修复后的精确提交为准。

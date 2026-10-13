@@ -139,10 +139,32 @@ function Stage-Source([string]$Name, [string]$Uri, [string]$Expected) {
 }
 
 function Invoke-Native([string]$File, [string[]]$Arguments) {
-    & $File @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "native command failed ($LASTEXITCODE): $File $($Arguments -join ' ')"
+    # PowerShell 5.1 wraps native stderr in ErrorRecord, including successful
+    # tools' informational messages. Keep those messages and check exit status.
+    $savedPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = $null
+        & $File @Arguments 2>&1 | ForEach-Object { $_.ToString() }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedPreference
     }
+    if ($null -eq $exitCode -or $exitCode -ne 0) {
+        throw "native command failed ($exitCode): $File $($Arguments -join ' ')"
+    }
+}
+
+function Test-NativeRunner {
+    $shell = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    Invoke-Native $shell @('/d','/c','echo native-runner-stderr-test 1>&2 & exit /b 0') | Out-Host
+    $failed = $false
+    try {
+        Invoke-Native $shell @('/d','/c','exit /b 23') | Out-Host
+    } catch {
+        $failed = $true
+    }
+    if (-not $failed) { throw 'native runner accepted a nonzero exit status' }
 }
 
 function Initialize-Msvc {
@@ -423,6 +445,7 @@ if (-not (Test-CacheMarker $luaRocksMarker $luaRocksBuildId) -or
 }
 $luaRocks = Join-Path $luaRocksRoot 'luarocks.exe'
 $msvc = Initialize-Msvc
+Test-NativeRunner
 foreach ($spec in $SelectedVersions) {
     $log = Join-Path $EvidenceDir "$HostLabel-lua-$($spec.Version).log"
     try {
