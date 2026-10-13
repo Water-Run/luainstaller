@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -116,7 +116,7 @@ for minor = 1, 5 do
 end
 for _, mode in ipairs({ "dir", "file" }) do
     local output_path = path.join(root, "artifact-" .. mode .. (windows and mode == "file" and ".exe" or ""))
-    cli("luainstaller", { "build", "--" .. mode, entry, "-o", output_path })
+    cli("luainstaller", { "build", "--" .. mode, entry, "-o", output_path, "--verbose" })
     local executable = mode == "dir"
         and path.join(output_path, path.basename(output_path) .. (windows and ".exe" or ""))
         or output_path

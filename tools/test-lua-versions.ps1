@@ -145,7 +145,13 @@ function Invoke-Native([string]$File, [string[]]$Arguments) {
     try {
         $ErrorActionPreference = 'Continue'
         $global:LASTEXITCODE = $null
-        & $File @Arguments 2>&1 | ForEach-Object { $_.ToString() }
+        & $File @Arguments 2>&1 | ForEach-Object {
+            if ($_ -is [Management.Automation.ErrorRecord]) {
+                $_.Exception.Message
+            } else {
+                $_.ToString()
+            }
+        }
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $savedPreference
