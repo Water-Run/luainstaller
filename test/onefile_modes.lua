@@ -49,9 +49,26 @@ local called, failure = pcall(function()
         assert(fs.pathType(path.join(exported, ".luai/build/launcher.c")) == "file")
         assert(fs.pathType(path.join(exported, ".luai/build/RELINKING.adoc")) == "file")
         if mode == "no-extract" then
+            local launcher = path.join(exported, ".luai/build/launcher.c")
+            local edited = assert(fs.readFile(launcher)) .. "\n/* user relinking edit */\n"
+            assert(fs.writeFile(launcher, edited))
             local repeated = process.outputCommand(built.executable, {"--luainstaller-extract",
                 path.join(root, "materials-" .. mode)})
             assert(not repeated, "material export overwrote an existing exported tree")
+            assert(fs.readFile(launcher) == edited, "repeat export changed edited relinking source")
+            local target, link = path.join(root, "export-target"), path.join(root, "export-link")
+            assert(fs.makeDirectory(target))
+            if package.config:sub(1, 1) == "\\" then
+                local fixture = dofile("test/support/windows_fixture.lua")(root)
+                local linked, link_output = process.outputCommand(fixture, {"junction", link, target})
+                assert(linked, link_output)
+            else
+                assert(process.outputCommand("ln", {"-s", target, link}))
+            end
+            local unsafe_export = process.outputCommand(built.executable, {"--luainstaller-extract", link})
+            assert(not unsafe_export, "material export followed a linked destination")
+            assert(#assert(fs.listTree(target)) == 0, "refused export wrote through a linked destination")
+            assert(fs.removeFile(link))
             local regenerated, regeneration_output = process.outputCommand(harness.lua_command(), {
                 path.join(exported, ".luai/build/generate-onefile-payload.lua"), exported,
                 path.join(exported, ".luai/build/payload.inc"),
@@ -82,7 +99,13 @@ local called, failure = pcall(function()
             assert(fs.readFile(native.library_path))))
         assert(fs.copyFile(native.runtime_path, path.join(prefix, path.basename(native.runtime_path))))
         if package.config:sub(1, 1) ~= "\\" then
-            assert(fs.copyFile(native.runtime_path, path.join(prefix, "lib/" .. path.basename(native.runtime_path))))
+            local runtime_copy = path.join(prefix, "lib/" .. path.basename(native.runtime_path))
+            if fs.pathType(runtime_copy) == "missing" then
+                assert(fs.copyFile(native.runtime_path, runtime_copy))
+            else
+                assert(fs.readFile(runtime_copy) == fs.readFile(native.runtime_path),
+                    "shared-only fixture has different runtime bytes at the same filename")
+            end
         end
         local automatic = api.bundle({entry=entry, mode="onefile", lua_prefix=prefix,
             out=path.join(root, "shared-auto")})
@@ -117,6 +140,8 @@ local called, failure = pcall(function()
     local ran, _, status = process.outputCommand(exiting.executable, {}, {PATH="", LUA_PATH="", LUA_CPATH=""})
     assert(not ran and status and status.code == 37, "direct startup did not preserve the application exit code")
 end)
+local export_link = path.join(root, "export-link")
+if fs.pathType(export_link) == "reparse" then assert(fs.removeFile(export_link)) end
 assert(fs.removeTree(root))
 assert(called, failure)
 print("single-file modes ok")

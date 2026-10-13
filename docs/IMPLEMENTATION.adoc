@@ -175,6 +175,10 @@ module layout. Private API contexts hold the original hashes and verify them
 before both directory and single-file publication. Selected MoonScript inputs
 are included in relinking materials. Disabling detection and ordinary Lua
 entries bypass compiler lookup and preprocessing.
+The entry snapshot keeps its first read. Static discovery prepares excluded
+MoonScript modules only when referenced, so their transitive dependencies remain
+visible before the final exclusion filter. Exclusions map from original files
+to prepared paths without removing a separate Lua file with the same basename.
 Preparation, source verification and path mapping use protected failure
 boundaries. Cleanup also catches thrown filesystem errors and reports a
 committed output when publication completed before cleanup failed.

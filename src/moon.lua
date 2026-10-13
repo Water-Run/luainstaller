@@ -112,18 +112,32 @@ function M.prepare(opts)
         local items, tree_error = fs.listTree(source_root)
         if not items then return failure("FilesystemError", "Cannot scan MoonScript project", {cause=tree_error}) end
         local candidates, seen_original, destinations = {}, {}, {}
+        local explicit_inputs, deferred = {}, {}
+        for _, filename in ipairs(opts.include) do explicit_inputs[path.absolute(filename)] = true end
+        local runtime = opts.depscan ~= false and opts.discovery_mode == "runtime"
+        local manual = opts.depscan == false or opts.discovery_mode == "manual"
         local function add(original, relative, external)
             original = path.absolute(original)
             if seen_original[original] then return end
             local destination_name = isMoon(original) and relative:gsub("%.[mM][oO][oO][nN]$", ".lua") or relative
             local destination = path.join(external and path.join(workspace, "external") or lua_root, destination_name)
             local key = WINDOWS and destination:lower() or destination
-            if destinations[key] then
+            local is_deferred = isMoon(original) and original ~= original_entry and not runtime
+                and excluded(original, opts.exclude) and not explicit_inputs[original]
+            if not is_deferred and destinations[key] then
                 error(failure("MoonScriptCollisionError", "MoonScript and Lua inputs would overwrite the same compiled file",
                     {source_path=original, conflicting_path=destinations[key]}), 0)
             end
-            destinations[key], seen_original[original] = original, true
-            candidates[#candidates + 1] = {original=original, prepared=destination, relative=relative}
+            if not is_deferred then destinations[key] = original end
+            seen_original[original] = true
+            local candidate = {original=original, prepared=destination, relative=relative,
+                deferred=is_deferred}
+            candidates[#candidates + 1] = candidate
+            candidate.index = #candidates
+            if candidate.deferred then
+                candidate.conflicting_path = deferred[key] and deferred[key].original
+                deferred[key] = candidate
+            end
         end
         add(original_entry, path.basename(original_entry))
         for _, item in ipairs(items) do
@@ -136,8 +150,7 @@ function M.prepare(opts)
             if not skipped and original ~= original_entry and item.type == "file"
                 and (lower:match("%.lua$") or lower:match("%.moon$") or lower:match("%.so[%.%d]*$")
                     or lower:match("%.dll$") or lower:match("%.dylib$")) then
-                if not (isMoon(original) and excluded(original, opts.exclude)
-                    and opts.discovery_mode ~= "runtime") then add(original, item.path) end
+                add(original, item.path)
             elseif not skipped and item.type == "reparse" and (lower:match("%.moon$") or lower:match("%.lua$")) then
                 return failure("FilesystemError", "MoonScript preprocessing refuses linked source files", {source_path=original})
             end
@@ -149,13 +162,18 @@ function M.prepare(opts)
             end
         end
         local total = 0
-        for index, candidate in ipairs(candidates) do
-            if index > 10000 then
-                return result.resourceLimit("preprocessed-files", 10000, original_entry, index)
-            end
+        if #candidates > 10000 then
+            return result.resourceLimit("preprocessed-files", 10000, original_entry, #candidates)
+        end
+        local function prepare_candidate(candidate)
             candidate.limit = (isMoon(candidate.original) or candidate.original:lower():match("%.lua$"))
                 and opts.max_source_bytes or opts.max_bundle_bytes
-            local content, read_error, read_state = fs.readRegularFile(candidate.original, candidate.limit)
+            local content, read_error, read_state
+            if candidate.original == original_entry then
+                content = input
+            else
+                content, read_error, read_state = fs.readRegularFile(candidate.original, candidate.limit)
+            end
             if content == nil then
                 if read_state and read_state.limit_exceeded then
                     return result.resourceLimit("source-bytes", opts.max_source_bytes, candidate.original)
@@ -164,7 +182,7 @@ function M.prepare(opts)
             end
             candidate.original_hash = hash.sha256(content)
             if isMoon(candidate.original) then
-                local snapshot = path.join(workspace, "inputs/source-" .. index .. ".moon")
+                local snapshot = path.join(workspace, "inputs/source-" .. candidate.index .. ".moon")
                 assert(fs.writeFile(snapshot, content))
                 local material_name = candidate.relative
                 if not path.isWithin(candidate.original, source_root) then
@@ -195,6 +213,57 @@ function M.prepare(opts)
             context.records[#context.records + 1] = candidate
             context.mapping[candidate.prepared] = candidate.original
             context.originals[candidate.original] = candidate.original_hash
+            return {ok=true}
+        end
+        for _, candidate in ipairs(candidates) do
+            if not candidate.deferred then
+                local prepared = prepare_candidate(candidate)
+                if not prepared.ok then return prepared end
+            end
+        end
+        if not runtime and not manual and next(deferred) then
+            -- Exclusion filters the final dependency list. Required excluded
+            -- modules still participate in ordinary static discovery; compile
+            -- those lazily and leave unrelated excluded sources untouched.
+            local analyzer = require("luainstaller.analyzer")
+            local resolver = analyzer.ModuleResolver.new(lua_root)
+            local queue = {candidates[1].prepared}
+            local queued = {[queue[1]]=true}
+            local position = 1
+            while position <= #queue do
+                if position > 10000 then
+                    return result.resourceLimit("preprocessed-discovery-files", 10000, original_entry, position)
+                end
+                local filename = queue[position]
+                position = position + 1
+                local content = fs.readRegularFile(filename, opts.max_source_bytes)
+                local parsed, requires = pcall(function()
+                    return analyzer.LuaLexer.new(content, filename):extractRequires()
+                end)
+                if parsed then
+                    for _, request in ipairs(requires) do
+                        for _, candidate in ipairs(resolver:buildCandidates(request.name, filename)) do
+                            local resolved = path.absolute(candidate.path)
+                            local key = WINDOWS and resolved:lower() or resolved
+                            if deferred[key] and fs.pathType(resolved) ~= "file" then
+                                if deferred[key].conflicting_path then
+                                    return failure("MoonScriptCollisionError", "Excluded MoonScript inputs have the same compiled file",
+                                        {source_path=deferred[key].original, conflicting_path=deferred[key].conflicting_path})
+                                end
+                                local prepared = prepare_candidate(deferred[key])
+                                if not prepared.ok then return prepared end
+                                deferred[key] = nil
+                            end
+                            if fs.pathType(resolved) == "file" then
+                                if candidate.type == "lua" and not queued[resolved] then
+                                    queue[#queue + 1], queued[resolved] = resolved, true
+                                end
+                                break
+                            end
+                        end
+                    end
+                end
+            end
         end
         local normalized = {}
         for key, item in pairs(opts) do normalized[key] = item end
@@ -208,10 +277,10 @@ function M.prepare(opts)
             normalized.include[#normalized.include + 1] = mapped or original
         end
         for _, filename in ipairs(opts.exclude) do
-            local original = path.absolute(filename)
-            local mapped
-            for prepared, source in pairs(context.mapping) do if source == original then mapped = prepared end end
-            normalized.exclude[#normalized.exclude + 1] = mapped or filename:gsub("%.[mM][oO][oO][nN]$", ".lua")
+            for prepared, source in pairs(context.mapping) do
+                if excluded(source, {filename}) then normalized.exclude[#normalized.exclude + 1] = prepared end
+            end
+            normalized.exclude[#normalized.exclude + 1] = filename
         end
         context.options = normalized
         local verified = context.verify()

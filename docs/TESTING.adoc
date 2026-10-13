@@ -42,6 +42,8 @@ LUA=${LUA:-lua}
 "$LUA" test/process_working_directory.lua
 "$LUA" test/static_windows_image.lua
 "$LUA" test/moonscript.lua
+"$LUA" test/moon_boundaries.lua
+"$LUA" test/moon_compiler_bounds.lua
 "$LUA" test/moon_failure_cleanup.lua
 "$LUA" test/moon_reproducibility.lua
 "$LUA" test/onefile_modes.lua
@@ -126,6 +128,13 @@ and compatibility with existing ownership records
 
 |`test/moonscript.lua`, `test/moon_failure_cleanup.lua`
 |Real local compiler, mixed modules, opt-out, source identity and exception cleanup
+
+|`test/moon_boundaries.lua`
+|Required exclusions, transitive discovery, unrelated excluded sources and first-read source changes
+
+|`test/moon_compiler_bounds.lua`
+|Real subprocess deadlines and output quotas, failed compilation, original diagnostics,
+aggregate preprocessing budgets and preservation of existing outputs
 
 |`test/moon_reproducibility.lua`
 |Cross-root MoonScript artifact identity, path privacy and exported preferred sources

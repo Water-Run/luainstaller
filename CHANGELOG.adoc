@@ -28,6 +28,12 @@ truth for the exact contents of a published version.
 * `--no-moon-detect`, `luai -M` and `moon_detect = false` skip MoonScript detection.
 * `--luainstaller-extract DIRECTORY` exports single-file relinking materials.
 
+=== Fixed
+
+* MoonScript static exclusions preserve transitive dependency discovery and
+  separate Lua modules. Entry snapshots retain their first read and reject
+  source changes during compiler lookup.
+
 == 1.5.3 - 2026-10-13
 
 === Fixed
