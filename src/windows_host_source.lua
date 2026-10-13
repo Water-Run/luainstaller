@@ -16,7 +16,7 @@ return [====[
  * Author: WaterRun
  * File: windows_host.c
  * Date: 2026-10-06
- * Updated: 2026-10-12
+ * Updated: 2026-10-13
  * Keep src/windows_host_source.lua synchronized with this file.
  * Uses Windows XP APIs only; no Lua headers or import library are needed.
  */
@@ -992,7 +992,7 @@ static int child_text(context *ctx, buffer *value)
 
 static int execute(context *ctx)
 {
-    wchar_t *program = argument(ctx, 1), *value, *env = NULL;
+    wchar_t *program = argument(ctx, 1), *value, *env = NULL, *directory = NULL;
     buffer command = {0}, output = {0}, diagnostic = {0};
     DWORD timeout, count, env_count, index, started, status = 0, output_limit, remaining;
     HANDLE out_read, out_write, err_read, err_write, job = NULL, input, finished = NULL, guard = NULL;
@@ -1004,10 +1004,15 @@ static int execute(context *ctx)
     int command_shell = 0, shell_body = 0;
     if (!program || ctx->count < 6 || !decimal(ctx, 2, &timeout) || !decimal(ctx, 3, &count)
         || count > ctx->count - 6 || !decimal(ctx, 4 + count, &env_count)
-        || env_count > (ctx->count - 6 - count) / 2 || 6 + count + env_count * 2 != ctx->count
+        || env_count > (ctx->count - 6 - count) / 2
+        || (6 + count + env_count * 2 != ctx->count && 7 + count + env_count * 2 != ctx->count)
         || !decimal(ctx, 5 + count + env_count * 2, &output_limit)
         || !output_limit || output_limit > 1073741824) return fail(ctx, "invalid process request");
     remaining = output_limit;
+    if (7 + count + env_count * 2 == ctx->count) {
+        directory = argument(ctx, 6 + count + env_count * 2);
+        if (!directory || !*directory) return fail(ctx, "invalid command directory");
+    }
     if (!quote_argument(ctx, &command, program)) return 0;
     {
         const wchar_t *base = program, *position;
@@ -1047,7 +1052,7 @@ static int execute(context *ctx)
     startup.hStdInput = input; startup.hStdOutput = out_write; startup.hStdError = err_write;
     memset(&child, 0, sizeof(child));
     if (!CreateProcessW(NULL, (wchar_t *)command.data, NULL, NULL, TRUE,
-        CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, env, NULL, &startup, &child)) return win_fail(ctx, "start process");
+        CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, env, directory, &startup, &child)) return win_fail(ctx, "start process");
     if (!track(ctx, child.hProcess) || !track(ctx, child.hThread)) return 0;
     job = CreateJobObjectW(NULL, NULL);
     if (job) {

@@ -2,7 +2,7 @@
  * Author: WaterRun
  * File: posix_host.c
  * Date: 2026-10-12
- * Updated: 2026-10-12
+ * Updated: 2026-10-13
  * Keep src/posix_host_source.lua synchronized with this file.
  */
 #define _POSIX_C_SOURCE 200809L
@@ -76,7 +76,7 @@ static int supervise(int argc, char **argv)
     uint64_t timeout, limit, env_count, started, stopping = 0, total = 0;
     int pipe_descriptors[2], index, code = 0, closed = 0, child_exited = 0, quiet_checks = 0;
     pid_t child, owner = getppid();
-    const char *reason = "exit", *token;
+    const char *reason = "exit", *token, *directory = NULL;
     struct sigaction action;
     siginfo_t state;
     struct pollfd event;
@@ -97,6 +97,11 @@ static int supervise(int argc, char **argv)
      * command group. Lua relays an interrupted read to this reserved child PID. */
     if (setpgid(0, 0)) return finish(token, 125, "supervisor-error");
     index = 6 + (int)env_count * 2;
+    if (!strcmp(argv[index], "--cwd")) {
+        if (index + 3 >= argc || !argv[index + 1][0]) return 127;
+        directory = argv[index + 1];
+        index += 2;
+    }
     if (strcmp(argv[index], "--") || index + 1 >= argc) return 127;
     memset(&action, 0, sizeof(action));
     sigemptyset(&action.sa_mask);
@@ -136,6 +141,10 @@ static int supervise(int argc, char **argv)
         if (pipe_descriptors[1] > STDERR_FILENO) close(pipe_descriptors[1]);
         for (position = 0; position < env_count; ++position) {
             if (setenv(argv[6 + position * 2], argv[7 + position * 2], 1)) _exit(126);
+        }
+        if (directory && chdir(directory)) {
+            perror("luainstaller: command directory");
+            _exit(126);
         }
         execvp(argv[index + 1], argv + index + 1);
         perror("luainstaller: start command");

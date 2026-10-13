@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-12
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local M = {}
@@ -104,6 +104,10 @@ function M.invocation(executable, arguments, environment, opts, token, raw, quot
     local parts = {"exec", quote(host), "exec", tostring(math.max(1, math.ceil(opts.timeout_seconds * 1000))),
         tostring(opts.max_output_bytes), quote(token), tostring(#keys)}
     for _, key in ipairs(keys) do parts[#parts + 1] = quote(key); parts[#parts + 1] = quote(environment[key]) end
+    if opts.working_directory then
+        parts[#parts + 1] = "--cwd"
+        parts[#parts + 1] = quote(opts.working_directory)
+    end
     parts[#parts + 1], parts[#parts + 2] = "--", quote(executable)
     for _, value in ipairs(arguments or {}) do parts[#parts + 1] = quote(value) end
     return table.concat(parts, " ")

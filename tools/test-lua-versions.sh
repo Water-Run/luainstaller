@@ -599,6 +599,7 @@ run_version() {
     "$lua" test/output_transaction.lua
     "$lua" test/lock_identity.lua
     "$lua" test/process_bounds.lua
+    "$lua" test/process_working_directory.lua
     "$lua" test/resource_bounds.lua
     "$lua" test/output_parents.lua
     "$lua" test/build_cleanup.lua

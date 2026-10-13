@@ -10,7 +10,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local M = {}
@@ -106,7 +106,12 @@ local function commandOptions(opts)
         or limit ~= math.floor(limit) then
         return nil, "command output limit must be an integer between 1 and 1073741824 bytes"
     end
-    return {timeout_seconds=timeout, max_output_bytes=limit}
+    local directory = opts.working_directory
+    if directory ~= nil and (type(directory) ~= "string" or directory == ""
+        or directory:find("\0", 1, true)) then
+        return nil, "command working directory must be a nonempty path without NUL bytes"
+    end
+    return {timeout_seconds=timeout, max_output_bytes=limit, working_directory=directory}
 end
 
 -- The shell path bootstraps a trusted compiler and serves filesystem queries
@@ -285,7 +290,9 @@ function M.output(command, opts)
     end
     if IS_WINDOWS then return M.outputCommand("cmd.exe", {"/d", "/s", "/c", command}, {}, opts) end
     local native = require("luainstaller.posix_host")
-    if not native.ready() and not (opts and opts.timeout_seconds) then return bootstrapOutput(command, opts) end
+    if not native.ready() and not (opts and (opts.timeout_seconds or opts.working_directory)) then
+        return bootstrapOutput(command, opts)
+    end
     return M.outputCommand("sh", {"-c", command}, {}, opts)
 end
 
@@ -330,7 +337,8 @@ function M.outputCommand(executable, arguments, environment, opts)
     if not normalized then return false, option_err, {reason="invalid-options"} end
     if IS_WINDOWS then
         local ok, output, extra = require("luainstaller.windows_host").execute(validated.executable,
-            validated.arguments, validated.environment, normalized.timeout_seconds, normalized.max_output_bytes)
+            validated.arguments, validated.environment, normalized.timeout_seconds, normalized.max_output_bytes,
+            normalized.working_directory)
         local code, reason = tostring(extra or ""):match("^(%d+):([a-z%-]+)$")
         return ok, (tostring(output or ""):gsub("\r\n", "\n")),
             {code=tonumber(code or extra), reason=reason or "exit",

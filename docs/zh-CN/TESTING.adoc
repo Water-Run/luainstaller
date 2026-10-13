@@ -37,6 +37,7 @@ LUA=${LUA:-lua}
 "$LUA" test/output_transaction.lua
 "$LUA" test/lock_identity.lua
 "$LUA" test/process_bounds.lua
+"$LUA" test/process_working_directory.lua
 "$LUA" test/resource_bounds.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
@@ -105,6 +106,9 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/process_bounds.lua`
 |无 GNU timeout 时的时限、子进程输出上限、退出码与参数原样传递
+
+|`test/process_working_directory.lua`
+|子进程私有工作目录、字面路径、目录设置失败与调用者状态保留
 
 |`test/resource_bounds.lua`
 |单个源码和总量上限、无效上限及空文件读取

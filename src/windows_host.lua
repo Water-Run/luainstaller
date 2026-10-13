@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local M = {}
@@ -280,7 +280,7 @@ function M.compiler()
     return compiler_context
 end
 
-function M.execute(executable, arguments, environment, timeout, output_limit)
+function M.execute(executable, arguments, environment, timeout, output_limit, working_directory)
     local module, err = bootstrap()
     if not module then return false, err end
     local child_environment = {}
@@ -307,6 +307,7 @@ function M.execute(executable, arguments, environment, timeout, output_limit)
     fields[#fields + 1] = tostring(#keys)
     for _, key in ipairs(keys) do fields[#fields + 1] = key; fields[#fields + 1] = child_environment[key] end
     fields[#fields + 1] = tostring(output_limit or 8388608)
+    if working_directory then fields[#fields + 1] = working_directory end
     return M.call("exec", (table.unpack or unpack)(fields))
 end
 

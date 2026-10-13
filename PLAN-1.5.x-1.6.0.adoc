@@ -178,6 +178,12 @@ API 为 `moon_detect = false`。禁用时不探测 PATH、不启动命令、不�
 官方接口依据：https://moonscript.org/reference/command_line.html[MoonScript 命令行文档]。
 本机已有 `moon` 和 `moonc` 0.6.0，可用于实际编译验证。
 
+预处理基础能力已开始落地：结构化子进程支持私有工作目录，覆盖含空格、
+`&` 与 `%` 的路径、目录不存在、NUL 参数和调用者目录保持。回归在旧实现忽略
+工作目录时失败，修复后在原生 Linux 通过；Windows x86/x64 严格 MinGW 编译通过，
+尚需最终原生 MSVC 门禁。该回归已加入 Linux/Windows 矩阵及双语测试指南。
+实际 MoonScript 暂存树、输入映射、检测开关与完整编译流程仍待实现。
+
 == 仓库分支与开发记录
 
 用户要求 GitHub 最终只保留 `main`。2026-10-12 已检查远端分支：

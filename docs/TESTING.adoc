@@ -39,6 +39,7 @@ LUA=${LUA:-lua}
 "$LUA" test/output_transaction.lua
 "$LUA" test/lock_identity.lua
 "$LUA" test/process_bounds.lua
+"$LUA" test/process_working_directory.lua
 "$LUA" test/resource_bounds.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
@@ -111,6 +112,9 @@ and compatibility with existing ownership records
 
 |`test/process_bounds.lua`
 |Deadlines without GNU timeout, capped child output, exit codes and literal arguments
+
+|`test/process_working_directory.lua`
+|Private child working directories, literal paths, failed directory setup and unchanged caller state
 
 |`test/resource_bounds.lua`
 |Per-source and aggregate budgets, invalid limits and empty-file reads
