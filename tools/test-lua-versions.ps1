@@ -190,7 +190,7 @@ function Initialize-Msvc {
         Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
     if ([string]::IsNullOrEmpty($sdkVersion)) { throw 'Windows SDK was not found' }
     # LuaRocks selects its Windows/MSVC backend from VCINSTALLDIR. Merely
-    # placing cl.exe on PATH leaves its default backend set to MinGW.
+    # placing cl.exe on PATH leaves its default backend set to GCC.
     $env:VCINSTALLDIR = Join-Path $installation 'VC'
     $env:PATH = "$binary;$env:SystemRoot\System32;$env:SystemRoot"
     $env:INCLUDE = @(
