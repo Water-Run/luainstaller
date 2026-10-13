@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -32,6 +32,8 @@ local launcher = path.join(root, "exec-clean-signals")
 local configured_lua = harness.lua_command()
 local lua = fs.pathType(configured_lua) == "file" and configured_lua
     or assert(process.firstLine("command -v " .. process.shellQuote(configured_lua)))
+local old_abi = _VERSION == "Lua 5.1" or _VERSION == "Lua 5.2"
+local driver_timeout = old_abi and 600 or 120
 
 local function cleanup()
     if fs.pathType(root) == "directory" then fs.removeTree(root) end
@@ -72,9 +74,7 @@ exec "$LUAI_REAL_CC" "$@"
         return count
     end
     local function interruptBuild(target, signal_name, label, timeout_seconds)
-        local old_abi = _VERSION == "Lua 5.1" or _VERSION == "Lua 5.2"
         local readiness_attempts = old_abi and 4800 or 1200
-        local driver_timeout = old_abi and 600 or 120
         local marker = path.join(root, "compiler-ready-" .. label)
         local diagnostic_path = path.join(root, "interrupted-" .. label .. ".log")
         local script = table.concat({
@@ -144,14 +144,15 @@ exec "$LUAI_REAL_CC" "$@"
         return exited, output
     end
     local function retryBuild(target)
-        local retry_ok, retry_output = process.outputCommand(lua, {
+        local retry_ok, retry_output, retry_status = process.outputCommand(lua, {
             "src/cli.lua", "build", entry, "--dir", "-o", target,
         }, {
             LUAINSTALLER_CLI_NAME = "luainstaller",
             CC = real_cc,
             LUAI_CC = real_cc,
-        })
-        assert(retry_ok, retry_output)
+        }, {timeout_seconds=driver_timeout})
+        assert(retry_ok, tostring(retry_output) .. "\nretry status: "
+            .. tostring(retry_status and retry_status.code) .. " / " .. tostring(retry_status and retry_status.reason))
         local lock_path = path.join(root, ".luai-lock-" .. hash.sha256(target))
         assert(fs.pathType(lock_path) == "missing", "retry left an output lock")
         assert(stagingCount() == 0, "retry left staging state")

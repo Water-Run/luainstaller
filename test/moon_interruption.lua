@@ -158,7 +158,7 @@ if kill -0 "$1" 2>/dev/null; then exit 1; fi
         assert(fs.pathType(path.join(root, "output")) == "missing", "SIGINT published an output")
         assert(not log:find("stack traceback", 1, true), log)
         local retried, retry_output = process.outputCommand(lua, {"src/cli.lua", "analyze", entry},
-            {LUAINSTALLER_CLI_NAME="luainstaller"})
+            {LUAINSTALLER_CLI_NAME="luainstaller"}, {timeout_seconds=old_abi and 600 or 120})
         assert(retried, retry_output)
     end
 end)
