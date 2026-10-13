@@ -163,7 +163,8 @@ luai -b app/main.moon --file-mode auto -o build/app
 ----
 
 Lua 和 MoonScript 模块可以混用。生成的程序不需要 MoonScript 环境。
-用 `luai -M` 或 `luainstaller --no-moon-detect` 跳过检测，直接按 Lua 处理输入。
+在 `luai` 命令中加 `-M`，或在 `luainstaller` 命令中加 `--no-moon-detect`，
+即可跳过检测，直接按 Lua 处理输入。
 API 中设置 `moon_detect = false`。
 
 [#usage-options]

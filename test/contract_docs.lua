@@ -43,6 +43,8 @@ local function check_cli_surfaces_contract()
     assert(code == 0)
     assert_contains(out, "Usage: luai")
     assert_contains(out, "luai -l [log options]")
+    assert_contains(out, "--file-mode <mode>")
+    assert_contains(out, "-M")
     for _, option in ipairs({"--runtime-timeout", "--max-source-bytes",
         "--max-bundle-bytes", "--max-trace-bytes"}) do
         assert_contains(out, option)
@@ -58,6 +60,8 @@ local function check_cli_surfaces_contract()
     assert(code == 0)
     assert_contains(out, "Usage: luainstaller")
     assert_contains(out, "--runtime-timeout")
+    assert_contains(out, "--file-mode <mode>")
+    assert_contains(out, "--no-moon-detect")
     assert(err == "")
 
     code, out, err = invoke_cli("luai", { "build", "app.lua" })

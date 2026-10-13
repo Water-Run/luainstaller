@@ -169,7 +169,8 @@ luai -b app/main.moon --file-mode auto -o build/app
 ----
 
 Lua and MoonScript modules can be mixed. The generated program doesn't need
-MoonScript. Use `luai -M` or `luainstaller --no-moon-detect` to skip detection
+MoonScript. Add `-M` to a `luai` command or `--no-moon-detect` to a
+`luainstaller` command to skip detection
 and treat the input as Lua. In the API, set `moon_detect = false`.
 
 [#usage-options]

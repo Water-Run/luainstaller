@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-06
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -42,6 +42,7 @@ end
             entry = entry,
             out = artifact,
             mode = "onefile",
+            onefile_mode = "extract",
         })
         assert(built.ok, built.error and table.concat({
             tostring(built.error.message),

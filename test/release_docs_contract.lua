@@ -97,6 +97,22 @@ expect_not_contains("docs/TROUBLESHOOTING.adoc", "Remove it once you're sure no 
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "使用相同的输出路径重试")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "不保证 断电后的持久性")
 
+for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
+    for _, needle in ipairs({"--file-mode", "auto", "extract", "no-extract", "moon_detect = false"}) do
+        expect_contains(prefix .. "USAGE.adoc", needle)
+    end
+    for _, needle in ipairs({"[#troubleshooting-file-mode]", "[#troubleshooting-moonscript]",
+        "moonc", "--no-moon-detect"}) do
+        expect_contains(prefix .. "TROUBLESHOOTING.adoc", needle)
+    end
+    for _, needle in ipairs({"test/moonscript.lua", "test/moon_failure_cleanup.lua", "test/onefile_modes.lua"}) do
+        expect_contains(prefix .. "TESTING.adoc", needle)
+    end
+    expect_contains(prefix .. "PLATFORMS-NATIVE-LIMITS.adoc", "--file-mode")
+end
+expect_not_contains("docs/PLATFORMS-NATIVE-LIMITS.adoc", "The single file is just an executable that unpacks itself.")
+expect_not_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "单文件只是一个会自行解包的可执行文件。")
+
 local structured_contract = "The structured result contract applies to `analyze`, `trace`, "
     .. "`compatibility`, and `bundle` only."
 local logging_contract = "`getLogs` returns a list of log records; `clearLogs` returns a boolean."

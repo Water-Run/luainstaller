@@ -151,7 +151,7 @@ MSVC can also generate the import library from the DLL's exports.
 Windows XP::
 Use a compiler and C runtime that support XP. A modern Visual Studio
 build won't start there even though it compiles fine. Run from the
-compiler's own prompt, and use PowerShell 2 or later.
+compiler's own prompt.
 
 FreeBSD::
 Don't add `-ldl`; it's Linux-only.
@@ -160,6 +160,26 @@ Android (Termux)::
 Install `clang` and Lua inside Termux. Leave
 `$PREFIX` and `$TMPDIR` alone and don't create `/tmp` or `/bin/sh`.
 ====
+
+[#troubleshooting-file-mode]
+== Direct startup isn't available
+
+`no-extract` needs a matching static Lua library and pure Lua modules.
+On Windows, a DLL import `.lib` isn't a static Lua library. Install the
+static library under your Lua prefix, or use `--file-mode extract`.
+`auto` makes this choice before compiling the application; application
+compile errors still stop the build.
+
+[#troubleshooting-moonscript]
+== MoonScript won't compile
+
+Check that `moonc` is on `PATH`. Install it with `luarocks install moonscript`,
+then retry. Compiler diagnostics name the original `.moon` file;
+later Lua diagnostics use the compiled Lua line numbers. The generated Lua
+and original MoonScript are available in the relinking materials.
+
+When a `.moon` and `.lua` file would produce the same module, rename one.
+Use `--no-moon-detect` (or `luai -M`) only when the input should be read as Lua.
 
 [#troubleshooting-native-dependencies]
 == A build warns about C module libraries

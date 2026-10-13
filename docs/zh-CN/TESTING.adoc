@@ -38,6 +38,10 @@ LUA=${LUA:-lua}
 "$LUA" test/lock_identity.lua
 "$LUA" test/process_bounds.lua
 "$LUA" test/process_working_directory.lua
+"$LUA" test/static_windows_image.lua
+"$LUA" test/moonscript.lua
+"$LUA" test/moon_failure_cleanup.lua
+"$LUA" test/onefile_modes.lua
 "$LUA" test/resource_bounds.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
@@ -109,6 +113,15 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/process_working_directory.lua`
 |子进程私有工作目录、字面路径、目录设置失败与调用者状态保留
+
+|`test/static_windows_image.lua`
+|PE 有界解析和直接启动时对外部 DLL 导入的拒绝
+
+|`test/moonscript.lua`, `test/moon_failure_cleanup.lua`
+|真实本机编译器、混合模块、禁用检测、源码身份与异常清理
+
+|`test/onefile_modes.lua`
+|自动及显式模式、无可写临时目录启动和材料重链接
 
 |`test/resource_bounds.lua`
 |单个源码和总量上限、无效上限及空文件读取

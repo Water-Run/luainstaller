@@ -18,6 +18,7 @@ local fs = require("luainstaller.fs")
 local path = require("luainstaller.path")
 local process = require("luainstaller.process")
 local root = assert(fs.makePrivateDirectory("moonscript"))
+local external_root = assert(fs.makePrivateDirectory("moon-external-test"))
 local make_private = fs.makePrivateDirectory
 local workspaces = {}
 fs.makePrivateDirectory = function(prefix, ...)
@@ -53,6 +54,40 @@ local called, failure = pcall(function()
         local single_ran, single_output = process.outputCommand(single.executable, {}, {LUA_PATH="", LUA_CPATH=""})
         assert(single_ran and single_output == "moon-mixed\n", single_output)
     end
+    local manual_entry = path.join(root, "manual.moon")
+    local external = path.join(external_root, "manual_value.moon")
+    assert(fs.writeFile(manual_entry, 'name = "manual_value"\nprint (require name)\n'))
+    assert(fs.writeFile(external, 'return "external-moon"\n'))
+    local manual = api.bundle({entry=manual_entry, discovery_mode="manual", include={external},
+        out=path.join(root, "manual-app")})
+    assert(manual.ok, manual.error and manual.error.message)
+    local manual_ran, manual_output = process.outputCommand(manual.executable, {}, {LUA_PATH="", LUA_CPATH=""})
+    assert(manual_ran and manual_output == "external-moon\n", manual_output)
+    local excluded = api.analyze({entry=manual_entry, discovery_mode="manual", include={external}, exclude={external}})
+    assert(excluded.ok and #excluded.dependencies.scripts == 0, excluded.error and excluded.error.message)
+    local ignored = path.join(root, "ignored.moon")
+    assert(fs.writeFile(ignored, "this isn't valid MoonScript!\n"))
+    local skipped = api.analyze({entry=entry, exclude={ignored}})
+    assert(skipped.ok, skipped.error and skipped.error.message)
+    assert(fs.removeFile(ignored))
+    local moon = require("luainstaller.moon")
+    local find_compiler = moon.findCompiler
+    local compiler = assert(find_compiler())
+    local compiler_dir = path.join(root, "compiler %LUAI_MOON_CANARY% & space")
+    assert(fs.makeDirectory(compiler_dir))
+    local windows = package.config:sub(1, 1) == "\\"
+    local wrapper = path.join(compiler_dir, windows and "moonc.cmd" or "moonc")
+    assert(fs.writeFile(wrapper, windows and ('@echo off\r\n"' .. compiler .. '" %*\r\n')
+        or ("#!/bin/sh\nexec " .. process.shellQuote(compiler) .. ' "$@"\n')))
+    assert(fs.setExecutable(wrapper))
+    local unusual_entry = path.join(root, "main %LUAI_MOON_CANARY% & space.moon")
+    assert(fs.writeFile(unusual_entry, 'print "literal-moon-path"\n'))
+    moon.findCompiler = function() return wrapper end
+    local unusual = api.bundle({entry=unusual_entry, out=path.join(root, "unusual-app")})
+    moon.findCompiler = find_compiler
+    assert(unusual.ok, unusual.error and (unusual.error.message .. "\n" .. tostring(unusual.error.output)))
+    local unusual_ran, unusual_output = process.outputCommand(unusual.executable, {}, {LUA_PATH="", LUA_CPATH=""})
+    assert(unusual_ran and unusual_output == "literal-moon-path\n", unusual_output)
     local original_source = assert(fs.readFile(path.join(root, "greet.moon")))
     local toolchain = require("luainstaller.toolchain")
     local original_compile = toolchain.compile
@@ -76,8 +111,6 @@ local called, failure = pcall(function()
     process.outputCommand = original
     assert(not disabled.ok and disabled.error.type == "LuaSyntaxError",
         disabled.error and (disabled.error.type .. ": " .. disabled.error.message))
-    local moon = require("luainstaller.moon")
-    local find_compiler = moon.findCompiler
     moon.findCompiler = function() error("disabled or Lua input detected MoonScript", 0) end
     local original_output = process.output
     process.output = function(command, ...)
@@ -118,5 +151,6 @@ for _, directory in ipairs(workspaces) do
     assert(fs.pathType(directory) == "missing", "MoonScript operation left its workspace: " .. directory)
 end
 assert(fs.removeTree(root))
+assert(fs.removeTree(external_root))
 assert(called, failure)
 print("real MoonScript preprocessing ok")

@@ -40,6 +40,10 @@ LUA=${LUA:-lua}
 "$LUA" test/lock_identity.lua
 "$LUA" test/process_bounds.lua
 "$LUA" test/process_working_directory.lua
+"$LUA" test/static_windows_image.lua
+"$LUA" test/moonscript.lua
+"$LUA" test/moon_failure_cleanup.lua
+"$LUA" test/onefile_modes.lua
 "$LUA" test/resource_bounds.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
@@ -115,6 +119,15 @@ and compatibility with existing ownership records
 
 |`test/process_working_directory.lua`
 |Private child working directories, literal paths, failed directory setup and unchanged caller state
+
+|`test/static_windows_image.lua`
+|Bounded PE parsing and refusal of external DLL imports for direct startup
+
+|`test/moonscript.lua`, `test/moon_failure_cleanup.lua`
+|Real local compiler, mixed modules, opt-out, source identity and exception cleanup
+
+|`test/onefile_modes.lua`
+|Automatic and explicit modes, startup without writable temporary storage and material relinking
 
 |`test/resource_bounds.lua`
 |Per-source and aggregate budgets, invalid limits and empty-file reads

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-08-24
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -34,6 +34,7 @@ local function build()
     local result = onefile.bundleOnefile({
         entry = "test/runtime_bundle/main.lua",
         out = out,
+        onefile_mode = "extract",
     })
     bundler.bundleOnedir = original
     return result

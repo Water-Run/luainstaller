@@ -126,6 +126,7 @@ jobs:
           export PATH="$LUAI_SAMPLE_DEPS_TREE/bin:$PATH"
           lua test/static_windows_image.lua
           lua test/moonscript.lua
+          lua test/moon_failure_cleanup.lua
           lua test/onefile_modes.lua
 
       - name: Comprehensive smoke audit
@@ -205,6 +206,7 @@ jobs:
           "$LUAI_TEST_LUA" test/resource_bounds.lua
           "$LUAI_TEST_LUA" test/output_parents.lua
           "$LUAI_TEST_LUA" test/build_cleanup.lua
+          "$LUAI_TEST_LUA" test/onefile_modes.lua
 
   windows-version-matrix:
     name: official Lua ${{ matrix.lua }} (Windows MSVC)

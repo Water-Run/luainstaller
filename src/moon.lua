@@ -219,7 +219,8 @@ function M.prepare(opts)
         return {ok=true}
     end, function(error_value) return error_value end)
     if not called or not value.ok then
-        local cleaned, cleanup_error = context.cleanup()
+        local cleanup_called, cleaned, cleanup_error = pcall(context.cleanup)
+        if not cleanup_called then cleanup_error, cleaned = cleaned, false end
         local error_result = called and value or (type(value) == "table" and value.ok == false and value
             or failure("MoonScriptCompilationError", "MoonScript preprocessing failed", {cause=tostring(value)}))
         if not cleaned then error_result.error.cleanup_error = cleanup_error; error_result.error.cleanup_path = workspace end

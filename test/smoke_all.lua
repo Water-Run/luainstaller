@@ -1680,6 +1680,7 @@ end
 assert_bundle({
     entry = "test/runtime_bundle/main.lua",
     mode = "onefile",
+    onefile_mode = "extract",
     out = os.getenv("LUAI_RUNTIME_ONEFILE_OUT"),
     max_deps = 250,
 })

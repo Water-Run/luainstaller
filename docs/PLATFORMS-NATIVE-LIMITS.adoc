@@ -55,7 +55,7 @@ the versions line up.
 
 |Windows
 |MSVC or MinGW-w64
-|`lua5x.dll` next to the executable
+|`lua5x.dll` next to the executable, or a static Lua library for direct startup
 
 |Android (Termux)
 |`clang` from Termux
@@ -97,7 +97,7 @@ Other notes:
   exist before that.
 * File paths use the system code page. On XP, plain ASCII paths are the
   safest choice.
-* The single-file form ties the program to its launcher, so killing one
+* The extracting single-file form ties the program to its launcher, so killing one
   ends the other. On XP this uses a small helper process instead of a Job
   Object feature XP lacks.
 
@@ -164,7 +164,7 @@ listed may still work.
 * macOS universal binaries, signing and notarization
 * Installer packages such as MSI, PKG, DEB or RPM
 
-The single file is just an executable that unpacks itself. It isn't an
-installer.
+Single-file builds either start directly or unpack first, according to
+`--file-mode`. They aren't installers.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -60,6 +60,16 @@ local build_diagnostic = built.error and table.concat({
     tostring(built.error.output or built.error.cause or ""),
 }, "\n") or "native onefile build failed"
 assert(built.ok, build_diagnostic)
+assert(built.onefile_mode == "extract" and built.selection_reason == "native-modules",
+    "automatic mode did not choose extraction for a C module")
+local rejected = require("luainstaller").bundle({
+    entry = entry,
+    out = path.join(root, "rejected" .. suffix),
+    mode = "onefile",
+    onefile_mode = "no-extract",
+})
+assert(not rejected.ok and rejected.error.type == "UnsupportedOnefileModeError")
+assert(fs.pathType(path.join(root, "rejected" .. suffix)) == "missing")
 assert(fs.pathType(built.executable) == "file")
 assert(#(built.manifest.modules.native or {}) == 1,
     "native module was not recorded in the onefile manifest")

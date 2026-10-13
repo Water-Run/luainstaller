@@ -20,6 +20,10 @@ local process = require("luainstaller.process")
 local toolchain = require("luainstaller.toolchain")
 local root = assert(fs.makePrivateDirectory("onefile-modes"))
 local called, failure = pcall(function()
+    assert(api.ErrorTypes.STATIC_LUA_UNAVAILABLE == "StaticLuaUnavailableError",
+        "the public error registry omits unavailable static Lua")
+    assert(api.ErrorTypes.UNSUPPORTED_ONEFILE_MODE == "UnsupportedOnefileModeError",
+        "the public error registry omits unsupported single-file mode")
     local entry = path.join(root, "main.lua")
     assert(fs.writeFile(entry, "assert(arg[1]=='literal & % arg'); print('direct-pure-lua')\n"))
     for _, mode in ipairs({"no-extract", "auto", "extract"}) do
@@ -69,6 +73,49 @@ local called, failure = pcall(function()
             assert(relink_ran and relink_output:find("direct-pure-lua", 1, true), relink_output)
         end
     end
+    local native, native_error = toolchain.resolve()
+    assert(native, native_error and native_error.error.message)
+    if native.link_mode == "shared" then
+        local prefix = path.join(root, "shared-only")
+        assert(fs.makeDirectory(path.join(prefix, "lib")))
+        assert(fs.writeFile(path.join(prefix, "lib/" .. path.basename(native.library_path)),
+            assert(fs.readFile(native.library_path))))
+        assert(fs.copyFile(native.runtime_path, path.join(prefix, path.basename(native.runtime_path))))
+        if package.config:sub(1, 1) ~= "\\" then
+            assert(fs.copyFile(native.runtime_path, path.join(prefix, "lib/" .. path.basename(native.runtime_path))))
+        end
+        local automatic = api.bundle({entry=entry, mode="onefile", lua_prefix=prefix,
+            out=path.join(root, "shared-auto")})
+        assert(automatic.ok, automatic.error and automatic.error.message)
+        assert(automatic.onefile_mode == "extract" and automatic.selection_reason == "static-lua-unavailable")
+        local ran, output = process.outputCommand(automatic.executable, {"literal & % arg"},
+            {LUA_PATH="", LUA_CPATH=""})
+        assert(ran and output:find("direct-pure-lua", 1, true), output)
+        local rejected = api.bundle({entry=entry, mode="onefile", onefile_mode="no-extract",
+            lua_prefix=prefix, out=path.join(root, "shared-rejected")})
+        assert(not rejected.ok and rejected.error.type == "StaticLuaUnavailableError")
+        assert(fs.pathType(path.join(root, "shared-rejected")) == "missing")
+    end
+    local compile = toolchain.compile
+    local application_attempts = 0
+    toolchain.compile = function(config, source, ...)
+        if path.basename(source) == "launcher.c" then
+            application_attempts = application_attempts + 1
+            return false, "injected application compilation failure", "fixture-compiler"
+        end
+        return compile(config, source, ...)
+    end
+    local rejected = api.bundle({entry=entry, mode="onefile", out=path.join(root, "compile-rejected")})
+    toolchain.compile = compile
+    assert(not rejected.ok and rejected.error.type == "CompilationFailedError")
+    assert(application_attempts == 1, "auto retried a failed application compilation in another mode")
+    assert(fs.pathType(path.join(root, "compile-rejected")) == "missing")
+    assert(fs.writeFile(entry, "os.exit(37)\n"))
+    local exiting = api.bundle({entry=entry, mode="onefile", onefile_mode="no-extract",
+        out=path.join(root, "exit37")})
+    assert(exiting.ok, exiting.error and exiting.error.message)
+    local ran, _, status = process.outputCommand(exiting.executable, {}, {PATH="", LUA_PATH="", LUA_CPATH=""})
+    assert(not ran and status and status.code == 37, "direct startup did not preserve the application exit code")
 end)
 assert(fs.removeTree(root))
 assert(called, failure)

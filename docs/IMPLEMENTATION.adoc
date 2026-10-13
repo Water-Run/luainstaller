@@ -175,6 +175,9 @@ module layout. Private API contexts hold the original hashes and verify them
 before both directory and single-file publication. Selected MoonScript inputs
 are included in relinking materials. Disabling detection and ordinary Lua
 entries bypass compiler lookup and preprocessing.
+Preparation, source verification and path mapping use protected failure
+boundaries. Cleanup also catches thrown filesystem errors and reports a
+committed output when publication completed before cleanup failed.
 
 [#implementation-errors]
 == Errors

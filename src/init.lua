@@ -120,6 +120,8 @@ M.ErrorTypes = {
     MOON_COMPILER_MISSING  = "MoonScriptCompilerNotFoundError",
     MOON_COMPILATION       = "MoonScriptCompilationError",
     MOON_COLLISION         = "MoonScriptCollisionError",
+    STATIC_LUA_UNAVAILABLE = "StaticLuaUnavailableError",
+    UNSUPPORTED_ONEFILE_MODE = "UnsupportedOnefileModeError",
 }
 
 
@@ -649,29 +651,42 @@ for _, action in ipairs({"analyze", "trace", "compatibility", "bundle"}) do
             end
         end
         local moon = require("luainstaller.moon")
-        local context, prepare_error = moon.prepare(normalized)
+        local prepared, context, prepare_error = pcall(moon.prepare, normalized)
+        if not prepared then return recordFailure(action_name, result.fromThrown(context)) end
         if not context then return recordFailure(action_name, prepare_error) end
         moon_contexts[context.options] = context
-        local called, value = xpcall(function() return original(context.options) end,
-            function(error_value) return error_value end)
-        local response = called and value or result.fromThrown(value)
-        if response.ok and action_name ~= "bundle" then
-            local verified = context.verify()
-            if not verified.ok then response = verified end
-        end
-        response = moon.remap(response, context)
-        if response.dependencies and response.dependencies.source_hashes then
-            for filename in pairs(response.dependencies.source_hashes) do
-                if context.originals[filename] then response.dependencies.source_hashes[filename] = context.originals[filename] end
+        local published = false
+        local called, value = xpcall(function()
+            local response = original(context.options)
+            published = response.ok and action_name == "bundle"
+            if response.ok and action_name ~= "bundle" then
+                local verified = context.verify()
+                if not verified.ok then response = verified end
             end
-        end
-        local cleaned, cleanup_error = context.cleanup()
+            response = moon.remap(response, context)
+            if response.dependencies and response.dependencies.source_hashes then
+                for filename in pairs(response.dependencies.source_hashes) do
+                    if context.originals[filename] then
+                        response.dependencies.source_hashes[filename] = context.originals[filename]
+                    end
+                end
+            end
+            return response
+        end, function(error_value) return error_value end)
+        moon_contexts[context.options] = nil
+        local response = called and value or result.fromThrown(value)
+        if not called and published then response.error.committed = true end
+        local cleanup_called, cleaned, cleanup_error = pcall(context.cleanup)
+        if not cleanup_called then cleanup_error, cleaned = cleaned, false end
         if not cleaned then
             if response.ok then
                 response = makeError("FilesystemError", "Cannot remove MoonScript workspace", {
-                    cleanup_path=context.workspace, cause=cleanup_error, committed=action_name == "bundle",
+                    cleanup_path=context.workspace, cause=cleanup_error, committed=published,
                 })
-            else response.error.cleanup_error = cleanup_error; response.error.cleanup_path = context.workspace end
+            else
+                response.error.cleanup_error = cleanup_error
+                response.error.cleanup_path = context.workspace
+            end
         end
         return recordFailure(action_name, response)
     end

@@ -50,7 +50,7 @@ toc::[]
 
 |Windows
 |MSVC 或 MinGW-w64
-|可执行文件旁边的 `lua5x.dll`
+|可执行文件旁边的 `lua5x.dll`，或直接启动使用的静态 Lua 库
 
 |Android（Termux）
 |Termux 的 `clang`
@@ -83,7 +83,7 @@ WARNING: 用当前的 Visual Studio 或 UCRT 构建可以顺利编译，但在 X
 
 * ARM 和 ARM64 面向 Windows 8 及更高版本，因为在那之前还不存在 Windows on ARM。
 * 文件路径使用系统代码页。在 XP 上，纯 ASCII 路径是最安全的选择。
-* 单文件形式把程序和它的启动器绑在一起，杀死其中一个，另一个也会结束。在 XP 上，这里使用一个小型辅助进程，而不是 XP 所缺少的 Job Object 功能。
+* 解包单文件形式把程序和它的启动器绑在一起，杀死其中一个，另一个也会结束。在 XP 上，这里使用一个小型辅助进程，而不是 XP 所缺少的 Job Object 功能。
 
 [#platforms-unix]
 == Linux、macOS 及其他
@@ -141,6 +141,6 @@ xref:TROUBLESHOOTING.adoc#troubleshooting-native-dependencies[依赖告警]。
 * macOS 通用二进制、签名和公证
 * MSI、PKG、DEB、RPM 之类的安装包
 
-单文件只是一个会自行解包的可执行文件。它不是安装程序。
+单文件根据 `--file-mode` 直接启动或先解包。它不是安装程序。
 
 xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

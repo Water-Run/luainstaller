@@ -141,8 +141,7 @@ MSVC 也可以根据 DLL 的导出符号生成导入库。
 
 Windows XP::
 使用支持 XP 的编译器和 C 运行时。新版 Visual Studio 构建出的程序
-即使编译通过，在 XP 上也无法启动。从编译器自带的命令提示符运行，
-并使用 PowerShell 2 或更高版本。
+即使编译通过，在 XP 上也无法启动。从编译器自带的命令提示符运行。
 
 FreeBSD::
 不要加 `-ldl`；它只适用于 Linux。
@@ -151,6 +150,24 @@ Android（Termux）::
 在 Termux 里安装 `clang` 和 Lua。不要改动 `$PREFIX` 和
 `$TMPDIR`，也不要创建 `/tmp` 或 `/bin/sh`。
 ====
+
+[#troubleshooting-file-mode]
+== 无法使用直接启动
+
+`no-extract` 需要匹配的静态 Lua 库和纯 Lua 模块。
+Windows 的 DLL 导入 `.lib` 不是静态 Lua 库。请在 Lua 前缀下安装静态库，
+或使用 `--file-mode extract`。`auto` 在编译应用之前选择模式；
+应用编译错误仍会终止构建。
+
+[#troubleshooting-moonscript]
+== MoonScript 无法编译
+
+先确认 `PATH` 中能找到 `moonc`。用 `luarocks install moonscript` 安装后重试。
+编译器诊断指向原始 `.moon` 文件；后续 Lua 诊断使用编译后的 Lua 行号。
+重链接材料中同时保存生成的 Lua 与原始 MoonScript。
+
+如果 `.moon` 和 `.lua` 会生成同一个模块，请重命名其中一个。
+只有需要把输入按 Lua 读取时，才使用 `--no-moon-detect`（或 `luai -M`）。
 
 [#troubleshooting-native-dependencies]
 == 构建提示 C 模块的库依赖

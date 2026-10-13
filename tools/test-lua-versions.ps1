@@ -161,6 +161,9 @@ function Initialize-Msvc {
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'um\Windows.h') } |
         Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
     if ([string]::IsNullOrEmpty($sdkVersion)) { throw 'Windows SDK was not found' }
+    # LuaRocks selects its Windows/MSVC backend from VCINSTALLDIR. Merely
+    # placing cl.exe on PATH leaves its default backend set to MinGW.
+    $env:VCINSTALLDIR = Join-Path $installation 'VC'
     $env:PATH = "$binary;$env:SystemRoot\System32;$env:SystemRoot"
     $env:INCLUDE = @(
         (Join-Path $tools 'include'),
@@ -323,6 +326,7 @@ variables = {
    LUA_DIR = [[$root]], LUA_BINDIR = [[$root]],
    LUA_INCDIR = [[$root/include]], LUA_LIBDIR = [[$root]],
    LUA_LIBNAME = [[lua$compact]],
+   CFLAGS = [[/nologo /MT /O2]],
 }
 "@, (New-Object Text.UTF8Encoding($false)))
     return $config
@@ -369,7 +373,8 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         'luarocks_install.lua','standalone_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
         'onefile_lifecycle.lua','output_transaction.lua','lock_identity.lua',
         'build_cleanup.lua','process_bounds.lua','process_working_directory.lua','resource_bounds.lua','output_parents.lua',
-        'distribution_licenses.lua','reproducible_artifacts.lua','static_windows_image.lua','moonscript.lua','onefile_modes.lua')) {
+        'distribution_licenses.lua','reproducible_artifacts.lua','static_windows_image.lua','moonscript.lua',
+        'moon_failure_cleanup.lua','onefile_modes.lua')) {
         Invoke-Native $lua @((Join-Path 'test' $test))
     }
     Invoke-Native $LuaRocks @('lint','luainstaller-1.6.0-1.rockspec')
