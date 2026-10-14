@@ -41,6 +41,7 @@ LUA=${LUA:-lua}
 "$LUA" test/static_windows_image.lua
 "$LUA" test/moonscript.lua
 "$LUA" test/moon_boundaries.lua
+"$LUA" test/moon_case_aliases.lua
 "$LUA" test/moon_compiler_bounds.lua
 "$LUA" test/moon_failure_cleanup.lua
 "$LUA" test/moon_interruption.lua
@@ -126,6 +127,9 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/moon_boundaries.lua`
 |被引用排除项、传递发现、未使用排除项与首次读取后的源码变更
+
+|`test/moon_case_aliases.lua`
+|MoonScript 入口与 include 的大小写别名、不同文件冲突拒绝；真实 Windows 文件身份和明确的 POSIX 后端模型
 
 |`test/moon_compiler_bounds.lua`
 |真实子进程超时和输出配额、编译失败、原始路径诊断、预处理总量预算及已有输出保留

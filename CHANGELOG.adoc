@@ -15,7 +15,7 @@ truth for the exact contents of a published version.
 * Introduction video link in the READMEs: bilibili in the Chinese README,
   YouTube in the English one.
 
-== 1.6.0 - 2026-10-13
+== 1.6.0 - 2026-10-14
 
 === Added
 
@@ -36,6 +36,8 @@ truth for the exact contents of a published version.
 * MoonScript preprocessing preserves interruption errors and the CLI's SIGINT
   exit code. Errors after publication retain the committed output state even
   when diagnostic mapping or cleanup also fails.
+* Windows MoonScript entry and include paths accept ASCII case aliases for the same
+  file. Distinct files retain the existing compiled-target collision checks.
 
 == 1.5.3 - 2026-10-13
 

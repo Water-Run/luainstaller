@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local host = require("luainstaller.windows_host")
@@ -25,6 +25,15 @@ end
 
 local function valid(value)
     return type(value) == "string" and value ~= "" and not value:find("\0", 1, true)
+end
+
+function M.sameFile(first, second)
+    if not valid(first) or not valid(second) then return nil, "source paths are invalid" end
+    local first_ok, first_id = host.call("file_identity", first)
+    if not first_ok then return nil, first_id end
+    local second_ok, second_id = host.call("file_identity", second)
+    if not second_ok then return nil, second_id end
+    return first_id == second_id
 end
 
 local function operation(name, ...)

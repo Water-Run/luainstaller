@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 local input = assert(io.open("src/host/windows_host.c", "rb"))
@@ -26,7 +26,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-12
+    2026-10-13
 ]]
 
 ]=], "return [====[\n", source, "]====]\n"))

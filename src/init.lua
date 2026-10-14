@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-13
+    2026-10-14
 ]]
 
 
@@ -610,8 +610,10 @@ function M.bundle(opts)
     if moon_context then
         bundle_opts.before_publish = moon_context.verify
         bundle_opts.additional_distribution_files = {}
-        local used = {[path.absolute(normalized.entry)]=true}
-        for _, filename in ipairs(context.dependencies.scripts or {}) do used[path.absolute(filename)] = true end
+        local used = {[moon_context.preparedPath(normalized.entry)]=true}
+        for _, filename in ipairs(context.dependencies.scripts or {}) do
+            used[moon_context.preparedPath(filename)] = true
+        end
         for _, material in ipairs(moon_context.materials) do
             if used[material.prepared_path] then
                 bundle_opts.additional_distribution_files[#bundle_opts.additional_distribution_files + 1] = material

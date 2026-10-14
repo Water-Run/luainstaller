@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-13
 Updated:
-    2026-10-13
+    2026-10-14
 ]]
 
 local fs = require("luainstaller.fs")
@@ -99,7 +99,12 @@ function M.prepare(opts)
     if not workspace then return nil, failure("FilesystemError", "Cannot create MoonScript workspace", {cause=workspace_error}) end
     local source_root = path.dirname(original_entry)
     local lua_root, compiler_root = path.join(workspace, "source"), path.join(workspace, "compiler")
-    local context = {workspace=workspace, records={}, mapping={}, originals={}, materials={}}
+    local context = {workspace=workspace, records={}, mapping={}, originals={}, materials={},
+        prepared_paths={}, folded_mapping={}}
+    function context.preparedPath(filename)
+        filename = path.absolute(filename)
+        return context.prepared_paths[WINDOWS and filename:lower() or filename] or filename
+    end
     function context.cleanup()
         return fs.removeTree(workspace)
     end
@@ -124,24 +129,39 @@ function M.prepare(opts)
         local items, tree_error = fs.listTree(source_root)
         if not items then return failure("FilesystemError", "Cannot scan MoonScript project", {cause=tree_error}) end
         local candidates, seen_original, destinations = {}, {}, {}
+        local folded_originals, original_aliases = {}, {}
         local explicit_inputs, deferred = {}, {}
-        for _, filename in ipairs(opts.include) do explicit_inputs[path.absolute(filename)] = true end
+        for _, filename in ipairs(opts.include) do
+            local original = path.absolute(filename)
+            explicit_inputs[WINDOWS and original:lower() or original] = true
+        end
         local runtime = opts.depscan ~= false and opts.discovery_mode == "runtime"
         local manual = opts.depscan == false or opts.discovery_mode == "manual"
         local function add(original, relative, external)
             original = path.absolute(original)
             if seen_original[original] then return end
+            if WINDOWS and folded_originals[original:lower()] then
+                local previous = folded_originals[original:lower()]
+                local same, identity_error = fs.sameFile(previous, original)
+                if same == nil then
+                    error(failure("FilesystemError", "Cannot inspect MoonScript source identity",
+                        {source_path=original, cause=identity_error}), 0)
+                end
+                if same then original_aliases[original] = previous; return end
+            end
             local destination_name = isMoon(original) and relative:gsub("%.[mM][oO][oO][nN]$", ".lua") or relative
             local destination = path.join(external and path.join(workspace, "external") or lua_root, destination_name)
             local key = WINDOWS and destination:lower() or destination
             local is_deferred = isMoon(original) and original ~= original_entry and not runtime
-                and excluded(original, opts.exclude) and not explicit_inputs[original]
+                and excluded(original, opts.exclude)
+                and not explicit_inputs[WINDOWS and original:lower() or original]
             if not is_deferred and destinations[key] then
                 error(failure("MoonScriptCollisionError", "MoonScript and Lua inputs would overwrite the same compiled file",
                     {source_path=original, conflicting_path=destinations[key]}), 0)
             end
             if not is_deferred then destinations[key] = original end
             seen_original[original] = true
+            if WINDOWS then folded_originals[original:lower()] = folded_originals[original:lower()] or original end
             local candidate = {original=original, prepared=destination, relative=relative,
                 deferred=is_deferred}
             candidates[#candidates + 1] = candidate
@@ -224,6 +244,8 @@ function M.prepare(opts)
             assert(fs.writeFile(candidate.prepared, content))
             context.records[#context.records + 1] = candidate
             context.mapping[candidate.prepared] = candidate.original
+            context.prepared_paths[WINDOWS and candidate.prepared:lower() or candidate.prepared] = candidate.prepared
+            if WINDOWS then context.folded_mapping[candidate.prepared:lower()] = candidate.original end
             context.originals[candidate.original] = candidate.original_hash
             return {ok=true}
         end
@@ -283,9 +305,20 @@ function M.prepare(opts)
         normalized.moon_detect = false
         normalized.include, normalized.exclude = {}, {}
         for _, filename in ipairs(opts.include) do
-            local original = path.absolute(filename)
+            local requested = path.absolute(filename)
+            local original = requested
+            original = original_aliases[original] or original
             local mapped
             for prepared, source in pairs(context.mapping) do if source == original then mapped = prepared end end
+            if WINDOWS and mapped and requested ~= original then
+                local relative = path.relativeWithin(requested, source_root)
+                local alias = relative and path.join(lua_root, relative)
+                    or path.join(path.dirname(mapped), path.basename(requested))
+                alias = alias:gsub("%.[mM][oO][oO][nN]$", ".lua")
+                context.mapping[alias] = requested
+                context.originals[requested] = context.originals[original]
+                mapped = alias
+            end
             normalized.include[#normalized.include + 1] = mapped or original
         end
         for _, filename in ipairs(opts.exclude) do
@@ -312,9 +345,16 @@ end
 function M.remap(value, context, seen)
     if type(value) == "string" then
         if context.mapping[value] then return context.mapping[value] end
+        local searched = WINDOWS and value:lower() or value
+        if WINDOWS and context.folded_mapping and context.folded_mapping[searched] then
+            return context.folded_mapping[searched]
+        end
         for prepared, original in pairs(context.mapping) do
-            local start = value:find(prepared, 1, true)
-            if start then value = value:sub(1, start - 1) .. original .. value:sub(start + #prepared) end
+            local start = searched:find(WINDOWS and prepared:lower() or prepared, 1, true)
+            if start then
+                value = value:sub(1, start - 1) .. original .. value:sub(start + #prepared)
+                searched = WINDOWS and value:lower() or value
+            end
         end
         return value
     end

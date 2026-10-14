@@ -43,6 +43,7 @@ LUA=${LUA:-lua}
 "$LUA" test/static_windows_image.lua
 "$LUA" test/moonscript.lua
 "$LUA" test/moon_boundaries.lua
+"$LUA" test/moon_case_aliases.lua
 "$LUA" test/moon_compiler_bounds.lua
 "$LUA" test/moon_failure_cleanup.lua
 "$LUA" test/moon_interruption.lua
@@ -132,6 +133,10 @@ and compatibility with existing ownership records
 
 |`test/moon_boundaries.lua`
 |Required exclusions, transitive discovery, unrelated excluded sources and first-read source changes
+
+|`test/moon_case_aliases.lua`
+|Case aliases for MoonScript entries and includes, distinct-file collision refusal;
+native Windows file identity and an explicit POSIX backend model
 
 |`test/moon_compiler_bounds.lua`
 |Real subprocess deadlines and output quotas, failed compilation, original diagnostics,

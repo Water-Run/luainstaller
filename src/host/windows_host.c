@@ -1199,7 +1199,7 @@ static int dispatch(context *ctx)
     if (equals(op, "owner")) return owned_path(ctx, path);
     if (equals(op, "output_parents")) return parents(ctx, path, 2);
     if (equals(op, "type")) return path_type(ctx, path);
-    if (equals(op, "file_size")) {
+    if (equals(op, "file_size") || equals(op, "file_identity")) {
         if (!parents(ctx, path, 0)) return 0;
         handle = CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
             NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
@@ -1207,9 +1207,17 @@ static int dispatch(context *ctx)
         if (!track(ctx, handle)) return 0;
         if (!GetFileInformationByHandle(handle, &info)
             || (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
-            return fail(ctx, "file size requires a regular file");
+            return fail(ctx, "file inspection requires a regular file");
         value = ((ULONGLONG)info.nFileSizeHigh << 32) | info.nFileSizeLow;
         close_handle(ctx, handle);
+        if (equals(op, "file_identity")) {
+            char identity[64];
+            int length = _snprintf(identity, sizeof(identity), "%08lx:%08lx:%08lx",
+                (unsigned long)info.dwVolumeSerialNumber,
+                (unsigned long)info.nFileIndexHigh, (unsigned long)info.nFileIndexLow);
+            if (length < 0 || (size_t)length >= sizeof(identity)) return fail(ctx, "file identity exceeds buffer");
+            return text(ctx, identity);
+        }
         return number(ctx, value);
     }
     if (equals(op, "read")) {
