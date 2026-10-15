@@ -9,6 +9,8 @@ native_onefile
 headerless_build
 standalone_install
 resource_bounds
+process_bounds
+process_working_directory
 onefile_modes
 distribution_licenses
 output_transaction

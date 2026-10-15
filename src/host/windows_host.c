@@ -1,8 +1,8 @@
-/* Native Windows host operations for official Lua 5.1--5.5.
+/* Native Windows host operations for Lua 5.1--5.5 and LuaJIT 2.1.
  * Author: WaterRun
  * File: windows_host.c
  * Date: 2026-10-06
- * Updated: 2026-10-13
+ * Updated: 2026-10-15
  * Keep src/windows_host_source.lua synchronized with this file.
  * Uses Windows XP APIs only; no Lua headers or import library are needed.
  */
@@ -753,6 +753,10 @@ static int append_wide(context *ctx, buffer *out, const wchar_t *value, size_t c
 static int quote_argument(context *ctx, buffer *out, const wchar_t *value)
 {
     size_t slashes = 0, index;
+    /* Match ordinary Windows argv quoting, including unquoted compiler
+     * switches. MSVC treats a quoted "/?" as a filename wildcard. */
+    if (*value && !wcspbrk(value, L" \t\r\n\v\f\""))
+        return append_wide(ctx, out, value, wcslen(value));
     if (!append_wide(ctx, out, L"\"", 1)) return 0;
     for (index = 0; value[index]; ++index) {
         if (value[index] == L'\\') { ++slashes; continue; }
