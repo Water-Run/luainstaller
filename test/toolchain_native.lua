@@ -28,7 +28,12 @@ local config, config_err = toolchain.resolve({ lua_version = compat.luaVersion()
 local diagnostic = {}
 if config_err and config_err.error then
     diagnostic[#diagnostic + 1] = config_err.error.message or "toolchain error"
-    diagnostic[#diagnostic + 1] = tostring(config_err.error.cause or "")
+    diagnostic[#diagnostic + 1] = tostring(config_err.error.output or config_err.error.cause or "")
+    if config_err.error.command_status then
+        diagnostic[#diagnostic + 1] = "compiler probe status: "
+            .. tostring(config_err.error.command_status.code) .. " / "
+            .. tostring(config_err.error.command_status.reason)
+    end
     for _, failure in ipairs(config_err.error.failures or {}) do
         diagnostic[#diagnostic + 1] = table.concat({
             tostring(failure.message or "candidate failed"),

@@ -247,8 +247,8 @@ M.compilerFamily = compilerFamily
 
 local function commandAvailable(command, family, environment)
     local argument = family == "msvc" and "/?" or "--version"
-    local ok = process.outputCommand(command, { argument }, environment)
-    return ok == true
+    local ok, output, status = process.outputCommand(command, { argument }, environment)
+    return ok == true, output, status
 end
 
 local function regularFile(candidate)
@@ -410,11 +410,14 @@ local function discoverCompiler(opts, host)
     local configured = opts.cc or os.getenv("LUAI_CC") or os.getenv("CC")
     if configured and configured ~= "" then
         local family = compilerFamily(configured)
-        if commandAvailable(configured, family) then
+        local available, output, status = commandAvailable(configured, family)
+        if available then
             return compilerFromCommand(configured, family, {})
         end
         return nil, makeError("ToolchainError", "The configured native C compiler is unavailable", {
             compiler = configured,
+            output = output,
+            command_status = status,
         })
     end
     if host.os == "windows" then
