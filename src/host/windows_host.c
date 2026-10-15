@@ -750,12 +750,12 @@ static int append_wide(context *ctx, buffer *out, const wchar_t *value, size_t c
     return append(ctx, out, value, count * sizeof(wchar_t));
 }
 
-static int quote_argument(context *ctx, buffer *out, const wchar_t *value)
+static int quote_argument(context *ctx, buffer *out, const wchar_t *value, int force_quotes)
 {
     size_t slashes = 0, index;
     /* Match ordinary Windows argv quoting, including unquoted compiler
      * switches. MSVC treats a quoted "/?" as a filename wildcard. */
-    if (*value && !wcspbrk(value, L" \t\r\n\v\f\""))
+    if (!force_quotes && *value && !wcspbrk(value, L" \t\r\n\v\f\""))
         return append_wide(ctx, out, value, wcslen(value));
     if (!append_wide(ctx, out, L"\"", 1)) return 0;
     for (index = 0; value[index]; ++index) {
@@ -1003,7 +1003,7 @@ static int execute(context *ctx)
         directory = argument(ctx, 6 + count + env_count * 2);
         if (!directory || !*directory) return fail(ctx, "invalid command directory");
     }
-    if (!quote_argument(ctx, &command, program)) return 0;
+    if (!quote_argument(ctx, &command, program, 1)) return 0;
     {
         const wchar_t *base = program, *position;
         for (position = program; *position; ++position) if (*position == L'\\' || *position == L'/') base = position + 1;
@@ -1021,7 +1021,7 @@ static int execute(context *ctx)
         } else if (command_shell && !shell_body && value[0] == L'/'
             && wcsspn(value, L"/:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") == wcslen(value)) {
             if (!append_wide(ctx, &command, value, wcslen(value))) return 0;
-        } else if (!quote_argument(ctx, &command, value)) return 0;
+        } else if (!quote_argument(ctx, &command, value, 0)) return 0;
         if (command_shell && (_wcsicmp(value, L"/c") == 0 || _wcsicmp(value, L"/k") == 0)) shell_body = 1;
     }
     if (command.size / sizeof(wchar_t) >= 32767 || !append_wide(ctx, &command, L"", 1)) return fail(ctx, "Windows command line is too long");

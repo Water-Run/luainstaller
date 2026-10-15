@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -187,11 +187,13 @@ for _, name in ipairs(names) do
     assert(fs.rename(relocated, destination))
     relocated = destination
     local executable = path.join(relocated, path.basename(built.executable))
-    local moved_ok, moved_output = process.outputCommand(
+    local moved_ok, moved_output, moved_status = process.outputCommand(
         executable, { "native-relocated" }, { LUA_PATH = "", LUA_CPATH = "" }
     )
     assert(moved_ok and moved_output:find("native-probe-ok native-relocated", 1, true),
-        "native module path was interpreted as a template: " .. tostring(moved_output))
+        "native module path was interpreted as a template: " .. tostring(moved_output)
+            .. "\nprocess status: " .. tostring(moved_status and moved_status.code)
+            .. " / " .. tostring(moved_status and moved_status.reason))
 end
 assert(fs.removeFile(path.join(relocated, ".luai/native/luai_native_probe." .. native_extension)))
 local missing_ok, missing_output = process.outputCommand(
