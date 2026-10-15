@@ -38,6 +38,9 @@ if config_err and config_err.error then
 end
 assert(config, table.concat(diagnostic, "\n"))
 assert(type(config.cc) == "string" and config.cc ~= "")
+if config.host.os == "windows" and os.getenv("LUAI_JIT_CONFIGURATION") then
+    assert(config.compiler_family == "msvc", "LuaJIT Windows gate must exercise MSVC")
+end
 assert(config.include_dir == nil or type(config.include_dir) == "string")
 assert(config.lua_version.abi == compat.luaVersion().abi)
 local supported_link_modes = {}

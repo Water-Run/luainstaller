@@ -42,7 +42,11 @@ function Initialize-Msvc {
         Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
     if (-not $sdkVersion) { throw 'Windows SDK was not found' }
     $env:VCINSTALLDIR = Join-Path $installation 'VC'
-    $env:PATH = (Join-Path $tools 'bin\Hostx64\x64') + ';' + $env:PATH
+    $binary = Join-Path $tools 'bin\Hostx64\x64'
+    $env:LUAI_CC = Join-Path $binary 'cl.exe'
+    $env:CC = $env:LUAI_CC
+    $env:PATH = @($binary, (Join-Path $sdk "bin\$sdkVersion\x64"),
+        "$env:SystemRoot\System32", $env:SystemRoot) -join ';'
     $env:INCLUDE = @((Join-Path $tools 'include'), (Join-Path $sdk "Include\$sdkVersion\ucrt"),
         (Join-Path $sdk "Include\$sdkVersion\shared"), (Join-Path $sdk "Include\$sdkVersion\um")) -join ';'
     $env:LIB = @((Join-Path $tools 'lib\x64'), (Join-Path $sdk "Lib\$sdkVersion\ucrt\x64"),
@@ -60,6 +64,8 @@ try {
     }
     Invoke-Logged 'tar.exe' @('-xzf', $archive, '-C', $WorkRoot)
     Initialize-Msvc
+    "Compiler: $env:LUAI_CC" | Out-File -FilePath $Log -Append -Encoding utf8
+    Invoke-Logged $env:LUAI_CC @('/?')
     $source = Join-Path $WorkRoot "LuaJIT-$($Pin.commit)\src"
     $prefix = Join-Path $WorkRoot 'prefix'
     foreach ($directory in @($prefix, "$prefix\lib", "$prefix\include", "$prefix\lua\jit")) {
