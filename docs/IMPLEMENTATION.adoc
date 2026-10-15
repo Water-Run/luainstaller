@@ -156,7 +156,8 @@ and generated launchers. These probes run on the native host.
 
 MSVC executables delay-load the Lua DLL and load its adjacent copy by a full
 Windows path before creating a state. The generated `lua_min.h` retains the
-loader and linker directives for relinking. Native C modules keep ordinary imports.
+loader; the compiler driver supplies `/DELAYLOAD` and `/DELAY:NOBIND`.
+Native C modules keep ordinary imports.
 
 Explicit `ffi_libraries` join the native file inventory and source snapshots.
 The bootstrap binds their logical names to copied paths while the application

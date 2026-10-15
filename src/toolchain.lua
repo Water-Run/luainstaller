@@ -139,8 +139,6 @@ local WINDOWS_RUNTIME_PREPARE = [=[
 #include <stdio.h>
 #include <string.h>
 #pragma comment(lib, "delayimp.lib")
-#pragma comment(linker, @DELAY_OPTION@)
-#pragma comment(linker, "/delay:nobind")
 static int luai_prepare_runtime(void)
 {
     wchar_t filename[32768];
@@ -1041,6 +1039,14 @@ local function appendMsvcReproducibleCompile(arguments, config)
     if config.supports_brepro then arguments[#arguments + 1] = "/Brepro" end
 end
 
+local function delayedRuntimeName(config)
+    if config.host and config.host.os == "windows" and config.compiler_family == "msvc"
+        and config.runtime_path and config.link_mode ~= "static"
+        and not (config.profile and config.profile.require_static) then
+        return config.runtime_name or path.basename(config.runtime_path)
+    end
+end
+
 function M.writeLuaHeader(config, directory)
     local lua_version, version_err = luaVersionInfo(config.lua_version)
     if not lua_version then return version_err end
@@ -1054,13 +1060,10 @@ function M.writeLuaHeader(config, directory)
     end
     local content = LUA_MIN_HEADER:gsub("@LUA_ABI@", tostring(lua_version.num))
     local preparation = "#define LUAI_PREPARE_RUNTIME() ((void)0)\n"
-    if config.host and config.host.os == "windows" and config.compiler_family == "msvc"
-        and config.runtime_path and not (config.profile and config.profile.require_static) then
-        local dll_name = config.runtime_name or path.basename(config.runtime_path)
+    local dll_name = delayedRuntimeName(config)
+    if dll_name then
         preparation = WINDOWS_RUNTIME_PREPARE:gsub("@LUA_DLL@", function()
             return cStringLiteral(dll_name)
-        end):gsub("@DELAY_OPTION@", function()
-            return cStringLiteral("/delayload:" .. dll_name)
         end)
     end
     content = content:gsub("@RUNTIME_PREPARE@", function() return preparation end)
@@ -1140,6 +1143,12 @@ function M.compile(config, source_path, output_path, opts)
             arguments[#arguments + 1] = import:gsub("/", "\\")
         end
         arguments[#arguments + 1] = "/link"
+        local delayed = delayedRuntimeName(config)
+        if delayed then
+            arguments[#arguments + 1] = "delayimp.lib"
+            arguments[#arguments + 1] = "/DELAYLOAD:" .. delayed
+            arguments[#arguments + 1] = "/DELAY:NOBIND"
+        end
         arguments[#arguments + 1] = "/INCREMENTAL:NO"
         appendMsvcReproducibleLink(arguments, config)
         local machine = windowsMachine(config.profile.target_arch)

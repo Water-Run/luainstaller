@@ -54,6 +54,10 @@ and a fresh luainstaller build.
 . Compile `launcher.c` as portable C99, link the selected Lua library
   and its platform dependencies, and preserve the loader search path
   used by the target profile.
++
+For shared Lua with MSVC, also link `delayimp.lib` and pass
+`/DELAYLOAD:<DLL name> /DELAY:NOBIND`. Use the runtime DLL name recorded
+in `../manifest.lua` and retain the generated `lua_min.h`.
 . Replace the inner executable in an onedir tree, or rebuild the onefile
   payload from that tree with the matching luainstaller source revision.
 . Run the application with `LUA_PATH`, `LUA_CPATH`, and every `LUA_INIT*`

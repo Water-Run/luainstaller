@@ -34,6 +34,10 @@ Lua 声明。重新生成 `payload.inc` 后，用经过验证的静态 Lua 库�
   LuaJIT 还需要匹配版本、GC64 和 Lua 5.2 兼容设置。
 . 使用面向目标操作系统和体系结构的原生编译器。交叉编译不在受支持的原生重链接配置之内。
 . 将 `launcher.c` 按可移植 C99 编译，链接选定的 Lua 库及其平台依赖，并保留目标配置使用的加载器搜索路径。
++
+MSVC 动态链接 Lua 时，还需链接 `delayimp.lib` 并传入
+`/DELAYLOAD:<DLL name> /DELAY:NOBIND`。DLL 名称使用 `../manifest.lua`
+记录的运行库名称，并保留生成的 `lua_min.h`。
 . 替换 onedir 目录树中的内部可执行文件，或用匹配的 luainstaller 源码修订版本从该目录树重建单文件 payload。
 . 在清空 `LUA_PATH`、`LUA_CPATH` 和所有 `LUA_INIT*` 变量的情况下运行应用，然后重复其原生模块测试。
 
