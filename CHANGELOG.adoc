@@ -20,6 +20,9 @@ truth for the exact contents of a published version.
 * Dependency limits outside the portable integer range return
   `InvalidOptionsError` before discovery, instead of failing while generating
   a runtime trace script.
+* Standalone installations copy the LuaJIT license referenced by their notices.
+* Logs with equal timestamps retain write order. Default descending queries
+  return the newest record before applying `--limit`.
 * Native CI runs the source-normalization and dependency-limit regressions on
   every official Lua ABI and LuaJIT configuration.
 

@@ -49,6 +49,7 @@ LUA=${LUA:-lua}
 "$LUA" test/onefile_modes.lua
 "$LUA" test/resource_bounds.lua
 "$LUA" test/dependency_limits.lua
+"$LUA" test/logger_order.lua
 "$LUA" test/source_normalization.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
@@ -153,6 +154,9 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/source_normalization.lua`
 |混合换行的 shebang 在分析、运行时发现、两份运行时实现及三种产物模式中保留代码和行号
+
+|`test/logger_order.lua`
+|相同时间戳保留写入顺序，覆盖筛选、数量限制和两种 CLI
 
 |`test/output_parents.lua`
 |两个宿主的链接祖先拒绝、POSIX 共享写入目录及用户文件保留

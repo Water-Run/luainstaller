@@ -8,7 +8,7 @@
 
 == 当前结论
 
-已确认三类正确性与配额问题，并加入先失败、后通过的行为回归。
+已确认五类正确性、配额与交付问题，并加入先失败、后通过的行为回归。
 相关修复已在本地官方 Lua 和 LuaJIT 下通过专项检查；完整本地回归和发布门禁仍在进行。
 最终发布提交、原生作业和公开附件证据将在发布说明中记录。
 
@@ -38,7 +38,7 @@ Windows 改动，再沿源码输入、发现、清单、生成、加载和发布
 |`toolchain_native`、`headerless_build`、`native_bundle`、`native_onefile`
 |进程与输出
 |时限、输出预算、工作目录、信号、子进程、锁和失败后的清理
-|`process_bounds`、`process_working_directory`、`build_interruption`、`build_cleanup`
+|`process_bounds`、`process_working_directory`、`build_interruption`、`build_cleanup`、`logger_order`
 |文件与发布事务
 |祖先目录、重解析点、输出清单、暂存、恢复与用户文件保护
 |`output_parents`、`output_transaction`、`lock_identity`、`onefile_lifecycle`
@@ -103,6 +103,29 @@ runtime 却在生成 trace 脚本时因 `%d` 无法表示该值而返回内部 `
 超限请求在发现前返回带 `option = "max_deps"` 的 `InvalidOptionsError`。
 回归覆盖最大可移植值、紧邻超限值、极大有限数值、四个操作、三种发现模式和两种 CLI。
 
+== V71-04：独立安装遗漏 notices 引用的许可证
+
+优先级：P2，交付材料缺失。
+
+1.7.0 源码包包含 `LICENSES/LuaJIT-MIT.txt`，`THIRD_PARTY_NOTICES.md` 也引用它；
+但 `tools/install.lua` 的固定复制清单没有加入该文件。官方 Lua 和 LuaJIT 两种
+独立安装树均复现缺失，而嵌入式分发材料中的文本已存在。
+
+修复补齐安装清单。安装回归逐份比较主许可证、GPL、Lua、LuaJIT 和 notices，
+避免只检查主许可证导致新增材料漏装。
+
+== V71-05：同时间戳的最新日志查询返回旧记录
+
+优先级：P2，诊断顺序错误。
+
+日志时间戳精度为秒，同一秒内写入两条记录后，默认倒序加 `limit = 1`
+可能返回第一条。排序比较器只看时间戳；Lua 的表排序不保证相等元素的顺序。
+独立私有日志目录中固定时间戳后，已复现最新记录丢出查询结果。
+
+现在以时间戳为主键，时间相同时按原始写入位置排序，再应用数量限制。
+正序和倒序分别保留对应的写入顺序；筛选不改变相对顺序。
+回归覆盖同秒写入、不同时间戳、level/source 筛选、limit 与两套日志命令。
+
 == C71-01：统一原生依赖计数
 
 基线指南把 `max_deps` 描述为 Lua 模块数量，因此不将未统计 C 模块单独宣称为
@@ -124,7 +147,7 @@ runtime 却在生成 trace 脚本时因 `%d` 无法表示该值而返回内部 `
 
 == 发布验收要求
 
-确认缺陷有回归并关闭；39 个官方 Lua 本地套件和 LuaJIT 专项完成；
+确认缺陷有回归并关闭；40 个官方 Lua 本地套件和 LuaJIT 专项完成；
 同一发布提交通过官方 Lua 13 个作业和 LuaJIT 5 个作业。
 逐份核验完整矩阵日志，验证源码包与 source rock 的独立安装、1.7.0 升级，
 公开发布后下载全部五个附件并核对摘要。

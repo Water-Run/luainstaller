@@ -51,6 +51,7 @@ LUA=${LUA:-lua}
 "$LUA" test/onefile_modes.lua
 "$LUA" test/resource_bounds.lua
 "$LUA" test/dependency_limits.lua
+"$LUA" test/logger_order.lua
 "$LUA" test/source_normalization.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
@@ -164,6 +165,9 @@ excluded inputs, exact limits, public API errors and both CLIs
 |`test/source_normalization.lua`
 |Mixed-newline shebangs preserve code and line numbers in analysis, runtime
 discovery, both runtime implementations and all three artifact modes
+
+|`test/logger_order.lua`
+|Equal timestamps retain publication order, including filtering, limits and both CLIs
 
 |`test/output_parents.lua`
 |Linked ancestors on both hosts, POSIX shared writers and preservation of user files

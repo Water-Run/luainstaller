@@ -100,6 +100,7 @@ local function install()
     for _, relative in ipairs({
         "luainstaller.lua", "bin/luai.lua", "bin/luainstaller.lua",
         "LICENSE", "LICENSES/GPL-3.0-or-later.txt", "LICENSES/Lua-MIT.txt",
+        "LICENSES/LuaJIT-MIT.txt",
         "THIRD_PARTY_NOTICES.md", "README.adoc", "README.zh-CN.adoc",
         "CHANGELOG.adoc", "luainstaller.1",
     }) do copy(relative) end

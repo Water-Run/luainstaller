@@ -8,7 +8,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local fs = require("luainstaller.fs")
@@ -882,7 +882,13 @@ function M.getLogs(opts)
         end
     end
 
+    local positions = {}
+    for index, entry in ipairs(logs) do positions[entry] = index end
     table.sort(logs, function(left, right)
+        if left.timestamp == right.timestamp then
+            if opts.descending == false then return positions[left] < positions[right] end
+            return positions[left] > positions[right]
+        end
         if opts.descending == false then
             return (left.timestamp or "") < (right.timestamp or "")
         end

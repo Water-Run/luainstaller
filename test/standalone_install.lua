@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -46,7 +46,12 @@ end
 
 local installer = path.absolute("tools/install.lua")
 checked(lua, { installer, "--prefix", prefix, "--lua", lua })
-assert(fs.readFile(path.join(prefix, "LICENSE")) == fs.readFile("LICENSE"))
+for _, material in ipairs({"LICENSE", "LICENSES/GPL-3.0-or-later.txt",
+    "LICENSES/Lua-MIT.txt", "LICENSES/LuaJIT-MIT.txt", "THIRD_PARTY_NOTICES.md"}) do
+    local expected = assert(fs.readFile(material))
+    assert(fs.readFile(path.join(prefix, material)) == expected,
+        "standalone distribution material missing or changed: " .. path.join(prefix, material))
+end
 local installed, output = process.outputCommand(lua, { installer, "--prefix", prefix }, environment)
 assert(not installed and output:find("destination already exists", 1, true), output)
 assert(fs.writeFile(path.join(prefix, "keep.txt"), "preserve me\n"))

@@ -617,6 +617,7 @@ run_version() {
     "$lua" test/onefile_modes.lua
     "$lua" test/resource_bounds.lua
     "$lua" test/dependency_limits.lua
+    "$lua" test/logger_order.lua
     "$lua" test/source_normalization.lua
     "$lua" test/output_parents.lua
     "$lua" test/build_cleanup.lua

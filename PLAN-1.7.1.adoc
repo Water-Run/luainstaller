@@ -60,6 +60,12 @@ xref:AUDIT-1.7.1.adoc[1.7.1 审计记录]。
 |V71-03
 |过大的有限整数被接受为依赖预算，却在生成运行时 trace 时触发格式化错误。
 |`test/dependency_limits.lua`：超出范围、最大可移植边界、全部操作与两种 CLI
+|V71-04
+|独立安装遗漏 `LICENSES/LuaJIT-MIT.txt`，notices 引用的文件不存在。
+|`test/standalone_install.lua`：安装后逐份比对许可证和 notices 内容
+|V71-05
+|日志时间戳精度为秒；同秒记录的排序没有次序保证，最新一条查询可能返回旧记录。
+|`test/logger_order.lua`：同时间戳、不同时间戳、筛选、数量限制和两种 CLI
 |C71-01
 |统一 Lua、原生和 FFI 文件的依赖计数，保留 FFI 名称数量限制。
 原指南仅说明 Lua 模块；此次收紧原生文件计数并同步说明。

@@ -10,6 +10,7 @@ headerless_build
 standalone_install
 resource_bounds
 dependency_limits
+logger_order
 source_normalization
 process_bounds
 process_working_directory
