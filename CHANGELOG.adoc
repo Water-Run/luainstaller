@@ -44,14 +44,6 @@ truth for the exact contents of a published version.
 
 == 1.6.1 - 2026-10-15
 
-=== Added
-
-* Complete Simplified Chinese documentation: `README.zh-CN.adoc` plus
-  `docs/zh-CN/` translations of every guide, with language switch links in
-  both READMEs.
-* Introduction video link in the READMEs: bilibili in the Chinese README,
-  YouTube in the English one.
-
 === Fixed
 
 * Oversized files supplied with `--include` return a structured resource-limit
@@ -172,6 +164,10 @@ metadata aren't required.
   installation guidance. Windows reports that DLL dependencies weren't
   checked. Diagnostics are also available in operation logs and bundle
   results; they don't stop a build.
+* Simplified Chinese documentation: `README.zh-CN.adoc` and `docs/zh-CN/`
+  translations of every guide, with language switch links in both READMEs.
+* Introduction video links: bilibili in the Chinese README and YouTube in
+  the English one.
 
 === Fixed
 

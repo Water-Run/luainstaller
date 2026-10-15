@@ -50,6 +50,9 @@ LuaRocks commands, and execution on a target whose `PATH` contains no Lua.
 `support/`::
 Shared fixture, process, loader, and assertion helpers for the contract suites.
 
+xref:REALWORLD_CASES.txt[Real-world cases]::
+Commands for packaging external projects and running the benchmark script.
+
 Run the local contract suites from the repository root with the Lua interpreter
 being tested (shown as `$LUA` below):
 

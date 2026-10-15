@@ -1,0 +1,19 @@
+= Development
+:sectanchors:
+
+This directory holds active plans and audit records. Completed plans are removed;
+their history remains in Git. User guides are in xref:../README.adoc#documentation-index[the documentation index].
+
+[cols="1,3",options="header"]
+|===
+|Document |Purpose
+|xref:PLAN.adoc[Roadmap] |Scope and order of upcoming releases
+|xref:PLAN-1.8.0.adoc[1.8.0 plan] |The compact and modern command interfaces
+|xref:PLAN-1.9.0.adoc[1.9.0 draft] |o1/o2/o3 strategies for generated programs' runtime efficiency
+|xref:AUDIT-1.7.1.adoc[1.7.1 audit] |Findings, fixes and release verification
+|xref:SECURITY-AUDIT.adoc[1.5.x–1.6.0 audit] |Earlier fixes and deployment boundaries
+|===
+
+Follow xref:../CODING-STYLE.txt[the coding style] and
+xref:../docs/TESTING.adoc[the test guide]. Additional benchmark commands are in
+xref:../test/REALWORLD_CASES.txt[the real-world cases].

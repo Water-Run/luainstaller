@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-15
+    2026-10-16
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -638,7 +638,7 @@ local function check_documentation_contract()
     assert_contains(portable_host, "FreeBSD")
 
     local benchmark = read_file("tools/benchmark-real-world.sh")
-    local realworld_cases = read_file("REALWORLD_TEST_CASES.txt")
+    local realworld_cases = read_file("test/REALWORLD_CASES.txt")
     assert_not_contains(testing, "--require-engine")
     assert_not_contains(benchmark, "--require-engine")
     assert_not_contains(realworld_cases, "--require-engine")

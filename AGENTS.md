@@ -37,6 +37,24 @@ User docs (`README.adoc`, `docs/*.adoc` except `IMPLEMENTATION` and
   the English README the YouTube one. The bundle-embedded RELINKING copy
   is the English `docs/RELINKING.adoc`; the translation is repo-only.
 
+# Repository layout
+
+- Keep active development plans and audit records in `dev/`. Remove completed
+  PLAN documents; Git history preserves them. The roadmap describes future work.
+- Keep test instructions and fixtures in `test/`, tools in `tools/`, and user
+  guides in `docs/`. Keep generated output and local session files out of commits.
+
+# Release notes
+
+- Write for users. Feature releases use `Major changes` and `Minor changes`;
+  patch releases use `Changes`. Add `Notes` only for useful upgrade, usage or
+  compatibility information. Use concise bullet points and keep the existing
+  English release-note language.
+- Describe what changed for the user. Omit development diaries, audit progress,
+  CI results, commit hashes, file counts, publishing procedures and future plans.
+- Check changes against the release tag; do not attribute later features to an
+  older version. Keep verification evidence in audit records and task logs.
+
 # Release checklist
 
 - Bump the version in `src/`, `luainstaller.1`, the rockspec file name and
@@ -46,8 +64,8 @@ User docs (`README.adoc`, `docs/*.adoc` except `IMPLEMENTATION` and
   matrices, the native Linux x86 job, and the separate pinned LuaJIT Linux
   and Windows/MSVC matrix, on the release commit.
 - Physical-host runs (ARM64, macOS, FreeBSD, Termux, legacy Windows) are
-  supplemental. Record them in the release notes, not in `docs/`. A host
-  missing a compiler or headers is a blocked test, not a pass.
+  supplemental. Record them in audit records, not in user guides or release
+  notes. A host missing a compiler or headers is a blocked test, not a pass.
 - Don't broaden platform claims in the docs from simulated or
   cross-compiled results alone.
 - `docs/RELINKING.adoc` is also embedded in `src/distribution_files.lua`

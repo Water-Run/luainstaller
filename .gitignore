@@ -1,66 +1,41 @@
-# =========================
-# Lua / LuaRocks
-# =========================
-
-# LuaRocks local tree
+# Lua and LuaRocks
 .luarocks/
 .rocks/
 luarocks.lock
-
-# Compiled Lua bytecode
+*.rock
 *.luac
 
-# =========================
-# Build / Dist
-# =========================
-
+# Build output
 build/
 dist/
 out/
 target/
 
-# Agent planning artifacts
+# Local work and temporary files
+.worktrees/
+.mimocode/
+.tmp/
+.cache/
+*.log
+*.tmp
+*.cache
+*-export-session_*.md
+.gitignore.bak
 doc/superpower/
 doc/superpowers/
 docs/superpower/
 docs/superpowers/
 
-# If you ship prebuilt binaries selectively, keep them explicit
-# e.g. do NOT ignore /bin globally unless you are sure
-# bin/
-
-# =========================
-# Logs / Temp
-# =========================
-
-*.log
-*.tmp
-*.cache
-.tmp/
-.cache/
-
-# =========================
-# Editor / IDE
-# =========================
-
+# Editors and operating systems
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# =========================
-# OS / Environment
-# =========================
-
 .DS_Store
 Thumbs.db
 
-# =========================
-# Safety Net (IMPORTANT)
-# Prevent accidentally tracking HOME / system files
-# =========================
-
+# Personal configuration and credentials
 .ServiceHub/
 .airbyte/
 .android/
@@ -78,12 +53,3 @@ Thumbs.db
 .docker/
 .local/
 .ssh/
-.cache/
-
-# =========================
-# Git
-# =========================
-
-.git/
-.worktrees/
-.gitignore.bak

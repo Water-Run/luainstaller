@@ -29,8 +29,7 @@ lua test/savinglua/main.lua --db "$db" delete users:ada
 ----
 
 `main.lua` is the entry. `src/savinglua/store.lua` initializes SQLite and owns
-put/get/scan/delete operations. `bench/` and `csrc/` are reserved for future
-sample-specific experiments and are not current runtime dependencies.
+put/get/scan/delete operations.
 
 == Package and verify
 
