@@ -45,7 +45,7 @@ local moon_contexts = setmetatable({}, {__mode="k"})
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.7.0"
+M.VERSION = "1.7.1"
 
 --@description: Package author name
 --@const: AUTHOR
@@ -195,8 +195,10 @@ local function validateMaxDeps(opts)
     end
     if type(value) ~= "number" or value ~= value
         or value == math.huge or value == -math.huge
-        or value < 1 or value ~= math.floor(value) then
-        return invalidOption("max_deps", "max_deps must be a finite positive integer")
+        or value < 1 or value > 2147483583 or value ~= math.floor(value) then
+        -- Runtime tracing reserves 64 extra records. Keep its generated integer
+        -- literal within the signed 32-bit formatter range used by Lua 5.1.
+        return invalidOption("max_deps", "max_deps must be a finite positive integer at most 2147483583")
     end
     return nil
 end

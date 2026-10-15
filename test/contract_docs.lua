@@ -602,6 +602,7 @@ local function check_documentation_contract()
     local usage = read_file("docs/USAGE.adoc")
     assert_contains(usage, "DynamicRequireError")
     assert_contains(usage, "--max-deps")
+    assert_contains(usage, "limit the combined Lua and native dependency files")
     assert_contains(usage, "LUA_CPATH")
     assert_contains(usage, "Build results include a `warnings` list")
     assert_contains(usage, "luainstaller.VERSION")
@@ -712,7 +713,7 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.7.0-1.rockspec")
+    local rockspec = read_file("luainstaller-1.7.1-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -725,7 +726,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.7.0-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.7.1-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

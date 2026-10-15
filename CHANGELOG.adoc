@@ -7,6 +7,24 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+== 1.7.1 - 2026-10-15
+
+=== Fixed
+
+* Shebang removal stops at the first line ending. Mixed LF/CRLF sources retain
+  their first statements and line numbers in analysis, runtime discovery and
+  packaged programs.
+* Explicit Lua inputs obey `max_deps` in every discovery mode. Selected Lua,
+  native and FFI dependency files now use one combined count; duplicate paths
+  and the entry do not consume another slot. FFI names also remain bounded.
+* Dependency limits outside the portable integer range return
+  `InvalidOptionsError` before discovery, instead of failing while generating
+  a runtime trace script.
+* Native CI runs the source-normalization and dependency-limit regressions on
+  every official Lua ABI and LuaJIT configuration.
+
+== 1.7.0 - 2026-10-15
+
 === Added
 
 * Independent LuaJIT 2.1 packaging, including runtime/build identity checks,

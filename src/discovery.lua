@@ -222,6 +222,29 @@ local function applyManualInputs(discovered, opts)
     local trace = {}
     local source_hashes = {}
     local excludes = opts.exclude or {}
+    local counted = { [normalizePath(absolutePath(opts.entry))] = true }
+    local dependency_count = 0
+    local limit = opts.max_deps or DEFAULT_MAX_DEPS
+
+    local function countDependency(source_path)
+        local canonical = normalizePath(absolutePath(source_path))
+        if counted[canonical] then return true end
+        local prospective = dependency_count + 1
+        if prospective > limit then
+            return nil, makeError("DependencyLimitExceededError", string.format(
+                "Dependency count (%d) exceeds limit (%d)", prospective, limit), {
+                current_count = prospective, limit = limit,
+            })
+        end
+        counted[canonical] = true
+        dependency_count = prospective
+        return true
+    end
+
+    for _, filename in pairs(opts.ffi_libraries or {}) do
+        local added, count_err = countDependency(filename)
+        if not added then return nil, count_err end
+    end
 
     for source_path, digest in pairs(discovered.source_hashes or {}) do
         source_hashes[normalizePath(absolutePath(source_path))] = digest
@@ -252,12 +275,16 @@ local function applyManualInputs(discovered, opts)
 
     for _, path in ipairs(discovered.scripts or {}) do
         if not isExcluded(path, excludes) and not listContains(scripts, path) then
+            local added, count_err = countDependency(path)
+            if not added then return nil, count_err end
             scripts[#scripts + 1] = path
         end
     end
 
     for _, path in ipairs(discovered.libraries or {}) do
         if not isExcluded(path, excludes) and not listContains(libraries, path) then
+            local added, count_err = countDependency(path)
+            if not added then return nil, count_err end
             libraries[#libraries + 1] = path
         end
     end
@@ -272,6 +299,10 @@ local function applyManualInputs(discovered, opts)
                 option = "include",
                 script_path = normalized,
             })
+        end
+        if not isExcluded(normalized, excludes) then
+            local added, count_err = countDependency(normalized)
+            if not added then return nil, count_err end
         end
         local content, read_err, state = fs.readRegularFile(normalized, opts.max_source_bytes)
         if content == nil then
@@ -517,9 +548,12 @@ local function strip_source(source)
     source = tostring(source or "")
     if source:sub(1, 3) == "\239\187\191" then source = source:sub(4) end
     if source:sub(1, 2) == "#!" then
-        local newline_start, newline_end = source:find("\r\n", 1, true)
-        if not newline_start then newline_start, newline_end = source:find("[\r\n]") end
-        if newline_start then source = "\n" .. source:sub(newline_end + 1) else source = "" end
+        local newline_start, newline_end = source:find("[\r\n]")
+        if newline_start then
+            local pair = source:sub(newline_end, newline_end + 1)
+            if pair == "\r\n" or pair == "\n\r" then newline_end = newline_end + 1 end
+            source = "\n" .. source:sub(newline_end + 1)
+        else source = "" end
     end
     return source
 end

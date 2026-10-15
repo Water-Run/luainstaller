@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.7.0-1.rockspec",
+    "luainstaller-1.7.1-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -67,6 +67,16 @@ expect_contains("docs/PLATFORMS-NATIVE-LIMITS.adoc", "weren't checked")
 expect_contains("docs/USAGE.adoc", "Build results include a `warnings` list")
 expect_contains("docs/USAGE.adoc", "Use manual discovery with `--include`, or use runtime discovery.")
 expect_contains("docs/zh-CN/USAGE.adoc", "用手动模式配合 `--include` 列出模块， 或者改用运行时模式。")
+expect_contains("docs/USAGE.adoc", "limit the combined Lua and native dependency files")
+expect_contains("docs/zh-CN/USAGE.adoc", "限制 Lua 和原生依赖文件的合计数量")
+for _, suite in ipairs({"dependency_limits", "source_normalization"}) do
+    expect_contains("docs/TESTING.adoc", "test/" .. suite .. ".lua")
+    expect_contains("docs/zh-CN/TESTING.adoc", "test/" .. suite .. ".lua")
+    expect_contains(".github/workflows/ci.yml", "test/" .. suite .. ".lua")
+    expect_contains("tools/test-lua-versions.sh", "test/" .. suite .. ".lua")
+    expect_contains("tools/test-lua-versions.ps1", "'" .. suite .. ".lua'")
+    expect_contains("tools/luajit-suites.txt", suite)
+end
 
 local workflow = read_file(".github/workflows/ci.yml")
 local posix_matrix = assert(workflow:match("\n  version%-matrix:(.-)\n  linux%-x86%-native:"),
@@ -92,7 +102,7 @@ expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查"
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
-expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.7.0-1.rockspec")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.7.1-1.rockspec")
 expect_contains("docs/TESTING.adoc", "test/no_lua_target.lua")
 for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
     expect_contains(prefix .. "LUAJIT.adoc", "--ffi-library")

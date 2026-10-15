@@ -9,6 +9,8 @@ native_onefile
 headerless_build
 standalone_install
 resource_bounds
+dependency_limits
+source_normalization
 process_bounds
 process_working_directory
 onefile_modes

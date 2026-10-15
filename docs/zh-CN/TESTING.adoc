@@ -48,13 +48,15 @@ LUA=${LUA:-lua}
 "$LUA" test/moon_reproducibility.lua
 "$LUA" test/onefile_modes.lua
 "$LUA" test/resource_bounds.lua
+"$LUA" test/dependency_limits.lua
+"$LUA" test/source_normalization.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.7.0-1.rockspec
+luarocks lint luainstaller-1.7.1-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -145,6 +147,12 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/resource_bounds.lua`
 |单个源码和总量上限、无效上限及空文件读取
+
+|`test/dependency_limits.lua`
+|发现、显式输入、原生模块与 FFI 的合并计数；重复输入、排除项、恰好达到上限、公共 API 错误与两种 CLI
+
+|`test/source_normalization.lua`
+|混合换行的 shebang 在分析、运行时发现、两份运行时实现及三种产物模式中保留代码和行号
 
 |`test/output_parents.lua`
 |两个宿主的链接祖先拒绝、POSIX 共享写入目录及用户文件保留

@@ -29,11 +29,10 @@ function M.stripSource(source)
         source = source:sub(4)
     end
     if source:sub(1, 2) == "#!" then
-        local newline_start, newline_end = source:find("\r\n", 1, true)
-        if not newline_start then
-            newline_start, newline_end = source:find("[\r\n]")
-        end
+        local newline_start, newline_end = source:find("[\r\n]")
         if newline_start then
+            local pair = source:sub(newline_end, newline_end + 1)
+            if pair == "\r\n" or pair == "\n\r" then newline_end = newline_end + 1 end
             source = "\n" .. source:sub(newline_end + 1)
         else
             source = ""

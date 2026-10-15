@@ -50,13 +50,15 @@ LUA=${LUA:-lua}
 "$LUA" test/moon_reproducibility.lua
 "$LUA" test/onefile_modes.lua
 "$LUA" test/resource_bounds.lua
+"$LUA" test/dependency_limits.lua
+"$LUA" test/source_normalization.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.7.0-1.rockspec
+luarocks lint luainstaller-1.7.1-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -154,6 +156,14 @@ and real POSIX SIGINT status, compiler termination, workspace cleanup and retry
 
 |`test/resource_bounds.lua`
 |Per-source and aggregate budgets, invalid limits and empty-file reads
+
+|`test/dependency_limits.lua`
+|Combined discovered, explicit, native and FFI dependency counts; duplicates,
+excluded inputs, exact limits, public API errors and both CLIs
+
+|`test/source_normalization.lua`
+|Mixed-newline shebangs preserve code and line numbers in analysis, runtime
+discovery, both runtime implementations and all three artifact modes
 
 |`test/output_parents.lua`
 |Linked ancestors on both hosts, POSIX shared writers and preservation of user files

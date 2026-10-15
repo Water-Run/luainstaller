@@ -104,7 +104,7 @@ try {
             Invoke-Logged $env:LUAI_TEST_LUA @("test/$suite.lua")
         }
     } finally { Pop-Location }
-    "PASS luainstaller 1.7.0 LuaJIT $($Pin.version) $Configuration" |
+    "PASS luainstaller 1.7.1 LuaJIT $($Pin.version) $Configuration" |
         Out-File -FilePath $Log -Append -Encoding utf8
     Get-Content -LiteralPath $Log -Tail 1
 } catch {

@@ -184,7 +184,8 @@ API 中设置 `moon_detect = false`。
 `--include PATH`:: 补上扫描遗漏的源码文件
 `--ffi-library NAME=PATH`:: 打包已命名的 LuaJIT FFI 库；参见 xref:LUAJIT.adoc[LuaJIT 打包]
 `--exclude NAME`:: 排除某个依赖（路径、文件名或路径后缀）
-`--max-deps N`:: 找到的 Lua 模块超过 N 个就停止（默认 36）
+`--max-deps N`:: 限制 Lua 和原生依赖文件的合计数量，包含显式输入和 FFI 库（默认 36）；
+FFI 名称数量也受这个上限约束
 
 .工具链
 [horizontal]

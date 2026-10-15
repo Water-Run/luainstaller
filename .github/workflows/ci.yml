@@ -105,6 +105,8 @@ jobs:
           lua test/process_bounds.lua
           lua test/process_working_directory.lua
           lua test/resource_bounds.lua
+          lua test/dependency_limits.lua
+          lua test/source_normalization.lua
           lua test/output_parents.lua
           lua test/build_cleanup.lua
 
@@ -218,6 +220,8 @@ jobs:
           "$LUAI_TEST_LUA" test/process_bounds.lua
           "$LUAI_TEST_LUA" test/process_working_directory.lua
           "$LUAI_TEST_LUA" test/resource_bounds.lua
+          "$LUAI_TEST_LUA" test/dependency_limits.lua
+          "$LUAI_TEST_LUA" test/source_normalization.lua
           "$LUAI_TEST_LUA" test/output_parents.lua
           "$LUAI_TEST_LUA" test/build_cleanup.lua
           "$LUAI_TEST_LUA" test/onefile_modes.lua

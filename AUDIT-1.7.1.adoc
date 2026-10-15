@@ -1,0 +1,132 @@
+= luainstaller 1.7.1 审计记录
+:toc:
+:sectanchors:
+
+基线：`v1.7.0`，提交 `1b6b8a87258684f3edff22ea7837e54704e40aae`。
+本文件记录审计判断和修复依据。执行清单见 xref:PLAN-1.7.1.adoc[1.7.1 交付计划]。
+此前的事务、进程和部署边界见 xref:SECURITY-AUDIT.adoc[既有安全审计]。
+
+== 当前结论
+
+已确认三类正确性与配额问题，并加入先失败、后通过的行为回归。
+相关修复已在本地官方 Lua 和 LuaJIT 下通过专项检查；完整本地回归和发布门禁仍在进行。
+最终发布提交、原生作业和公开附件证据将在发布说明中记录。
+
+审计开始时 GitHub 没有开放 issue；本轮缺陷来自源码审查和独立复现。
+待查线索不会直接写成已确认漏洞，也不把声明过的能力边界当作新增缺陷。
+
+== 审查方法与范围
+
+以已有审计和 1.7.0 的验收为基础，复查 1.6.1 到 1.7.0 的运行时、工具链、安装与
+Windows 改动，再沿源码输入、发现、清单、生成、加载和发布链检查行为是否一致。
+重点复核新 LuaJIT/FFI 路径与原有资源限制、源码快照及失败恢复的交点。
+
+[cols="2,4,3",options="header"]
+|===
+|区域 |审查要点 |对应行为证据
+|参数与公共结果
+|选项归一化、序列校验、数值预算、四个操作的失败返回与 CLI 退出码
+|`contract_docs`、`cli_split_smoke`、`resource_bounds`、`dependency_limits`
+|源码与发现
+|首行处理、字节码拒绝、静态/手动/运行时发现、模块快照与手动别名
+|`source_normalization`、`production_edges`、`moon_boundaries`、`luajit_syntax`
+|LuaJIT 与 FFI
+|运行时种类和 C ABI 分离、配置匹配、内置模块、外部库副本、FFI 绑定恢复
+|`luajit_identity`、`luajit_mismatch`、`luajit_integration`、`luajit_ffi`
+|原生工具链
+|真实编译/运行探测、头文件替代声明、静态/动态库、MSVC 参数与相邻 DLL 加载
+|`toolchain_native`、`headerless_build`、`native_bundle`、`native_onefile`
+|进程与输出
+|时限、输出预算、工作目录、信号、子进程、锁和失败后的清理
+|`process_bounds`、`process_working_directory`、`build_interruption`、`build_cleanup`
+|文件与发布事务
+|祖先目录、重解析点、输出清单、暂存、恢复与用户文件保护
+|`output_parents`、`output_transaction`、`lock_identity`、`onefile_lifecycle`
+|安装与交付
+|源码身份、版本、独立安装、升级、重链接、许可证与运行时独立性
+|`version_contract`、`standalone_install`、`luarocks_install`、`distribution_licenses`、`no_lua_target`
+|===
+
+此表区分审查范围与执行证据；套件的最终通过状态以完整验收记录为准。
+
+== V71-01：混合换行误删 Lua 代码
+
+优先级：P1，程序语义错误。
+
+`analyzer.prepareSource`、独立运行时、内嵌运行时和运行时发现的快照处理，
+都先搜索整份源码中的 CRLF，再退回搜索单个换行。如果 shebang 以 LF 结束，
+而下一条语句以 CRLF 结束，剥离范围就跨过第一条语句。
+
+[source,lua]
+----
+#!/usr/bin/env lua
+local value = 41
+return value + 1
+----
+
+复现文件的第一行使用 LF，第二行使用 CRLF。基线将第二行一起删去，
+运行时报告 `value` 为 nil。若被删的语句是检查或 `require`，也会改变分析结果与执行含义。
+官方 Lua 和 LuaJIT 均复现。
+
+修复从第一个 CR 或 LF 定位行尾，只合并紧邻的双字节换行，保留后面的全部源码，
+并用一个换行占位保持行号。四处实现同步修改。
+
+回归覆盖 BOM、有/无 shebang、LF/CRLF/CR/LFCR、错误行号、首条依赖、三种发现模式、
+独立与内嵌运行时，以及移除原始源码后运行的目录、解包和免解包产物。
+通过原生解释器文件加载器的集成用例使用各 ABI 都接受的 LF shebang。
+
+== V71-02：显式 Lua 输入绕过依赖限制
+
+优先级：P2，已声明配额未统一执行。
+
+在入口不含依赖时，通过 `include` 提供两个 Lua 文件并设置 `max_deps = 1`，
+基线的 static、manual 和 runtime 三种模式都会返回成功。发现阶段计数完成后，
+`applyManualInputs` 继续添加文件却没有检查总数。LuaJIT 下，一个 Lua 输入与一个
+FFI 文件也能分别通过局部限制，形成超过单一预算的最终计划。
+
+修复在合并依赖时统一计数，在读取新增手动文件前拒绝超限；同一路径去重，
+入口本身不额外计数，排除项不会占用手动输入名额。FFI 名称数量继续单独受相同上限约束。
+
+回归覆盖四个公共操作、三种发现模式和两种 CLI，核对错误类型、`current_count`、
+`limit` 与输出未创建；也覆盖重复项、排除项、恰好达到限制及 Lua/原生/FFI 混合输入。
+
+== V71-03：不可表示的依赖预算进入运行时生成
+
+优先级：P2，输入校验与发现模式不一致。
+
+`max_deps = 1e100` 是有限数值，旧校验还把它视为整数；static 与 manual 会接受，
+runtime 却在生成 trace 脚本时因 `%d` 无法表示该值而返回内部 `LuaInstallerError`。
+该输入在官方 Lua 下有独立复现。
+
+现在统一接受不超过 2147483583 的正整数，为 trace 额外的 64 条记录留出空间，
+保证生成的计数在 Lua 5.1 使用的 32 位有符号格式化范围内。
+超限请求在发现前返回带 `option = "max_deps"` 的 `InvalidOptionsError`。
+回归覆盖最大可移植值、紧邻超限值、极大有限数值、四个操作、三种发现模式和两种 CLI。
+
+== C71-01：统一原生依赖计数
+
+基线指南把 `max_deps` 描述为 Lua 模块数量，因此不将未统计 C 模块单独宣称为
+违反旧文档的漏洞。此次将选中的 Lua、原生和 FFI 文件统一计数，避免同名选项
+在不同输入路径上产生不同的总量边界；静态发现也在新增原生模块时检查预算。
+
+这是配额语义的收紧。原来原生依赖较多的项目可能需要提高 `--max-deps`。
+双语使用指南、变更记录、文档契约和混合输入回归已同步。
+
+== 已排除与保留的边界
+
+* 手动 `--include` 接受 Lua 源文件，不接受 C 库。把它与 FFI 同时使用的最初线索，
+  不构成已支持行为的回归；同一原生文件同时由静态 `require` 和 FFI 选择有专门计数回归。
+* LuaJIT 的版本、GC64、Lua 5.2 兼容设置、可用内置能力仍在库探测和目标启动时核对；
+  JIT 开关属于应用行为，不当作运行时身份变化。
+* 运行时发现执行用户代码，构建工具链和工作区仍需可信；资源配额不等于代码沙箱。
+* 现有目录切换的可见间隙、断电持久性、系统原生依赖、Windows 代码页和旧物理主机边界保留。
+* 本轮平台声明以 Linux 与 Windows/MSVC 原生门禁为准，补充物理主机未通过时不扩大承诺。
+
+== 发布验收要求
+
+确认缺陷有回归并关闭；39 个官方 Lua 本地套件和 LuaJIT 专项完成；
+同一发布提交通过官方 Lua 13 个作业和 LuaJIT 5 个作业。
+逐份核验完整矩阵日志，验证源码包与 source rock 的独立安装、1.7.0 升级，
+公开发布后下载全部五个附件并核对摘要。
+
+原始复现、过程日志和发布证据保存在任务目录，发布说明提供可访问的 CI 与标签链接。
