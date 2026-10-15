@@ -8,10 +8,11 @@ File:
 Date:
     2026-06-22
 Updated:
-    2026-07-29
+    2026-10-15
 ]]
 
 local platform = require("luainstaller.platform")
+local lua_abi = require("luainstaller.lua_abi")
 
 local M = {}
 local UINT32 = 4294967296
@@ -28,6 +29,8 @@ end
 
 M.uint32 = uint32
 
+local runtime_identity = lua_abi.info()
+local jit_bits = runtime_identity.supported and runtime_identity.kind == "luajit" and require("bit") or nil
 local NIBBLE_BITS = { band = {}, bor = {}, bxor = {} }
 local BYTE_BITS = { band = {}, bor = {}, bxor = {} }
 local function initializePortableBits()
@@ -74,8 +77,8 @@ local function initializePortableBits()
     end
 end
 
-if _VERSION == "Lua 5.1"
-    or (_VERSION == "Lua 5.2" and type(bit32) ~= "table") then
+if not jit_bits and (_VERSION == "Lua 5.1"
+    or (_VERSION == "Lua 5.2" and type(bit32) ~= "table")) then
     initializePortableBits()
 end
 
@@ -96,8 +99,8 @@ local function arithmeticBitOp(left, right, operation)
     return result
 end
 
-local native_bits
-if _VERSION ~= "Lua 5.1" and _VERSION ~= "Lua 5.2" then
+local native_bits = jit_bits
+if not native_bits and _VERSION ~= "Lua 5.1" and _VERSION ~= "Lua 5.2" then
     local loader = loadstring or load
     local chunk = loader([[
 return {
@@ -238,22 +241,7 @@ function M.searchpath(name, search_path, separator, replacement)
 end
 
 function M.luaVersion()
-    local version = _VERSION or "Lua"
-    local major, minor = version:match("Lua%s+(%d+)%.(%d+)")
-    local jit_runtime = rawget(_G, "jit")
-    local official = not (type(jit_runtime) == "table"
-        and type(jit_runtime.version) == "string"
-        and type(jit_runtime.status) == "function")
-    major = tonumber(major)
-    minor = tonumber(minor)
-    return {
-        version = version,
-        abi = major and minor and ("lua" .. major .. "." .. minor) or "unknown",
-        major = major,
-        minor = minor,
-        num = major and minor and (major * 100 + minor) or nil,
-        official = official,
-    }
+    return lua_abi.info()
 end
 
 local function modeName(opts)

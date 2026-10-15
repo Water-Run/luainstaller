@@ -45,7 +45,7 @@ local moon_contexts = setmetatable({}, {__mode="k"})
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.6.1"
+M.VERSION = "1.7.0"
 
 --@description: Package author name
 --@const: AUTHOR
@@ -238,6 +238,7 @@ local ALLOWED_OPTIONS = {
     entry = true,
     exclude = true,
     include = true,
+    ffi_libraries = true,
     launcher_profile = true,
     lua = true,
     lua_prefix = true,
@@ -349,6 +350,23 @@ local function normalizeOptions(opts)
         normalized.target_os = nil
     end
     normalized.include = include
+    normalized.ffi_libraries = {}
+    if opts.ffi_libraries ~= nil and type(opts.ffi_libraries) ~= "table" then
+        return nil, invalidOption("ffi_libraries", "ffi_libraries must map library names to file paths")
+    end
+    for name, filename in pairs(opts.ffi_libraries or {}) do
+        if type(name) ~= "string" or not name:match("^[%w_.%-]+$")
+            or name == "." or name == ".." or type(filename) ~= "string"
+            or filename == "" or filename:find("%c") then
+            return nil, invalidOption("ffi_libraries", "FFI libraries need a simple name and a file path")
+        end
+        local path_error = validateNotDriveRelative(filename, "ffi_libraries")
+        if path_error then return nil, path_error end
+        if compat.luaVersion().kind ~= "luajit" then
+            return nil, invalidOption("ffi_libraries", "ffi_libraries requires LuaJIT")
+        end
+        normalized.ffi_libraries[name] = path.normalize(path.absolute(filename))
+    end
     normalized.exclude = exclude
     normalized.run_args = run_args
     normalized.onefile_mode = opts.onefile_mode or "auto"
@@ -408,12 +426,10 @@ end
 local function analyzeContext(opts, config)
     config = config or {}
     local lua_version = compat.luaVersion()
-    if lua_version.major ~= 5 or not lua_version.minor
-        or lua_version.minor < 1 or lua_version.minor > 5
-        or not lua_version.official then
+    if not lua_version.supported then
         return nil, makeError(
             "UnsupportedLuaVersionError",
-            "luainstaller requires an official Lua 5.1 through 5.5 interpreter",
+            "luainstaller requires official Lua 5.1 through 5.5 or LuaJIT 2.1 with FFI",
             {
                 version = lua_version.version,
                 abi = lua_version.abi,
@@ -634,7 +650,7 @@ for _, action in ipairs({"analyze", "trace", "compatibility", "bundle"}) do
         if type(opts) ~= "table" or type(opts.entry) ~= "string" or opts.moon_detect == false
             or not opts.entry:lower():match("%.moon$") then return original(opts) end
         local version = compat.luaVersion()
-        if not version.official or version.major ~= 5 or version.minor < 1 or version.minor > 5 then
+        if not version.supported then
             return original(opts)
         end
         local normalized, invalid = normalizeOptions(opts)

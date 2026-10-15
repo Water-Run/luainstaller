@@ -1202,7 +1202,7 @@ print(result.executable)
 end
 
 local function check_release_metadata_contract()
-    local rockspec = read_file("luainstaller-1.6.1-1.rockspec")
+    local rockspec = read_file("luainstaller-1.7.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
@@ -1246,7 +1246,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luai", { "-v" })),
-        "luai 1.6.1\n"
+        "luai 1.7.0\n"
     )
 
     local full_help = run(cli_command("luainstaller", { "help" }))
@@ -1260,7 +1260,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luainstaller", { "version" })),
-        "luainstaller 1.6.1  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.7.0  LGPL 3.0 by WaterRun\n"
     )
 
     local bad_luai = run(cli_command("luai", { "build", "test/single_file/01_hello_luainstaller.lua" }), {
@@ -1830,10 +1830,10 @@ local function check_installed_cli_bundle()
     local root = make_temp_dir("installed-cli")
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
-    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.6.1-1.rockspec")
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.7.0-1.rockspec")
     assert_equals(
         run(shell_quote(tree .. "/bin/luainstaller") .. " version"),
-        "luainstaller 1.6.1  LGPL 3.0 by WaterRun\n"
+        "luainstaller 1.7.0  LGPL 3.0 by WaterRun\n"
     )
     run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")

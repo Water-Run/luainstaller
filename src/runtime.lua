@@ -12,7 +12,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local compat = require("luainstaller.compat")
@@ -97,6 +97,11 @@ function M.install(payload)
     local native_modules = payload.native_modules or {}
     local searchers = loaderTable()
     local searcher
+    local ffi, original_ffi_load
+    if next(payload.ffi_libraries or {}) then
+        ffi = require("ffi")
+        original_ffi_load = ffi.load
+    end
 
     searcher = function(module_name)
         local native = native_modules[module_name]
@@ -111,8 +116,17 @@ function M.install(payload)
     end
 
     table.insert(searchers, 2, searcher)
+    if ffi then
+        ffi.load = function(name, ...)
+            local record = payload.ffi_libraries[name]
+            local filename = record and ((payload.native_root or "."):gsub("/+$", "")
+                .. "/" .. record.path) or name
+            return original_ffi_load(filename, ...)
+        end
+    end
 
     return function()
+        if ffi then ffi.load = original_ffi_load end
         for i = #searchers, 1, -1 do
             if searchers[i] == searcher then
                 table.remove(searchers, i)

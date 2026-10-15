@@ -46,8 +46,8 @@ and a fresh luainstaller build.
 
 == Relinking the launcher
 
-. Use an official Lua interpreter and library with the same
-  major and minor ABI shown in `../manifest.lua`.
+. Use the runtime kind and Lua ABI shown in `../manifest.lua`.
+  For LuaJIT, match its version, GC64 and Lua 5.2 compatibility settings too.
 . Use a native compiler for the target operating system and
   architecture. Cross-compilation is outside the supported native
   relinking profile.

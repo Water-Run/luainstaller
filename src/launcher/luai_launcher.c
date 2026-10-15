@@ -197,6 +197,12 @@ static int luai_runtime_matches(lua_State *L)
     version = lua_tostring(L, -1);
     matches = version != NULL && strcmp(version, "@LUA_VERSION@") == 0;
     lua_pop(L, 1);
+    if (matches)
+    {
+        matches = luaL_dostring(L, @RUNTIME_CHECK@) == 0;
+        if (!matches) fprintf(stderr, "%s\n", lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
     return matches;
 }
 

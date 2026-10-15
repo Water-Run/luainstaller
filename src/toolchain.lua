@@ -7,10 +7,11 @@ File:
     toolchain.lua
 Date:
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 local compat = require("luainstaller.compat")
+local lua_abi = require("luainstaller.lua_abi")
 local fs = require("luainstaller.fs")
 local native_profile = require("luainstaller.native_profile")
 local path = require("luainstaller.path")
@@ -152,37 +153,19 @@ local function copyList(values)
 end
 
 local function luaVersionInfo(configured)
-    local current = configured or compat.luaVersion()
-    local major = tonumber(current.major)
-    local minor = tonumber(current.minor)
-    if not major or not minor then
-        major, minor = tostring(current.version or ""):match("Lua%s+(%d+)%.(%d+)")
-        major, minor = tonumber(major), tonumber(minor)
+    local info, err = lua_abi.validateInfo(configured)
+    if not info then
+        return nil, makeError("UnsupportedLuaVersionError", err, {
+            lua_version = configured and configured.version,
+        })
     end
-    if current.official == false then
-        return nil, makeError(
-            "UnsupportedLuaVersionError",
-            "LuaJIT and other non-official Lua runtimes are not supported",
-            { lua_version = current.version }
-        )
-    end
-    if major ~= 5 or not minor or minor < 1 or minor > 5 then
-        return nil, makeError(
-            "UnsupportedLuaVersionError",
-            "A supported official Lua 5.1 through 5.5 ABI is required",
-            { lua_version = current.version }
-        )
-    end
-    return {
-        version = string.format("Lua %d.%d", major, minor),
-        major = major,
-        minor = minor,
-        num = tonumber(current.num) or (major * 100 + minor),
-        abi = current.abi or string.format("lua%d.%d", major, minor),
-    }
+    return info
 end
 
 local function versionMatches(value, lua_version)
+    if lua_version.kind == "luajit" then
+        return trimmed(value):match("^2%.1[%.%-%+]") ~= nil or trimmed(value) == "2.1"
+    end
     local expected = string.format("%d.%d", lua_version.major, lua_version.minor)
     value = trimmed(value)
     if value == expected then return true end
@@ -487,10 +470,14 @@ local function activeLuaPrefix(opts)
             if prefix then return prefix, interpreter end
         end
     end
-    return prefixFromInterpreter("lua")
+    return prefixFromInterpreter(compat.luaVersion().kind == "luajit" and "luajit" or "lua")
 end
 
 local function luaNames(lua_version)
+    if lua_version.kind == "luajit" then
+        if IS_WINDOWS then return { "lua51", "luajit-5.1", "luajit" } end
+        return { "luajit-5.1", "luajit" }
+    end
     local dotted = string.format("lua%d.%d", lua_version.major, lua_version.minor)
     local compact = string.format("lua%d%d", lua_version.major, lua_version.minor)
     return { dotted, "lua-" .. lua_version.major .. "." .. lua_version.minor, compact, "lua" }
@@ -585,6 +572,7 @@ local function prefixCandidate(prefix, lua_version, source, config)
     local version = string.format("%d.%d", lua_version.major, lua_version.minor)
     local include_dir
     for _, candidate in ipairs({
+        lua_version.kind == "luajit" and (prefix .. "/include/luajit-2.1") or (prefix .. "/include"),
         prefix .. "/include",
         prefix .. "/include/lua" .. version,
         prefix .. "/include/lua-" .. version,
@@ -637,6 +625,9 @@ local function prefixCandidate(prefix, lua_version, source, config)
                 library_paths[#library_paths + 1] = directory .. "/lib" .. name .. extension
                 library_paths[#library_paths + 1] = directory .. "/" .. name .. extension
                 if extension == ".so" then
+                    if lua_version.kind == "luajit" then
+                        library_paths[#library_paths + 1] = directory .. "/lib" .. name .. ".so.2"
+                    end
                     -- Runtime packages commonly expose only a SONAME such
                     -- as liblua5.4.so.0, without a development linker symlink.
                     library_paths[#library_paths + 1] = directory .. "/lib"
@@ -837,6 +828,7 @@ end
 local function probeSource(lua_version, module_pattern)
     local module_script = module_pattern and ("package.cpath = " .. string.format("%q", module_pattern)
         .. "; assert(require('luai_native_probe') == 'native-probe-ok')") or "return true"
+    module_script = "(function()\n" .. lua_abi.checkSource(lua_version) .. "\nend)(); " .. module_script
     local source = [[
 #include <stdio.h>
 #include <string.h>

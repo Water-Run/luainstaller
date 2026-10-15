@@ -31,7 +31,8 @@ build/app/app                       # <2>
 <2> Run it. No `lua` on the machine is required.
 
 It works with official Lua 5.1 through 5.5 on Linux, Windows (back to XP),
-macOS, FreeBSD and Android/Termux.
+macOS, FreeBSD and Android/Termux. LuaJIT 2.1 has a separate native Linux
+x86_64 and Windows/MSVC x86_64 path; see xref:docs/LUAJIT.adoc[LuaJIT packaging].
 
 toc::[]
 
@@ -63,7 +64,7 @@ NOTE: Lua headers aren't needed to build executables.
 On Windows, use your compiler's command prompt for installation and packaging.
 PowerShell isn't required.
 
-* An official Lua interpreter, 5.1 to 5.5. LuaJIT isn't supported.
+* Official Lua 5.1 to 5.5, or LuaJIT 2.1 with FFI.
 * A C compiler for the machine you're on.
 * A Lua library that matches that interpreter's version. It usually comes
   with the interpreter.
@@ -227,6 +228,9 @@ must already be built for the target system and your Lua version.
 
 |xref:docs/USAGE.adoc[Usage]
 |All options, dependency discovery, native modules, the library API
+
+|xref:docs/LUAJIT.adoc[LuaJIT]
+|Selecting LuaJIT, built-in modules, FFI libraries and single-file programs
 
 |xref:docs/TROUBLESHOOTING.adoc[Troubleshooting]
 |Common errors and how to fix them

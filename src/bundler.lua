@@ -8,11 +8,12 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 local launcher = require("luainstaller.launcher")
 local compat = require("luainstaller.compat")
+local lua_abi = require("luainstaller.lua_abi")
 local distribution_files = require("luainstaller.distribution_files")
 local fs = require("luainstaller.fs")
 local hash_mod = require("luainstaller.hash")
@@ -675,30 +676,13 @@ local function serializeManifest(manifest)
 end
 
 local function selectedLuaVersion(manifest)
-    local current = manifest and manifest.lua or compat.luaVersion()
-    local major = tonumber(current and current.major)
-    local minor = tonumber(current and current.minor)
-    if not major or not minor then
-        major, minor = tostring(current and current.version or ""):match("Lua%s+(%d+)%.(%d+)")
-        major, minor = tonumber(major), tonumber(minor)
-    end
-    if current and current.official == false then
-        return nil, makeError("UnsupportedLuaVersionError", "Bundle manifest must use an official Lua interpreter", {
-            lua_version = current.version,
+    local info, err = lua_abi.validateInfo(manifest and manifest.lua)
+    if not info then
+        return nil, makeError("UnsupportedLuaVersionError", err, {
+            lua_version = manifest and manifest.lua and manifest.lua.version,
         })
     end
-    if major ~= 5 or not minor or minor < 1 or minor > 5 then
-        return nil, makeError("UnsupportedLuaVersionError", "Bundle manifest requires an official Lua 5.1 through 5.5 ABI", {
-            lua_version = current and current.version,
-        })
-    end
-    return {
-        version = string.format("Lua %d.%d", major, minor),
-        major = major,
-        minor = minor,
-        num = tonumber(current.num) or (major * 100 + minor),
-        abi = current.abi or string.format("lua%d.%d", major, minor),
-    }
+    return info
 end
 
 local function abiProbeSource(lua_version)
@@ -721,11 +705,19 @@ int main(void) {
                 version != NULL ? version : "unknown");
     }
     lua_pop(state, 1);
+    if (matches) {
+        matches = luaL_dostring(state, @RUNTIME_CHECK@) == 0;
+        if (!matches) fprintf(stderr, "%s\n", lua_tostring(state, -1));
+        lua_pop(state, 1);
+    }
     lua_close(state);
     return matches ? 0 : 42;
 }
 ]]
     source = source:gsub("@LUA_VERSION@", lua_version.version)
+    source = source:gsub("@RUNTIME_CHECK@", function()
+        return lua_abi.checkCString(lua_version)
+    end)
     return source
 end
 

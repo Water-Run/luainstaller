@@ -56,7 +56,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.6.1-1.rockspec
+luarocks lint luainstaller-1.7.0-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -425,6 +425,41 @@ completion. Summary and logs are written to:
 ----
 /tmp/luainstaller-benchmark-*/results/summary.txt
 ----
+
+[#testing-luajit]
+== Independent LuaJIT gate
+
+`.github/workflows/luajit.yml` runs the upstream commit and SHA-256 in
+`tools/luajit-version.txt`. Linux x86_64 covers `default`, `lua52compat` and
+`nogc64`; Windows x86_64 uses MSVC with `default` and `lua52compat`,
+building the LuaJIT DLL and static archive with `/MT`.
+These five jobs are required alongside the official Lua gates on the release commit.
+
+[source,bash]
+----
+sh tools/test-luajit.sh
+LUAI_JIT_CONFIGURATION=lua52compat sh tools/test-luajit.sh
+LUAI_JIT_CONFIGURATION=nogc64 sh tools/test-luajit.sh
+----
+
+[source,powershell]
+----
+powershell -NoProfile -File tools/test-luajit.ps1 -Configuration default
+powershell -NoProfile -File tools/test-luajit.ps1 -Configuration lua52compat
+----
+
+The suite list is `tools/luajit-suites.txt`. LuaJIT-specific coverage is in
+`test/luajit_identity.lua`, `test/luajit_syntax.lua`, `test/luajit_mismatch.lua`,
+`test/luajit_integration.lua` and `test/luajit_ffi.lua`. It checks runtime
+identity, builtin versus source modules, explicit FFI files, all artifact
+modes, JIT on/off and execution after source removal. Shared suites cover
+installation, headerless relinking, quotas, publication and cleanup.
+Linux also runs `test/no_lua_target.lua` in an isolated target filesystem.
+
+Artifacts named `luajit-linux-<configuration>-evidence` and
+`luajit-windows-<configuration>-evidence` retain complete logs for 14 days,
+including failures. Missing logs fail the upload step. Check the pinned
+source, configuration, suite exits and final `PASS` before accepting a run.
 
 [#testing-release]
 == Release checklist

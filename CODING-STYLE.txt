@@ -10,8 +10,9 @@ Match the surrounding file when a rule does not settle a formatting choice.
 Lua files
 ---------
 
-* Target official Lua 5.1 through 5.5 without using syntax unavailable in Lua
-  5.1. Reject LuaJIT explicitly where an interpreter or ABI is selected.
+* Target official Lua 5.1 through 5.5 and LuaJIT 2.1 without using syntax
+  unavailable in Lua 5.1 in the tool itself. Keep runtime kind separate from
+  the Lua C ABI; verify the selected interpreter and linked library together.
 * Indent with four spaces. Do not use tabs or trailing whitespace.
 * Keep lines readable; split long command construction and error tables by
   meaning rather than at an arbitrary column.

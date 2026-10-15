@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 local M = {}
@@ -115,7 +115,9 @@ local function bootstrap()
     if load_error then return nil, load_error end
     if not windows then return nil, "native Windows operations require Windows" end
     local abi = _VERSION:match("^Lua 5%.([1-5])$")
-    if not abi or rawget(_G, "jit") then return nil, "official Lua 5.1 through 5.5 is required" end
+    if not abi or not require("luainstaller.lua_abi").validateInfo() then
+        return nil, "official Lua 5.1 through 5.5 or LuaJIT 2.1 is required"
+    end
     local source = require("luainstaller.windows_host_source")
     source_id = source_id or require("luainstaller.hash").sha256(source)
     local inherited = os.getenv("LUAI_WINDOWS_HOST_DLL")
@@ -224,7 +226,7 @@ local function bootstrap()
     if not open then load_error = tostring(open_error); return nil, load_error end
     local called, module = pcall(open)
     if not called or type(module) ~= "table" or type(module.request) ~= "function" then
-        load_error = "Cannot bind the running interpreter's official Lua DLL API: " .. tostring(module)
+        load_error = "Cannot bind the running interpreter's Lua DLL API: " .. tostring(module)
         return nil, load_error
     end
     loaded, loaded_path = module, root .. "\\host.dll"

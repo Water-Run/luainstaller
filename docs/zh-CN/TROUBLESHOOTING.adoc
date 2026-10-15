@@ -246,7 +246,7 @@ rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 |InvalidOptionsError         |选项或值不合法
 |InvalidOutputError          |输出目录无法被安全替换
 |UnsupportedPlatformError    |`--target-os` 与本机不匹配
-|UnsupportedLuaVersionError  |不是官方 Lua 5.1–5.5（LuaJIT 也不支持）
+|UnsupportedLuaVersionError  |运行时不受支持；使用官方 Lua 5.1–5.5 或启用了 FFI 的 LuaJIT 2.1
 |ToolchainError              |编译器或 Lua 库缺失或不匹配
 |CompilationFailedError      |编译器已运行并报告了错误
 |LuaRuntimeNotFoundError     |找不到 Lua 共享库
@@ -266,5 +266,19 @@ rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 
 `luainstaller logs --level error --limit 20` 会显示最近的错误。发帖
 之前请去掉私有路径和敏感信息。
+
+[#troubleshooting-luajit]
+== LuaJIT
+
+库需要与解释器来自相同的 LuaJIT 版本和构建。GC64 或 Lua 5.2 兼容设置
+不匹配时，会报告运行时身份错误。可以用 `--lua-prefix` 选择正确的安装目录。
+
+短函数（`->`）、安全导航（`?.`）以及没有括号的嵌套三元表达式需要运行时
+或手动发现。带括号的三元表达式、`const`、整数与复数字面量可使用静态发现。
+运行时发现只覆盖执行过的路径；其他源码模块可用手动发现配合 `--include`。
+
+缺少 FFI 库时，用 `--ffi-library` 声明其 `ffi.load` 名称。
+外部 FFI 库使用目录包或 `extract` 单文件模式。
+参见 xref:LUAJIT.adoc[LuaJIT 打包]。
 
 xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

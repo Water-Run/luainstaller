@@ -182,13 +182,14 @@ API 中设置 `moon_detect = false`。
 `-d MODE`:: `static`（默认）、`runtime` 或 `manual`
 `--no-depscan`:: 等同于 `-d manual`
 `--include PATH`:: 补上扫描遗漏的源码文件
+`--ffi-library NAME=PATH`:: 打包已命名的 LuaJIT FFI 库；参见 xref:LUAJIT.adoc[LuaJIT 打包]
 `--exclude NAME`:: 排除某个依赖（路径、文件名或路径后缀）
 `--max-deps N`:: 找到的 Lua 模块超过 N 个就停止（默认 36）
 
 .工具链
 [horizontal]
-`--lua PATH`:: 运行时发现使用的解释器；必须与运行 `luainstaller` 的
-Lua 是同一个版本
+`--lua PATH`:: 运行时发现使用的解释器；匹配运行 `luainstaller` 的
+运行时种类、版本和构建配置
 `--lua-prefix PATH`:: 指定 Lua 库的位置，在自动检测选错时使用
 `--target-os OS`:: 构建机器不是该操作系统即失败；不支持交叉编译
 

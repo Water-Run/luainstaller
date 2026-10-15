@@ -540,6 +540,7 @@ local function check_documentation_contract()
         "docs/BUNDLING.adoc",
         "docs/IMPLEMENTATION.adoc",
         "docs/INSTALL.adoc",
+        "docs/LUAJIT.adoc",
         "docs/PLATFORMS-NATIVE-LIMITS.adoc",
         "docs/RELINKING.adoc",
         "docs/TESTING.adoc",
@@ -550,6 +551,7 @@ local function check_documentation_contract()
         "docs/zh-CN/BUNDLING.adoc",
         "docs/zh-CN/IMPLEMENTATION.adoc",
         "docs/zh-CN/INSTALL.adoc",
+        "docs/zh-CN/LUAJIT.adoc",
         "docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc",
         "docs/zh-CN/RELINKING.adoc",
         "docs/zh-CN/TESTING.adoc",
@@ -710,7 +712,7 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.6.1-1.rockspec")
+    local rockspec = read_file("luainstaller-1.7.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -723,7 +725,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.6.1-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.7.0-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

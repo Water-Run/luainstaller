@@ -54,7 +54,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.6.1-1.rockspec
+luarocks lint luainstaller-1.7.0-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -395,6 +395,39 @@ bash tools/benchmark-real-world.sh
 ----
 /tmp/luainstaller-benchmark-*/results/summary.txt
 ----
+
+[#testing-luajit]
+== 独立 LuaJIT 门禁
+
+`.github/workflows/luajit.yml` 使用 `tools/luajit-version.txt` 固定的上游提交与
+SHA-256。Linux x86_64 覆盖 `default`、`lua52compat` 和 `nogc64`；
+Windows x86_64 使用 MSVC，覆盖 `default` 和 `lua52compat`，
+并用 `/MT` 构建 LuaJIT DLL 与静态库。
+这五项作业与官方 Lua 门禁一样，需要在发布提交上通过。
+
+[source,bash]
+----
+sh tools/test-luajit.sh
+LUAI_JIT_CONFIGURATION=lua52compat sh tools/test-luajit.sh
+LUAI_JIT_CONFIGURATION=nogc64 sh tools/test-luajit.sh
+----
+
+[source,powershell]
+----
+powershell -NoProfile -File tools/test-luajit.ps1 -Configuration default
+powershell -NoProfile -File tools/test-luajit.ps1 -Configuration lua52compat
+----
+
+套件清单为 `tools/luajit-suites.txt`。LuaJIT 专项覆盖在
+`test/luajit_identity.lua`、`test/luajit_syntax.lua`、`test/luajit_mismatch.lua`、
+`test/luajit_integration.lua` 和 `test/luajit_ffi.lua`，检查运行时身份、内置模块
+与源码模块、显式 FFI 文件、全部产物模式、JIT 开关以及删除源码后的执行。
+共用套件覆盖安装、无头文件重链接、配额、发布与清理。
+Linux 还在隔离目标文件系统中运行 `test/no_lua_target.lua`。
+
+`luajit-linux-<configuration>-evidence` 和
+`luajit-windows-<configuration>-evidence` 归档保留 14 天完整日志，包括失败记录。
+缺少日志会使上传步骤失败。验收前核对源码固定值、配置、各套件退出状态与最终 `PASS`。
 
 [#testing-release]
 == 发布检查清单

@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-12
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -97,9 +97,10 @@ local called, failure = pcall(function()
         assert(fs.makeDirectory(path.join(prefix, "lib")))
         assert(fs.writeFile(path.join(prefix, "lib/" .. path.basename(native.library_path)),
             assert(fs.readFile(native.library_path))))
-        assert(fs.copyFile(native.runtime_path, path.join(prefix, path.basename(native.runtime_path))))
+        local runtime_name = native.runtime_name or path.basename(native.runtime_path)
+        assert(fs.copyFile(native.runtime_path, path.join(prefix, runtime_name)))
         if package.config:sub(1, 1) ~= "\\" then
-            local runtime_copy = path.join(prefix, "lib/" .. path.basename(native.runtime_path))
+            local runtime_copy = path.join(prefix, "lib/" .. runtime_name)
             if fs.pathType(runtime_copy) == "missing" then
                 assert(fs.copyFile(native.runtime_path, runtime_copy))
             else

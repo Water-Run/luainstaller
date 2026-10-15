@@ -9,6 +9,19 @@ truth for the exact contents of a published version.
 
 === Added
 
+* Independent LuaJIT 2.1 packaging, including runtime/build identity checks,
+  built-in module discovery, static and shared linking, all bundle modes,
+  standalone installation and LuaJIT license materials.
+* Explicit FFI library inputs through `--ffi-library NAME=PATH` and
+  `ffi_libraries`. These libraries are copied and loaded by their declared
+  names; automatic single-file mode extracts them.
+* Pinned native LuaJIT Linux and Windows/MSVC gates, including Lua 5.2
+  compatibility and GC64 configuration checks.
+
+== 1.6.1 - 2026-10-15
+
+=== Added
+
 * Complete Simplified Chinese documentation: `README.zh-CN.adoc` plus
   `docs/zh-CN/` translations of every guide, with language switch links in
   both READMEs.

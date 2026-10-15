@@ -1,0 +1,80 @@
+= 打包 LuaJIT 应用
+:sectanchors:
+ifdef::env-github[]
+:note-caption: :information_source:
+:tip-caption: :bulb:
+endif::[]
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
+
+使用启用了 FFI 的 LuaJIT 2.1。LuaJIT 打包在原生 Linux x86_64 和
+Windows x86_64 的 MSVC 环境中测试。生成的程序携带 LuaJIT 运行库，
+目标机器不需要安装 LuaJIT。
+
+[#luajit-install]
+== 选择 LuaJIT
+
+用希望打包的 LuaJIT 解释器运行安装程序：
+
+[source,bash]
+----
+luajit tools/install.lua --prefix "$HOME/luainstaller-jit"
+export PATH="$HOME/luainstaller-jit/bin:$PATH"
+luai -b app/main.lua -o build/app
+----
+
+在源码目录中，也可以运行 `luajit bin/luai.lua -b app/main.lua`。
+Windows 用户在编译器命令提示符中运行相同命令，并为 `--prefix`
+填写 Windows 绝对路径。
+
+运行工具的解释器决定目标运行时。自动查找需要帮助时，用 `--lua-prefix`
+选择匹配的 LuaJIT 库。`--lua` 为运行时发现选择匹配的解释器，
+不会改变构建使用的运行时。
+
+NOTE: 官方 Lua 5.1 与 LuaJIT 共用 C API，但属于不同的运行时选择。
+工具会在使用库之前核对 LuaJIT 版本和构建配置。
+
+[#luajit-modules]
+== 模块与源码
+
+`bit`、`jit`、`ffi`、`jit.util`、`jit.opt`、`jit.profile` 和 `string.buffer`
+由 LuaJIT 自身提供。`jit.bc`、`jit.dump` 等 Lua 模块与普通依赖一样查找和打包，
+构建时需要保留它们的源码文件。
+
+输入为 Lua 源码，可以使用 LuaJIT 的整数与复数字面量。
+静态发现无法分析的语法，可以改用运行时发现，或用手动发现配合 `--include`。
+参见 xref:TROUBLESHOOTING.adoc#troubleshooting-luajit[LuaJIT 诊断]。
+
+[#luajit-ffi]
+== 外部 FFI 库
+
+使用程序传给 `ffi.load` 的名称声明库：
+
+[source,lua]
+----
+local ffi = require("ffi")
+local codec = ffi.load("codec")
+----
+
+[source,bash]
+----
+luai -b app/main.lua --ffi-library codec=/opt/app/libcodec.so -o build/app
+----
+
+Windows 用户将该选项指向匹配的 DLL。多个名称可以重复使用 `--ffi-library`。
+Lua API 使用 `ffi_libraries = { codec = "path/to/library" }`。
+
+打包程序从复制的库中加载已声明的名称；副本缺失或损坏会报错。
+未声明的名称继续使用 LuaJIT 的系统查找方式。
+该库自身依赖的其他库仍属于系统依赖，请检查构建告警，并在干净的目标环境中测试。
+
+[#luajit-onefile]
+== 单文件程序
+
+使用内置 FFI 和 `ffi.C` 的代码，在有匹配的静态 LuaJIT 库时可以使用
+`--file-mode no-extract`。C 模块和已声明的外部 FFI 库需要磁盘上的文件，
+因此 `auto` 会为它们选择 `extract`。
+
+应用通过 `jit.on()` 和 `jit.off()` 控制 JIT 编译，打包后两种设置都可使用。
+
+xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

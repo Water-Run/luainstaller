@@ -9,7 +9,7 @@ File:
 Date:
     2026-09-22
 Updated:
-    2026-09-22
+    2026-10-15
 ]]
 
 local function fail(message)
@@ -36,12 +36,11 @@ while index <= #arg do
     index = index + 2
 end
 if not options["--prefix"] then fail("--prefix is required (use --help)") end
-if rawget(_G, "jit") or not _VERSION:match("^Lua 5%.[1-5]$") then
-    fail("official Lua 5.1 through 5.5 is required")
-end
-
 local directory = arg[0]:match("^(.*[/\\])") or "./"
 local api = dofile(directory .. "../luainstaller.lua")
+local lua_abi = require("luainstaller.lua_abi")
+local identity, identity_error = lua_abi.validateInfo()
+if not identity then fail(identity_error) end
 local fs = require("luainstaller.fs")
 local path = require("luainstaller.path")
 local process = require("luainstaller.process")
@@ -78,10 +77,10 @@ local lua = options["--lua"] or current_lua
 if lua:find('[%c"]') or path.isDriveRelative(lua) then fail("invalid interpreter path") end
 if lua:find("[/\\]") then lua = path.absolute(lua) end
 local checked, banner = process.outputCommand(lua, {
-    "-e", "assert(not jit); io.write(_VERSION)",
+    "-e", "(function()\n" .. lua_abi.checkSource(identity) .. "\nend)(); io.write(_VERSION)",
 })
 if not checked or banner ~= _VERSION then
-    fail("--lua must run the same official Lua ABI as the installer: " .. tostring(banner))
+    fail("--lua must run the same runtime kind, version and build as the installer: " .. tostring(banner))
 end
 
 local stage, stage_error = fs.makePrivateDirectory("install", parent)

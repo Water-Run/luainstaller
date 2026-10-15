@@ -162,7 +162,7 @@ installSourcePreloads()
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 
-local VERSION = "1.6.1"
+local VERSION = "1.7.0"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
@@ -187,6 +187,7 @@ Options:
   -M                   skip MoonScript detection
   -o, --out <path>      output path
   --include <path>      include an extra file
+  --ffi-library <name=path>  bundle a LuaJIT FFI library; repeatable
   --exclude <path>      exclude a dependency
   --target-os <os>      assert the detected native host OS
   --lua <path>          Lua interpreter for runtime discovery
@@ -230,6 +231,7 @@ Build options:
   --no-moon-detect             Skip MoonScript detection.
   -o, --out <path>             Output path.
   --include <path>             Include an extra file; repeatable.
+  --ffi-library <name=path>    Bundle a LuaJIT FFI library; repeatable.
   --exclude <path>             Exclude a dependency; repeatable.
   --target-os <os>             Assert the detected native host OS.
   --lua <path>                 Lua interpreter for runtime discovery.
@@ -289,6 +291,7 @@ local KNOWN_OPTION_TOKENS = {
     ["--dir"] = true, ["--onedir"] = true, ["--file"] = true, ["--onefile"] = true,
     ["--file-mode"] = true, ["--no-moon-detect"] = true,
     ["--out"] = true, ["--include"] = true, ["--exclude"] = true,
+    ["--ffi-library"] = true,
     ["--target-os"] = true, ["--lua"] = true, ["--lua-prefix"] = true,
     ["--discovery-mode"] = true, ["--no-depscan"] = true, ["--max-deps"] = true,
     ["--verbose"] = true, ["--"] = true,
@@ -412,6 +415,7 @@ end
 local function newOptions()
     return {
         include = {},
+        ffi_libraries = {},
         exclude = {},
         run_args = {},
         depscan = true,
@@ -463,6 +467,13 @@ local function parseActionOptions(parser, action)
                 return nil, err
             end
             opts.include[#opts.include + 1] = value
+        elseif item == "--ffi-library" then
+            local value, err = parser:consumeValue(item)
+            if not value then return nil, err end
+            local name, filename = value:match("^([^=]+)=(.+)$")
+            if not name then return nil, "--ffi-library requires name=path" end
+            if opts.ffi_libraries[name] then return nil, "duplicate FFI library name: " .. name end
+            opts.ffi_libraries[name] = filename
         elseif item == "--exclude" then
             local value, err = parser:consumeValue(item)
             if not value then

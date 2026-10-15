@@ -188,13 +188,14 @@ and treat the input as Lua. In the API, set `moon_detect = false`.
 `-d MODE`:: `static` (default), `runtime` or `manual`
 `--no-depscan`:: same as `-d manual`
 `--include PATH`:: add a source file the scan missed
+`--ffi-library NAME=PATH`:: bundle a named LuaJIT FFI library; see xref:LUAJIT.adoc[LuaJIT packaging]
 `--exclude NAME`:: leave out a dependency (path, file name or path suffix)
 `--max-deps N`:: stop if more than N Lua modules are found (default 36)
 
 .Toolchain
 [horizontal]
-`--lua PATH`:: interpreter used by runtime discovery; must be the same Lua
-version as the one running `luainstaller`
+`--lua PATH`:: interpreter used by runtime discovery; matches the runtime
+kind, version and build used to run `luainstaller`
 `--lua-prefix PATH`:: where to find the Lua library, when automatic
 detection picks the wrong ones
 `--target-os OS`:: fail unless the build machine is this OS; there's no

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local compat = require("luainstaller.compat")
@@ -108,6 +108,8 @@ local band, bxor, bnot = compat.band, compat.bxor, compat.bnot
 local rshift, lshift, rrotate = compat.rshift, compat.lshift, compat.rrotate
 if type(bit32) == "table" then
     sha256_backend = "bit32"
+elseif lua_version.kind == "luajit" then
+    sha256_backend = "luajit-bit"
 end
 
 local function multiplyFNVPrime(value)

@@ -265,7 +265,7 @@ rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 |InvalidOptionsError         |A bad option or value
 |InvalidOutputError          |The output folder can't be safely replaced
 |UnsupportedPlatformError    |`--target-os` doesn't match this machine
-|UnsupportedLuaVersionError  |Not official Lua 5.1–5.5 (LuaJIT included)
+|UnsupportedLuaVersionError  |Unsupported runtime; use official Lua 5.1–5.5 or LuaJIT 2.1 with FFI
 |ToolchainError              |Compiler or Lua library missing or mismatched
 |CompilationFailedError      |The compiler ran and reported errors
 |LuaRuntimeNotFoundError     |The Lua shared library couldn't be located
@@ -285,5 +285,22 @@ Please include:
 
 `luainstaller logs --level error --limit 20` shows recent errors. Remove
 private paths and secrets before posting.
+
+[#troubleshooting-luajit]
+== LuaJIT
+
+Use a library from the same LuaJIT version and build as the interpreter.
+A GC64 or Lua 5.2 compatibility mismatch reports a runtime identity error.
+`--lua-prefix` can select the correct installation.
+
+Short functions (`->`), safe navigation (`?.`) and nested ternaries without
+parentheses need runtime or manual discovery. Parenthesized ternaries,
+`const`, integer and complex literals work with static discovery. Runtime
+discovery covers executed paths; use `--include` with manual discovery for
+other source modules.
+
+For a missing FFI library, declare its `ffi.load` name with `--ffi-library`.
+External FFI libraries use directory bundles or the `extract` single-file mode.
+See xref:LUAJIT.adoc[LuaJIT packaging].
 
 xref:../README.adoc#documentation-index[Back to documentation index]

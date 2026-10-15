@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -24,6 +24,7 @@ local toolchain = require("luainstaller.toolchain")
 local root = assert(fs.makePrivateDirectory("distribution-licenses"))
 local suffix = package.config:sub(1, 1) == "\\" and ".exe" or ""
 local canonical = {
+    [".luai/licenses/LuaJIT-MIT.txt"] = "LICENSES/LuaJIT-MIT.txt",
     [".luai/licenses/Lua-MIT.txt"] = "LICENSES/Lua-MIT.txt",
     [".luai/licenses/LGPL-3.0-or-later.txt"] = "LICENSE",
     [".luai/licenses/GPL-3.0-or-later.txt"] = "LICENSES/GPL-3.0-or-later.txt",
@@ -89,7 +90,7 @@ end
 
 local function assertManifest(bundle_root)
     local manifest = assert(loadfile(path.join(bundle_root, ".luai/manifest.lua")))()
-    assert(#manifest.distribution_files == 6,
+    assert(#manifest.distribution_files == 7,
         "manifest distribution material count changed")
     local seen = {}
     for _, record in ipairs(manifest.distribution_files) do

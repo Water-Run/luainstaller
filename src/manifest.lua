@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-08-16
+    2026-10-15
 ]]
 
 local fs = require("luainstaller.fs")
@@ -16,6 +16,7 @@ local hash = require("luainstaller.hash")
 local path = require("luainstaller.path")
 local platform = require("luainstaller.platform")
 local compat = require("luainstaller.compat")
+local lua_abi = require("luainstaller.lua_abi")
 
 local M = {}
 
@@ -63,19 +64,9 @@ local function logicalSourceId(source, entry_dir, content_hash)
 end
 
 local function luaInfo(configured)
-    local current = configured or compat.luaVersion()
-    local major = tonumber(current.major)
-    local minor = tonumber(current.minor)
-    local number = tonumber(current.num) or (major and minor and (major * 100 + minor))
-    return {
-        version = current.version or (major and minor
-            and string.format("Lua %d.%d", major, minor) or "Lua"),
-        major = major,
-        minor = minor,
-        num = number,
-        abi = current.abi or (major and minor
-            and ("lua" .. major .. "." .. minor) or "unknown"),
-    }
+    local info, err = lua_abi.validateInfo(configured)
+    if not info then error({type="UnsupportedLuaVersionError", message=err}) end
+    return info
 end
 
 local function platformInfo(host, profile)
@@ -262,6 +253,7 @@ function M.distribution(manifest)
             exclude_count = #(manifest.manual and manifest.manual.exclude or {}),
         },
         discovery = copyValue(manifest.discovery),
+        ffi_libraries = copyValue(manifest.ffi_libraries or {}),
         trace = distributionTrace(manifest),
         compatibility = copyValue(manifest.compatibility),
         distribution_files = copyValue(manifest.distribution_files or {}),
@@ -417,6 +409,11 @@ function M.build(opts)
         opts.source_hashes
     )
     if append_err then return append_err end
+
+    manifest.ffi_libraries = {}
+    for name, filename in pairs(dependencies.ffi_libraries or {}) do
+        manifest.ffi_libraries[name] = normalizePath(".luai/native/" .. basename(filename))
+    end
 
     local duplicate = checkDuplicateDestinations(manifest, profile.target_os)
     if duplicate then

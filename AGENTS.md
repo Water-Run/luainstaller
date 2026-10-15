@@ -43,7 +43,8 @@ User docs (`README.adoc`, `docs/*.adoc` except `IMPLEMENTATION` and
   contents, and the tool scripts together; `test/version_contract.lua` and
   `test/contract_docs.lua` check them.
 - The required gates are the GitHub Actions Linux and Windows five-ABI
-  matrices and the native Linux x86 job, on the release commit.
+  matrices, the native Linux x86 job, and the separate pinned LuaJIT Linux
+  and Windows/MSVC matrix, on the release commit.
 - Physical-host runs (ARM64, macOS, FreeBSD, Termux, legacy Windows) are
   supplemental. Record them in the release notes, not in `docs/`. A host
   missing a compiler or headers is a blocked test, not a pass.

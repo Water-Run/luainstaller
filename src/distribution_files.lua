@@ -8,10 +8,71 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 return {
+    {
+        source = "LICENSES/LuaJIT-MIT.txt",
+        destination = ".luai/licenses/LuaJIT-MIT.txt",
+        content = [====[===============================================================================
+LuaJIT -- a Just-In-Time Compiler for Lua. https://luajit.org/
+
+Copyright (C) 2005-2026 Mike Pall. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+[ MIT license: https://www.opensource.org/licenses/mit-license.php ]
+
+===============================================================================
+[ LuaJIT includes code from Lua 5.1/5.2, which has this license statement: ]
+
+Copyright (C) 1994-2012 Lua.org, PUC-Rio.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+===============================================================================
+[ LuaJIT includes code from dlmalloc, which has this license statement: ]
+
+This is a version (aka dlmalloc) of malloc/free/realloc written by
+Doug Lea and released to the public domain, as explained at
+https://creativecommons.org/licenses/publicdomain
+
+===============================================================================
+]====],
+    },
     {
         source = "LICENSES/Lua-MIT.txt",
         destination = ".luai/licenses/Lua-MIT.txt",
@@ -908,7 +969,7 @@ The native release matrix verifies these archives before use:
 | Lua 5.1.5 | https://www.lua.org/ftp/lua-5.1.5.tar.gz | `2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333` |
 | Lua 5.2.4 | https://www.lua.org/ftp/lua-5.2.4.tar.gz | `b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b` |
 | Lua 5.3.6 | https://www.lua.org/ftp/lua-5.3.6.tar.gz | `fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60` |
-| Lua 5.4.8 | https://www.lua.org/ftp/lua-5.4.8.tar.gz | `4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae` |
+| Lua 5.4.9 | https://www.lua.org/ftp/lua-5.4.9.tar.gz | `2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6` |
 | Lua 5.5.1 | https://www.lua.org/ftp/lua-5.5.1.tar.gz | `1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce` |
 
 A generated bundle's `.luai/manifest.lua` identifies the actual Lua
@@ -916,6 +977,19 @@ major/minor ABI and runtime link mode selected from its build environment.
 Distributors should additionally retain the exact provenance of the runtime
 binary they provide, including downstream patches from an operating-system
 vendor.
+
+## LuaJIT runtime
+
+LuaJIT bundles use LuaJIT 2.1, under the MIT license. Its complete copyright
+notice, including the incorporated Lua license, is reproduced in
+`.luai/licenses/LuaJIT-MIT.txt`. Upstream: https://luajit.org/.
+
+The LuaJIT test matrix pins commit `2a8e017ef1ece6a95b983ffca073d30609dce7c4`
+from https://github.com/LuaJIT/LuaJIT. The corresponding source archive is
+https://codeload.github.com/LuaJIT/LuaJIT/tar.gz/2a8e017ef1ece6a95b983ffca073d30609dce7c4
+(SHA-256 `54705d4b1de50a9c668539b9cf0dc3170d94ffdad51fafd1cf4477e498be7144`).
+The bundle manifest records its selected runtime kind, version and build
+configuration. Distributors should retain provenance for any downstream patches.
 
 ## luainstaller generated runtime and launcher
 
@@ -979,8 +1053,8 @@ and a fresh luainstaller build.
 
 == Relinking the launcher
 
-. Use an official Lua interpreter and library with the same
-  major and minor ABI shown in `../manifest.lua`.
+. Use the runtime kind and Lua ABI shown in `../manifest.lua`.
+  For LuaJIT, match its version, GC64 and Lua 5.2 compatibility settings too.
 . Use a native compiler for the target operating system and
   architecture. Cross-compilation is outside the supported native
   relinking profile.

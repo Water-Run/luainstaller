@@ -8,11 +8,12 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local cgen = require("luainstaller.cgen")
 local compat = require("luainstaller.compat")
+local lua_abi = require("luainstaller.lua_abi")
 
 local M = {}
 
@@ -216,6 +217,12 @@ static int luai_runtime_matches(lua_State *L)
     version = lua_tostring(L, -1);
     matches = version != NULL && strcmp(version, "@LUA_VERSION@") == 0;
     lua_pop(L, 1);
+    if (matches)
+    {
+        matches = luaL_dostring(L, @RUNTIME_CHECK@) == 0;
+        if (!matches) fprintf(stderr, "%s\n", lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
     return matches;
 }
 
@@ -278,35 +285,19 @@ local function readFile(path)
 end
 
 local function luaVersionInfo(configured)
-    local current = configured or compat.luaVersion()
-    local major = tonumber(current.major)
-    local minor = tonumber(current.minor)
-    local number = tonumber(current.num) or (major and minor and (major * 100 + minor))
-    if current.official == false then
-        error({
-            type = "UnsupportedLuaVersionError",
-            message = "LuaJIT and other non-official Lua runtimes are not supported",
-            lua_version = current.version,
-        })
+    local info, err = lua_abi.validateInfo(configured)
+    if not info then
+        error({type="UnsupportedLuaVersionError", message=err,
+            lua_version=configured and configured.version})
     end
-    if major ~= 5 or not minor or minor < 1 or minor > 5 or not number then
-        error({
-            type = "UnsupportedLuaVersionError",
-            message = "A supported official Lua 5.1 through 5.5 ABI is required to generate a launcher",
-            lua_version = current.version,
-        })
-    end
-    return {
-        version = string.format("Lua %d.%d", major, minor),
-        major = major,
-        minor = minor,
-        num = number,
-        abi = current.abi or string.format("lua%d.%d", major, minor),
-    }
+    return info
 end
 
 local function renderTemplate(template, lua_version)
     template = template:gsub("@LUA_VERSION@", lua_version.version)
+    template = template:gsub("@RUNTIME_CHECK@", function()
+        return lua_abi.checkCString(lua_version)
+    end)
     return template
 end
 

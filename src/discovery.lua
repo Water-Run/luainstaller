@@ -88,29 +88,21 @@ local function cleanupWorkDir(path_value, failure)
     return failure or cleanup_err
 end
 
-local LUA_IDENTITY_PROBE = table.concat({
-        "local major, minor = tostring(_VERSION):match('Lua%s+(%d+)%.(%d+)')",
-        "major, minor = tonumber(major), tonumber(minor)",
-        "local j = rawget(_G, 'jit')",
-        "if major ~= 5 or not minor or minor < 1 or "
-            .. "(type(j) == 'table' and type(j.version) == 'string' and type(j.status) == 'function') then "
-            .. "io.stderr:write('expected official Lua 5.1+, got ', tostring(_VERSION), '\\n'); "
-            .. "os.exit(42) end",
-        "io.write(_VERSION)",
-    }, ";")
-
 local function validateLuaInterpreter(interpreter, expected_abi)
+    local expected = lua_abi.info()
+    local probe = "(function()\n" .. lua_abi.checkSource(expected) .. "\nend)(); io.write(_VERSION)"
     local ok, output, status = process.outputCommand(interpreter, {
-        "-e", LUA_IDENTITY_PROBE,
+        "-e", probe,
     }, {}, {timeout_seconds=10, max_output_bytes=4096})
     local actual_abi = lua_abi.normalize(output)
     if not ok or actual_abi ~= expected_abi then
         return nil, makeError(
             "ToolchainError",
-            "Runtime discovery interpreter must be official Lua and match the active Lua ABI",
+            "Runtime discovery interpreter must match the active runtime kind, version and build",
             {
                 interpreter = interpreter,
                 expected_abi = expected_abi,
+                expected_runtime = expected,
                 actual_abi = actual_abi,
                 output = output,
                 command_status = status,
@@ -154,8 +146,9 @@ local function luaInterpreter(opts, expected_abi)
         end
     end
 
-    if not seen.lua then
-        local identity = validateLuaInterpreter("lua", expected_abi)
+    local fallback = lua_abi.info().kind == "luajit" and "luajit" or "lua"
+    if not seen[fallback] then
+        local identity = validateLuaInterpreter(fallback, expected_abi)
         if identity then return identity end
     end
 
@@ -395,7 +388,41 @@ end
 -- use --include for those. os.exit is wrapped so records are flushed first.
 local function traceScript(entry, output_path, opts)
     local entry_dir = dirname(absolutePath(entry))
+    local builtin_names = {}
+    for _, name in ipairs(lua_abi.builtinNames()) do
+        builtin_names[#builtin_names + 1] = string.format("%q", name)
+    end
+    local ffi_bindings = {}
+    for name, filename in pairs(opts.ffi_libraries or {}) do
+        ffi_bindings[#ffi_bindings + 1] = "[" .. string.format("%q", name) .. "]=" .. string.format("%q", filename)
+    end
+    table.sort(ffi_bindings)
     return string.format([[
+local builtin_preloads = {}
+local builtin_loaded = {}
+for _, name in ipairs({%s}) do
+    local global_value = _G
+    for part in name:gmatch("[^.]+") do
+        global_value = type(global_value) == "table" and rawget(global_value, part) or nil
+    end
+    local loaded = package.loaded[name]
+    if type(loaded) == "table" and loaded == global_value then builtin_loaded[name] = loaded end
+    local loader = package.preload[name]
+    if type(loader) == "function" and debug.getinfo(loader, "S").what == "C" then
+        builtin_preloads[name] = loader
+        -- LuaJIT can load ffi while compiling an LL/ULL/complex literal,
+        -- before the first observed require. Bind its trusted builtin now.
+        if not loaded then builtin_loaded[name] = require(name) end
+    end
+end
+local ffi_bindings = {%s}
+if next(ffi_bindings) then
+    local ffi = require("ffi")
+    local original_ffi_load = ffi.load
+    ffi.load = function(name, ...)
+        return original_ffi_load(ffi_bindings[name] or name, ...)
+    end
+end
 local output_path = %q
 local entry = %q
 local entry_dir = %q
@@ -515,6 +542,10 @@ local function read_all(source_path)
 end
 local function capture_loader_snapshot(record, loader, loader_path)
     if type(record) ~= "table" then return end
+    if builtin_preloads[record.name] == loader then
+        record.builtin = true
+        return
+    end
     if type(loader_path) ~= "string" then
         error("LUAINSTALLER_RUNTIME_LOADER_UNVERIFIABLE: missing loader data", 0)
     end
@@ -600,6 +631,9 @@ package.cpath = table.concat({
     entry_dir .. "/?/init.dll",
 }, ";") .. ";" .. package.cpath
 require = function(name)
+    if builtin_loaded[name] and package.loaded[name] == builtin_loaded[name] then
+        return original_require(name)
+    end
     local info = debug.getinfo(2, "S") or {}
     local source = tostring(info.source or "")
     if source:sub(1, 1) == "@" then
@@ -636,6 +670,10 @@ require = function(name)
         discard_record(record)
         error(result[2], 0)
     end
+    if record and record.builtin then
+        builtin_loaded[name] = package.loaded[name]
+        discard_record(record)
+    end
     if record then
         recorded_names[module_key] = true
     end
@@ -657,7 +695,8 @@ flush_records()
 if not ok then
     error(err)
 end
-]], output_path, entry, entry_dir, opts.max_source_bytes or 8388608,
+]], table.concat(builtin_names, ","), table.concat(ffi_bindings, ","),
+        output_path, entry, entry_dir, opts.max_source_bytes or 8388608,
         opts.max_bundle_bytes or 134217728, opts.max_trace_bytes or 33554432,
         (opts.max_deps or DEFAULT_MAX_DEPS) + 64)
 end
@@ -727,7 +766,7 @@ local function runtimePlan(opts, lifecycle)
     local expected_abi, abi_err = lua_abi.current()
     if not expected_abi then
         return nil, makeError("ToolchainError", tostring(abi_err), {
-            expected_abi = "official Lua 5.1 through 5.5",
+            expected_abi = "official Lua 5.1 through 5.5 or LuaJIT 2.1",
         })
     end
     local identity, interpreter_err = luaInterpreter(opts, expected_abi)
@@ -961,6 +1000,24 @@ function M.plan(opts, config)
     end
     mode = mode or "static"
 
+    local initial_source_hashes = config.initial_source_hashes
+    if next(opts.ffi_libraries or {}) then
+        local selected, names = {}, 0
+        for _, filename in pairs(opts.ffi_libraries) do
+            names = names + 1
+            if not listContains(selected, filename) then selected[#selected + 1] = filename end
+        end
+        if names > (opts.max_deps or DEFAULT_MAX_DEPS) then
+            return nil, makeError("DependencyLimitExceededError", "FFI library count exceeds max_deps", {
+                current_count=names, limit=opts.max_deps or DEFAULT_MAX_DEPS,
+            })
+        end
+        local snapshot, snapshot_err = finalizeSourceSnapshots({scripts={}, libraries=selected}, opts,
+            initial_source_hashes)
+        if not snapshot then return nil, snapshot_err end
+        initial_source_hashes = snapshot.source_hashes
+    end
+
     local raw
     local err
     if mode == "static" then
@@ -989,7 +1046,15 @@ function M.plan(opts, config)
     if not planned then
         return nil, manual_err
     end
-    return finalizeSourceSnapshots(planned, opts, config.initial_source_hashes)
+    planned.ffi_libraries = {}
+    for name, filename in pairs(opts.ffi_libraries or {}) do
+        planned.ffi_libraries[name] = filename
+        if not listContains(planned.libraries, filename) then
+            planned.libraries[#planned.libraries + 1] = filename
+        end
+    end
+    table.sort(planned.libraries)
+    return finalizeSourceSnapshots(planned, opts, initial_source_hashes)
 end
 
 return M

@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local fs = require("luainstaller.fs")
@@ -192,6 +192,7 @@ function M.buildPayload(opts)
         },
         modules = {},
         native_modules = {},
+        ffi_libraries = {},
         module_records = {},
     }
 
@@ -238,6 +239,11 @@ function M.buildPayload(opts)
         end
     end
 
+    local ffi_paths = {}
+    for name, library in pairs(dependencies.ffi_libraries or {}) do
+        ffi_paths[normalizePath(absolutePath(library))] = true
+        payload.ffi_libraries[name] = { path = basename(library) }
+    end
     for _, library in ipairs(dependencies.libraries or {}) do
         local canonical = normalizePath(absolutePath(library))
         local configured = opts.native_module_names
@@ -245,7 +251,8 @@ function M.buildPayload(opts)
                 or opts.native_module_names[normalizePath(library)]
                 or opts.native_module_names[canonical])
         local filename = basename(library)
-        local aliases = moduleAliases(configured, filename:gsub("%.[^%.]+$", ""), canonical)
+        local aliases = (not ffi_paths[canonical] or configured)
+            and moduleAliases(configured, filename:gsub("%.[^%.]+$", ""), canonical) or {}
         for _, name in ipairs(aliases) do
             if payload.modules[name] or (payload.native_modules[name]
                 and payload.native_modules[name].source_path ~= canonical) then
@@ -288,6 +295,12 @@ local function emitPayload(payload)
     for _, name in ipairs(sortedKeys(payload.native_modules)) do
         lines[#lines + 1] = "    [" .. quote(name) .. "] = { path = "
             .. quote(payload.native_modules[name].path) .. " },"
+    end
+    lines[#lines + 1] = "  },"
+    lines[#lines + 1] = "  ffi_libraries = {"
+    for _, name in ipairs(sortedKeys(payload.ffi_libraries)) do
+        lines[#lines + 1] = "    [" .. quote(name) .. "] = { path = "
+            .. quote(payload.ffi_libraries[name].path) .. " },"
     end
     lines[#lines + 1] = "  },"
     lines[#lines + 1] = "}"
@@ -391,6 +404,11 @@ local function install(payload)
   local native_modules = payload.native_modules or {}
   local searchers = loaderTable()
   local searcher
+  local ffi, original_ffi_load
+  if next(payload.ffi_libraries or {}) then
+    ffi = require("ffi")
+    original_ffi_load = ffi.load
+  end
   searcher = function(module_name)
     local native = native_modules[module_name]
     if native then return loadNativeModule(native, module_name, payload.native_root) end
@@ -399,7 +417,14 @@ local function install(payload)
     return loadPayloadSource(record, "@" .. tostring(record.path or module_name)), record.path
   end
   table.insert(searchers, 2, searcher)
+  if ffi then
+    ffi.load = function(name, ...)
+      local record = payload.ffi_libraries[name]
+      return original_ffi_load(record and joinPath(payload.native_root or ".", record.path) or name, ...)
+    end
+  end
   return function()
+    if ffi then ffi.load = original_ffi_load end
     for i = #searchers, 1, -1 do
       if searchers[i] == searcher then table.remove(searchers, i); break end
     end

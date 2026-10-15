@@ -28,13 +28,16 @@ toc::[]
 [#platforms-lua]
 == Lua 版本
 
-官方的 Lua 5.1、5.2、5.3、5.4 和 5.5 都可以。LuaJIT 不行。
+支持官方 Lua 5.1、5.2、5.3、5.4 和 5.5。LuaJIT 2.1 在原生 Linux x86_64
+与 Windows/MSVC x86_64 环境中测试，参见 xref:LUAJIT.adoc[LuaJIT 打包]。
 
 运行 `luainstaller` 的解释器决定版本。Lua 库以及你打包的每个 C 模块
 都必须是同一个版本。构建结束前，新的可执行文件会被启动一次，以确认各版本一致。
 
 [#platforms-toolchains]
 == 各系统需要什么
+
+下表描述官方 Lua 的构建环境。
 
 [cols="1,2,2",options="header"]
 |===

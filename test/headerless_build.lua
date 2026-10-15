@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-05
 Updated:
-    2026-10-05
+    2026-10-15
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -51,7 +51,8 @@ if config.host.os == "linux" and config.link_mode == "shared" then
     local soname_prefix = path.join(root, "soname-lua")
     assert(fs.makeDirectory(soname_prefix))
     assert(fs.makeDirectory(path.join(soname_prefix, "lib")))
-    local soname = string.format("liblua%d.%d.so.0", config.lua_version.major, config.lua_version.minor)
+    local soname = config.lua_version.kind == "luajit" and "libluajit-5.1.so.2"
+        or string.format("liblua%d.%d.so.0", config.lua_version.major, config.lua_version.minor)
     assert(fs.copyFile(source, path.join(soname_prefix, "lib/" .. soname)))
     if config.runtime_name ~= soname then
         assert(fs.copyFile(source, path.join(soname_prefix, "lib/" .. config.runtime_name)))

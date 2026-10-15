@@ -31,7 +31,8 @@ build/app/app                       # <2>
 <2> 直接运行。机器上不需要 `lua`。
 
 它支持官方 Lua 5.1 到 5.5，可运行于 Linux、Windows（可追溯到
-XP）、macOS、FreeBSD 和 Android/Termux。
+XP）、macOS、FreeBSD 和 Android/Termux。LuaJIT 2.1 单独支持原生
+Linux x86_64 与 Windows/MSVC x86_64，参见 xref:docs/zh-CN/LUAJIT.adoc[LuaJIT 打包]。
 
 toc::[]
 
@@ -61,7 +62,7 @@ NOTE: 构建可执行文件不需要 Lua 头文件。
 
 Windows 上请在编译器的命令提示符中安装和打包，不需要 PowerShell。
 
-* 官方 Lua 解释器，5.1 到 5.5。不支持 LuaJIT。
+* 官方 Lua 5.1 到 5.5，或启用了 FFI 的 LuaJIT 2.1。
 * 适用于当前机器的 C 编译器。
 * 与该解释器版本匹配的 Lua 库，通常随解释器一起安装。
 
@@ -222,6 +223,9 @@ end
 
 |xref:docs/zh-CN/USAGE.adoc[使用]
 |全部选项、依赖发现、原生模块、库 API
+
+|xref:docs/zh-CN/LUAJIT.adoc[LuaJIT]
+|选择 LuaJIT、内置模块、FFI 库与单文件程序
 
 |xref:docs/zh-CN/TROUBLESHOOTING.adoc[故障排查]
 |常见错误及解决方法

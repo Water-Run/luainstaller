@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-06
+    2026-10-15
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -42,7 +42,9 @@ int luaopen_native_probe(lua_State *L) { lua_pushliteral(L, "native-clean-ok"); 
     assert(compiled, compile_output)
     assert(fs.writeFile(path.join(source, "helper.lua"), "return 'pure-clean-ok'\n"))
     local entry = path.join(source, "main.lua")
-    assert(fs.writeFile(entry, [[
+    local runtime_check = config.lua_version.kind == "luajit"
+        and "assert(jit and require('jit.bc').line and require('ffi').abi)\n" or ""
+    assert(fs.writeFile(entry, runtime_check .. [[
 assert(require('helper') == 'pure-clean-ok')
 assert(require('native_probe') == 'native-clean-ok')
 assert(arg[1] == 'space value' and arg[2] == '' and arg[3] == "quote'value")

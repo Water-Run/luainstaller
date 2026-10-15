@@ -31,7 +31,8 @@ run on the wrong kind of machine, which is handy in scripts.
 [#platforms-lua]
 == Lua versions
 
-Official Lua 5.1, 5.2, 5.3, 5.4 and 5.5 work. LuaJIT doesn't.
+Official Lua 5.1, 5.2, 5.3, 5.4 and 5.5 work. LuaJIT 2.1 is tested on native
+Linux x86_64 and Windows/MSVC x86_64. See xref:LUAJIT.adoc[LuaJIT packaging].
 
 The interpreter running `luainstaller` decides the version. The Lua
 library and every C module you bundle must be that same version.
@@ -40,6 +41,8 @@ the versions line up.
 
 [#platforms-toolchains]
 == What each system needs
+
+The table below describes official Lua builds.
 
 [cols="1,2,2",options="header"]
 |===

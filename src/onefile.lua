@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -1611,6 +1611,12 @@ end
 local function selectFileMode(opts, profile)
     local requested = opts.onefile_mode or "auto"
     if requested == "extract" then return "extract", nil, nil, "requested-extract" end
+    if next(opts.dependencies.ffi_libraries or {}) then
+        if requested == "auto" then return "extract", nil, nil, "ffi-libraries" end
+        return nil, makeError("UnsupportedOnefileModeError", "FFI libraries require extract mode", {
+            onefile_mode=requested, reason="ffi-libraries",
+        })
+    end
     if #(opts.dependencies.libraries or {}) > 0 then
         if requested == "auto" then return "extract", nil, nil, "native-modules" end
         return nil, makeError("UnsupportedOnefileModeError", "Native C modules require extract mode", {
@@ -1619,6 +1625,7 @@ local function selectFileMode(opts, profile)
     end
     local static, static_error = toolchain.resolve({target_os=profile.target_os,
         target_arch=profile.target_arch, lua_prefix=opts.lua_prefix,
+        lua=opts.lua, cc=opts.cc, lua_version=opts.manifest and opts.manifest.lua,
         require_static=true})
     if static then return "no-extract", nil, static, "pure-lua-static" end
     if requested == "auto" then return "extract", nil, nil, "static-lua-unavailable" end

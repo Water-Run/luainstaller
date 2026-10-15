@@ -13,7 +13,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local fs = require("luainstaller.fs")
@@ -232,6 +232,8 @@ Fields:
 ]]
 local LuaLexer = {}
 LuaLexer.__index = LuaLexer
+local is_luajit = compat.luaVersion().kind == "luajit"
+local extended_keywords = is_luajit and compat.loadText("const value = 1") ~= nil
 
 
 --@description: Construct a new LuaLexer instance
@@ -266,6 +268,8 @@ function LuaLexer.new(source_code, file_path)
     self.for_trackers = {}
     self.expression_trackers = {}
     self.table_constructor_scopes = {}
+    self.syntax_depth = 0
+    self.ternary_scopes = {}
     return self
 end
 
@@ -306,14 +310,15 @@ function LuaLexer:matchKeyword(keyword)
     end
     if self.pos > 1 then
         local prev = self.source:sub(self.pos - 1, self.pos - 1)
-        if prev:match("[%w_.:]") then
+        if prev:match("[%w_.:\128-\255]")
+            and not (prev == ":" and self.previous_token == "ternary-colon") then
             return false
         end
     end
     local next_pos = self.pos + kw_len
     if next_pos <= self.source_len then
         local nxt = self.source:sub(next_pos, next_pos)
-        if nxt:match("[%w_.:]") then
+        if nxt:match("[%w_.:\128-\255]") then
             return false
         end
     end
@@ -504,9 +509,14 @@ local LUA_KEYWORDS = {
 -- `goto` became reserved in Lua 5.2.  On 5.1 it remains a legal local,
 -- parameter, and loop-variable name, so declaration tracking must treat it
 -- like any other identifier there.
-if _VERSION == "Lua 5.1" then
+if _VERSION == "Lua 5.1" and not compat.luaVersion().lua52compat then
     STATEMENT_KEYWORDS["goto"] = nil
     LUA_KEYWORDS["goto"] = nil
+end
+
+if extended_keywords then
+    STATEMENT_KEYWORDS["const"], LUA_KEYWORDS["const"] = true, true
+    STATEMENT_KEYWORDS["continue"], LUA_KEYWORDS["continue"] = true, true
 end
 
 function LuaLexer:pushShadowScope(kind, local_declaration)
@@ -757,14 +767,20 @@ end
 
 function LuaLexer:consumeNumber()
     local source = self.source:sub(self.pos)
-    local number = source:match("^0[xX][%da-fA-F]*%.?[%da-fA-F]+[pP][%+%-]?%d+")
-        or source:match("^0[xX][%da-fA-F]+")
-        or source:match("^%d+%.?%d*[eE][%+%-]?%d+")
-        or source:match("^%d+%.?%d*")
-        or source:match("^%.%d+[eE][%+%-]?%d+")
-        or source:match("^%.%d+")
+    local number = source:match("^0[xX][%da-fA-F_]*%.?[%da-fA-F_]+[pP][%+%-]?[%d_]+")
+        or source:match("^0[xX][%da-fA-F_]+")
+        or (is_luajit and source:match("^0[bB][01_]+"))
+        or source:match("^%d[%d_]*%.?[%d_]*[eE][%+%-]?[%d_]+")
+        or source:match("^%d[%d_]*%.?[%d_]*")
+        or source:match("^%.[%d_]+[eE][%+%-]?[%d_]+")
+        or source:match("^%.[%d_]+")
     if not number or number == "" then return false end
     self.pos = self.pos + #number
+    if is_luajit then
+        local suffix = self.source:sub(self.pos):match("^[uU]?[lL][lL]")
+            or self.source:sub(self.pos):match("^[iI]")
+        if suffix then self.pos = self.pos + #suffix end
+    end
     return true
 end
 
@@ -879,7 +895,7 @@ function LuaLexer:trackKeyword(identifier, local_function)
         -- qualified field after `.` or `:`, which does not rebind require.
         return
     end
-    if identifier == "local" then
+    if identifier == "local" or (extended_keywords and identifier == "const") then
         self.local_outer_shadowed = self.require_shadowed
         self.local_pending = true
         self.local_expect_name = true
@@ -1053,6 +1069,9 @@ function LuaLexer:parsePcallRequire()
     end
     if self:currentChar() == ")" then
         self.pos = self.pos + 1
+    elseif self:currentChar() == "," then
+        self.syntax_depth = self.syntax_depth + 1
+        self:openExpressionDelimiter()
     elseif self:currentChar() ~= "," then
         error(errors.dynamicRequire(
             self.file_path,
@@ -1148,6 +1167,9 @@ function LuaLexer:parseRequire()
             end
             if self:currentChar() == ")" then
                 self.pos = self.pos + 1
+            elseif self:currentChar() == "," then
+                self.syntax_depth = self.syntax_depth + 1
+                self:openExpressionDelimiter()
             elseif self:currentChar() ~= "," then
                 error(errors.dynamicRequire(
                     self.file_path,
@@ -1243,8 +1265,8 @@ function LuaLexer:extractRequires()
                 end
             end
             self.previous_token = "require"
-        elseif char:match("[%a_]") then
-            local identifier = self.source:match("^([%a_][%w_]*)", self.pos)
+        elseif char:match("[%a_\128-\255]") then
+            local identifier = self.source:match("^([%a_\128-\255][%w_\128-\255]*)", self.pos)
             local local_function = self.local_pending
                 and self.local_expect_name
                 and self.local_names == 0
@@ -1283,6 +1305,38 @@ function LuaLexer:extractRequires()
             self:markExpressionValue()
             assert(self:consumeNumber())
             self.previous_token = "number"
+        elseif is_luajit and (self.source:sub(self.pos, self.pos + 1) == "?."
+            or self.source:sub(self.pos, self.pos + 1) == "->") then
+            error({
+                type = "DiscoveryError",
+                message = "This LuaJIT syntax requires runtime or manual discovery; use --discovery-mode runtime or --no-depscan with --include",
+                script_path = self.file_path,
+                line_number = self.line,
+            })
+        elseif is_luajit and char == "?" then
+            self:finishPendingLocalDeclaration()
+            self:markExpressionOperator()
+            if self:peekChar() == "?" then
+                self.pos = self.pos + 2
+            else
+                local outer = self.ternary_scopes[#self.ternary_scopes]
+                if outer and outer.depth == self.syntax_depth and outer.scope == #self.shadow_stack then
+                    error({type="DiscoveryError", script_path=self.file_path, line_number=self.line,
+                        message="Parenthesize nested LuaJIT conditionals for static discovery, or use runtime/manual discovery"})
+                end
+                self.ternary_scopes[#self.ternary_scopes + 1] = {
+                    depth=self.syntax_depth, scope=#self.shadow_stack,
+                }
+                self.pos = self.pos + 1
+            end
+            self.previous_token = "?"
+        elseif is_luajit and char == ":" and self.ternary_scopes[#self.ternary_scopes]
+            and self.ternary_scopes[#self.ternary_scopes].depth == self.syntax_depth
+            and self.ternary_scopes[#self.ternary_scopes].scope == #self.shadow_stack then
+            table.remove(self.ternary_scopes)
+            self:markExpressionOperator()
+            self.previous_token = "ternary-colon"
+            self.pos = self.pos + 1
         elseif self.source:sub(self.pos, self.pos + 2) == "..." then
             self:finishPendingLocalDeclaration()
             self:finishTrackersBeforeValue()
@@ -1301,6 +1355,7 @@ function LuaLexer:extractRequires()
             self.previous_token = "::"
             self:advanceCharacter()
         elseif char == "(" then
+            self.syntax_depth = self.syntax_depth + 1
             self:finishPendingLocalDeclaration()
             self:openExpressionDelimiter()
             if self.pending_function_params then
@@ -1313,6 +1368,7 @@ function LuaLexer:extractRequires()
             self.previous_token = char
             self:advanceCharacter()
         elseif char == ")" then
+            self.syntax_depth = self.syntax_depth - 1
             self:finishPendingLocalDeclaration()
             self:closeExpressionDelimiter()
             if self.in_params then
@@ -1353,6 +1409,7 @@ function LuaLexer:extractRequires()
             self.previous_token = char
             self:advanceCharacter()
         elseif char == "[" or char == "{" then
+            self.syntax_depth = self.syntax_depth + 1
             self:finishPendingLocalDeclaration()
             self:openExpressionDelimiter()
             if char == "{" then
@@ -1363,6 +1420,7 @@ function LuaLexer:extractRequires()
             self.previous_token = char
             self:advanceCharacter()
         elseif char == "]" or char == "}" then
+            self.syntax_depth = self.syntax_depth - 1
             self:finishPendingLocalDeclaration()
             self:closeExpressionDelimiter()
             if char == "}" then
@@ -1501,8 +1559,8 @@ end
 --@param module_name: string - Dot-separated module name
 --@return: boolean - True when the module name is a builtin name
 function ModuleResolver:isBuiltin(module_name)
-    local abi = lua_abi.current()
-    return abi ~= nil and lua_abi.isBuiltin(abi, module_name)
+    local identity = lua_abi.validateInfo()
+    return identity ~= nil and lua_abi.isBuiltin(identity, module_name)
 end
 
 --@description: Collect a deduplicated list of search directory descriptions

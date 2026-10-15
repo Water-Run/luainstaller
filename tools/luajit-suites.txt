@@ -1,0 +1,15 @@
+luajit_identity
+luajit_syntax
+toolchain_native
+luajit_mismatch
+luajit_integration
+luajit_ffi
+native_bundle
+native_onefile
+headerless_build
+standalone_install
+resource_bounds
+onefile_modes
+distribution_licenses
+output_transaction
+build_cleanup

@@ -133,9 +133,9 @@ Lex literal require and optional pcall. The entry directory is searched
 first. Computed names raise `DynamicRequireError`.
 
 runtime::
-Private directory plus tracer. Official Lua 5.1 and newer. Reject
-LuaJIT, native loader paths, and modules already cached before the
-trace. When the runtime returns loader data naming a readable `.lua`,
+Private directory plus tracer. The child interpreter must match the active
+runtime identity. Native loader paths and external modules cached before
+tracing are rejected; unchanged builtin modules are recognized separately. When the runtime returns loader data naming a readable `.lua`,
 that path is recorded. A single complete completion marker is required.
 
 [#implementation-manifest]
@@ -148,8 +148,15 @@ The in-memory build manifest retains physical paths for verification
 and diagnostics. Manifest v2 uses SHA-256. A mismatch raises
 `SourceChangedError`.
 
-Launcher compile-time guards and `_VERSION` probes use the build
-interpreter's major/minor ABI and run on the native host.
+Runtime kind is independent of the Lua C ABI: LuaJIT uses `lua5.1` while
+`lua.kind` is `luajit`. Its runtime version, OS, architecture, GC64,
+Lua 5.2 compatibility and JIT compiler capability travel with the manifest.
+The same identity source verifies discovery interpreters, linked libraries
+and generated launchers. These probes run on the native host.
+
+Explicit `ffi_libraries` join the native file inventory and source snapshots.
+The bootstrap binds their logical names to copied paths while the application
+runs, then restores `ffi.load`. They do not become `require` modules.
 
 Ownership markers use `luainstaller-generated-output-v2` and recursive
 SHA-256 inventories.

@@ -1,4 +1,4 @@
-.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.6.1" "User Commands"
+.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.7.0" "User Commands"
 .SH NAME
 luai, luainstaller \- package Lua applications for a matching runtime environment
 .SH SYNOPSIS
@@ -43,9 +43,10 @@ shared libraries required by Lua C modules are not copied automatically.
 Linux and macOS builds warn about external and missing libraries. Windows
 reports that DLL dependencies were not checked. These warnings do not stop builds.
 .PP
-Official Lua 5.1 through 5.5 is supported. Runtime
-discovery, linked runtimes, and native modules must all
-match the interpreter's Lua major/minor ABI. LuaJIT is rejected.
+Official Lua 5.1 through 5.5 and LuaJIT 2.1 with FFI are supported.
+LuaJIT is tested on native Linux x86_64 and Windows/MSVC x86_64.
+Discovery and linked runtimes match the active runtime kind, version and
+build configuration. Native modules match its Lua C ABI.
 .PP
 Before publishing, every native backend compiles and executes a linked-runtime
 probe on the build host. Generated launchers repeat the runtime version check
@@ -120,6 +121,11 @@ Set the output directory or onefile executable path.
 .BI \-\-include " path"
 Add a source file not found by automatic discovery. Repeatable.
 .TP
+.BI \-\-ffi-library " name=path"
+Bundle a LuaJIT FFI shared library under the name passed to ffi.load.
+Repeat for additional names. Automatic single-file mode extracts these libraries;
+no-extract rejects them. Dependencies of those libraries remain system dependencies.
+.TP
 .BI \-\-exclude " value"
 Exclude an exact path, basename, or path suffix. Repeatable. Exclusions take
 precedence over discovery and manual includes.
@@ -153,9 +159,9 @@ Limit combined inputs and the staged bundle. Default: 134217728.
 Limit runtime trace data. Default: 33554432.
 .TP
 .BI \-\-lua " path"
-Select the Lua interpreter used by runtime discovery. It must report exactly
-an official Lua 5.1 through Lua 5.5 version with the same major/minor ABI as
-the active luainstaller process. When omitted, launcher arguments and
+Select the interpreter used by runtime discovery. Its runtime kind, version
+and build configuration must match the active luainstaller process.
+When omitted, launcher arguments and
 .B lua
 on
 .B PATH
@@ -281,8 +287,7 @@ require MoonScript. The API option moon_detect=false skips detection.
 .SH ENVIRONMENT
 .TP
 .B LUAI_LUA
-Default interpreter for runtime discovery. A selected interpreter that is not
-official Lua 5.1 through 5.5 is rejected.
+Default matching interpreter for runtime discovery.
 .TP
 .B LUAI_LUA_PREFIX
 Default matching native Lua library/runtime prefix.
@@ -337,7 +342,7 @@ packaging and generated programs do not require PowerShell.
 Source use also supports lua bin/luai.lua and lua bin/luainstaller.lua.
 See docs/INSTALL.adoc for library use, relocation and removal.
 Package metadata requires Lua
-versions at least 5.1 and below 5.6; luainstaller rejects LuaJIT when used.
+versions at least 5.1 and below 5.6; LuaJIT uses the Lua 5.1 C ABI.
 Lua 5.5 requires LuaRocks 3.13.0 or newer.
 .SH LUA API
 The module

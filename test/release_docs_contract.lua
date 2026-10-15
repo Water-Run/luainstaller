@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.6.1-1.rockspec",
+    "luainstaller-1.7.0-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -92,8 +92,28 @@ expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查"
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
-expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.6.1-1.rockspec")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.7.0-1.rockspec")
 expect_contains("docs/TESTING.adoc", "test/no_lua_target.lua")
+for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
+    expect_contains(prefix .. "LUAJIT.adoc", "--ffi-library")
+    expect_contains(prefix .. "LUAJIT.adoc", "ffi_libraries")
+    expect_contains(prefix .. "LUAJIT.adoc", "jit.bc")
+    expect_contains(prefix .. "TROUBLESHOOTING.adoc", "[#troubleshooting-luajit]")
+    for _, needle in ipairs({".github/workflows/luajit.yml", "test/luajit_mismatch.lua",
+        "luajit-linux-<configuration>-evidence", "luajit-windows-<configuration>-evidence"}) do
+        expect_contains(prefix .. "TESTING.adoc", needle)
+    end
+end
+expect_contains("README.adoc", "docs/LUAJIT.adoc")
+expect_contains("README.zh-CN.adoc", "docs/zh-CN/LUAJIT.adoc")
+expect_not_contains("README.adoc", "LuaJIT isn't supported")
+expect_not_contains("luainstaller.1", "LuaJIT is rejected")
+local jit_workflow = read_file(".github/workflows/luajit.yml")
+for _, needle in ipairs({"default, lua52compat, nogc64", "default, lua52compat",
+    "tools/test-luajit.sh", "test-luajit.ps1", "if: always()",
+    "if-no-files-found: error", "retention-days: 14"}) do
+    assert(jit_workflow:find(needle, 1, true), "LuaJIT gate contract missing: " .. needle)
+end
 expect_contains("docs/zh-CN/TESTING.adoc", "test/no_lua_target.lua")
 expect_contains("docs/INSTALL.adoc", "PowerShell isn't needed")
 expect_contains("docs/PLATFORMS-NATIVE-LIMITS.adoc",

@@ -1,0 +1,86 @@
+= Packaging LuaJIT applications
+:sectanchors:
+ifdef::env-github[]
+:note-caption: :information_source:
+:tip-caption: :bulb:
+endif::[]
+
+xref:../README.adoc#documentation-index[Back to documentation index]
+
+Use LuaJIT 2.1 with FFI enabled. LuaJIT packaging is tested on native Linux
+x86_64 and Windows x86_64 with MSVC. The generated program carries its
+LuaJIT runtime; the target machine doesn't need LuaJIT installed.
+
+[#luajit-install]
+== Choose LuaJIT
+
+Run the installer with the LuaJIT interpreter you want to package:
+
+[source,bash]
+----
+luajit tools/install.lua --prefix "$HOME/luainstaller-jit"
+export PATH="$HOME/luainstaller-jit/bin:$PATH"
+luai -b app/main.lua -o build/app
+----
+
+From a source checkout, you can also run `luajit bin/luai.lua -b app/main.lua`.
+On Windows, use the same commands from your compiler's command prompt, with
+an absolute Windows path for `--prefix`.
+
+The interpreter running the tool chooses the runtime. `--lua-prefix` selects
+the matching LuaJIT library if automatic discovery needs help. `--lua` chooses
+a matching interpreter for runtime discovery; it doesn't change the runtime
+used by the build.
+
+NOTE: Official Lua 5.1 and LuaJIT share a C API, but they are separate runtime
+choices. The tool checks the LuaJIT version and build configuration before
+using a library.
+
+[#luajit-modules]
+== Modules and source
+
+`bit`, `jit`, `ffi`, `jit.util`, `jit.opt`, `jit.profile` and `string.buffer`
+come from LuaJIT itself. Lua modules such as `jit.bc` and `jit.dump` are found
+and packaged like other dependencies. Keep their source files available
+when building.
+
+Input is Lua source, including LuaJIT integer and complex literals.
+For syntax that static discovery cannot follow, use runtime discovery or
+manual discovery with `--include`. See
+xref:TROUBLESHOOTING.adoc#troubleshooting-luajit[LuaJIT diagnostics].
+
+[#luajit-ffi]
+== External FFI libraries
+
+Declare a library loaded with `ffi.load` by the name your program uses:
+
+[source,lua]
+----
+local ffi = require("ffi")
+local codec = ffi.load("codec")
+----
+
+[source,bash]
+----
+luai -b app/main.lua --ffi-library codec=/opt/app/libcodec.so -o build/app
+----
+
+On Windows, point the option to the matching DLL. Repeat `--ffi-library` for
+additional names. In the Lua API, use `ffi_libraries = { codec = "path/to/library" }`.
+
+The bundle loads a declared name from its copied library. A missing or broken
+copy reports an error. Undeclared names keep LuaJIT's normal system lookup.
+Libraries needed by that library are still system dependencies; check the
+build warnings and test on a clean target.
+
+[#luajit-onefile]
+== Single-file programs
+
+Code using built-in FFI and `ffi.C` can use `--file-mode no-extract` when a
+matching static LuaJIT library is available. C modules and declared external
+FFI libraries need files on disk, so `auto` selects `extract` for them.
+
+The application controls JIT compilation with `jit.on()` and `jit.off()`.
+Both settings work inside the packaged program.
+
+xref:../README.adoc#documentation-index[Back to documentation index]
