@@ -279,6 +279,8 @@ rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 
 缺少 FFI 库时，用 `--ffi-library` 声明其 `ffi.load` 名称。
 外部 FFI 库使用目录包或 `extract` 单文件模式。
+Windows 的静态 CRT 构建（`/MT`）不会通过 `ffi.C` 导出 `abs` 等 CRT 函数。
+可以显式加载所需的系统库，或使用动态 CRT 构建的 LuaJIT 运行库。
 参见 xref:LUAJIT.adoc[LuaJIT 打包]。
 
 xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]

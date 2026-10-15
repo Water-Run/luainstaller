@@ -47,8 +47,13 @@ assert(type(2i) == "cdata")
 assert(type(util.funcinfo) == "function" and type(profile.start) == "function")
 assert(buffer.new():put("LuaJIT"):get() == "LuaJIT")
 assert(type(bc.line) == "function")
-ffi.cdef("int abs(int);")
-assert(ffi.C.abs(-42) == 42)
+if jit.os == "Windows" then
+    ffi.cdef("unsigned long GetCurrentProcessId(void);")
+    assert(ffi.C.GetCurrentProcessId() > 0)
+else
+    ffi.cdef("int abs(int);")
+    assert(ffi.C.abs(-42) == 42)
+end
 if arg[1] == "off" then jit.off() else jit.on() end
 local sum = 0
 for i = 1, 100000 do sum = sum + i end

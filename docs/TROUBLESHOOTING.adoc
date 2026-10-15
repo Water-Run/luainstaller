@@ -301,6 +301,9 @@ other source modules.
 
 For a missing FFI library, declare its `ffi.load` name with `--ffi-library`.
 External FFI libraries use directory bundles or the `extract` single-file mode.
+On Windows, a static CRT build (`/MT`) doesn't export CRT functions such as
+`abs` through `ffi.C`. Load the needed system library explicitly, or use
+a LuaJIT runtime built with a shared CRT.
 See xref:LUAJIT.adoc[LuaJIT packaging].
 
 xref:../README.adoc#documentation-index[Back to documentation index]
