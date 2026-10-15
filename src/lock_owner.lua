@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local hash = require("luainstaller.hash")
@@ -260,7 +260,14 @@ function M.isAlive(pid, identity)
             return nil, "owner belongs to a different host, boot or process namespace"
         end
         local current, identity_err, dead = processIdentity(pid)
-        if current then return not dead and current == identity end
+        if current then
+            if dead or current ~= identity then return false end
+            -- A terminated Windows process retains its start identity while
+            -- another handle keeps the process object alive. Identity alone
+            -- is therefore not a liveness check on this host.
+            if IS_WINDOWS then return M.isAlive(pid) end
+            return true
+        end
         local alive, alive_err = M.isAlive(pid)
         if alive == false then return false end
         return nil, identity_err or alive_err
