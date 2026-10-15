@@ -126,6 +126,47 @@ int lua_pcallk(lua_State *L, int nargs, int nresults, int errfunc,
 #define lua_pushcfunction(L,f) lua_pushcclosure(L, (f), 0)
 #define luaL_dostring(L,s) (luaL_loadstring(L, (s)) || lua_pcall(L, 0, LUA_MULTRET, 0))
 
+@RUNTIME_PREPARE@
+#endif
+]=]
+
+-- MSVC delay imports let main select the adjacent DLL by its full path before
+-- any Lua call. An application directory containing ';' cannot be represented
+-- in Windows' ordinary DLL search-path list.
+local WINDOWS_RUNTIME_PREPARE = [=[
+#if defined(_WIN32) && defined(_MSC_VER) && defined(LUAI_EXECUTABLE)
+#include <windows.h>
+#include <stdio.h>
+#include <string.h>
+#pragma comment(lib, "delayimp.lib")
+#pragma comment(linker, @DELAY_OPTION@)
+#pragma comment(linker, "/delay:nobind")
+static int luai_prepare_runtime(void)
+{
+    wchar_t filename[32768];
+    static const wchar_t dll_name[] = L@LUA_DLL@;
+    DWORD length = GetModuleFileNameW(NULL, filename, 32768);
+    size_t offset = (size_t)length;
+    if (!length || length >= 32768) {
+        fputs("luainstaller: cannot locate the executable's Lua runtime\n", stderr);
+        return 0;
+    }
+    while (offset && filename[offset - 1] != L'\\' && filename[offset - 1] != L'/') --offset;
+    if (!offset || offset + sizeof(dll_name) / sizeof(dll_name[0]) > 32768) {
+        fputs("luainstaller: Lua runtime path is too long\n", stderr);
+        return 0;
+    }
+    memcpy(filename + offset, dll_name, sizeof(dll_name));
+    if (!LoadLibraryExW(filename, NULL, 0)) {
+        fprintf(stderr, "luainstaller: cannot load %ls beside the executable (Windows error %lu)\n",
+            dll_name, (unsigned long)GetLastError());
+        return 0;
+    }
+    return 1;
+}
+#define LUAI_PREPARE_RUNTIME() if (!luai_prepare_runtime()) return 70
+#else
+#define LUAI_PREPARE_RUNTIME() ((void)0)
 #endif
 ]=]
 local configured_timeout = tonumber(os.getenv("LUAI_CMD_TIMEOUT"))
@@ -835,13 +876,16 @@ local function probeSource(lua_version, module_pattern)
     local source = [[
 #include <stdio.h>
 #include <string.h>
+#define LUAI_EXECUTABLE 1
 #include "lua_min.h"
 
 int main(void) {
-    lua_State *state = luaL_newstate();
+    lua_State *state;
     const char *version;
     int matches;
     int module_status;
+    LUAI_PREPARE_RUNTIME();
+    state = luaL_newstate();
     if (!state) return 70;
     luaL_openlibs(state);
     lua_getglobal(state, "_VERSION");
@@ -1009,6 +1053,17 @@ function M.writeLuaHeader(config, directory)
         })
     end
     local content = LUA_MIN_HEADER:gsub("@LUA_ABI@", tostring(lua_version.num))
+    local preparation = "#define LUAI_PREPARE_RUNTIME() ((void)0)\n"
+    if config.host and config.host.os == "windows" and config.compiler_family == "msvc"
+        and config.runtime_path and not (config.profile and config.profile.require_static) then
+        local dll_name = config.runtime_name or path.basename(config.runtime_path)
+        preparation = WINDOWS_RUNTIME_PREPARE:gsub("@LUA_DLL@", function()
+            return cStringLiteral(dll_name)
+        end):gsub("@DELAY_OPTION@", function()
+            return cStringLiteral("/delayload:" .. dll_name)
+        end)
+    end
+    content = content:gsub("@RUNTIME_PREPARE@", function() return preparation end)
     local wrote, write_err = fs.writeFile(header_path, content)
     if not wrote then
         return makeError("FilesystemError", "Cannot write the minimal Lua header", {
@@ -1654,6 +1709,7 @@ local function verifyCandidate(config, candidate)
     config.library_dir = candidate.library_dir
     config.library_path = candidate.library_path
     config.runtime_path = candidate.runtime_path
+    config.runtime_name = nil
     config.link_args = candidateLinkArgs(config, candidate)
     config.pkg_config_module = candidate.pkg_config_module
     config.discovery_source = candidate.source

@@ -30,6 +30,7 @@
 #include <unistd.h>
 #endif
 
+#define LUAI_EXECUTABLE 1
 #include "lua_min.h"
 
 static int luai_traceback(lua_State *L)
@@ -212,6 +213,7 @@ int main(int argc, char **argv)
     int status;
     int traceback_index;
 
+    LUAI_PREPARE_RUNTIME();
     L = luaL_newstate();
     if (L == NULL)
     {

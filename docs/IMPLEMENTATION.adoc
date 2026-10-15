@@ -154,6 +154,10 @@ Lua 5.2 compatibility and JIT compiler capability travel with the manifest.
 The same identity source verifies discovery interpreters, linked libraries
 and generated launchers. These probes run on the native host.
 
+MSVC executables delay-load the Lua DLL and load its adjacent copy by a full
+Windows path before creating a state. The generated `lua_min.h` retains the
+loader and linker directives for relinking. Native C modules keep ordinary imports.
+
 Explicit `ffi_libraries` join the native file inventory and source snapshots.
 The bootstrap binds their logical names to copied paths while the application
 runs, then restores `ffi.load`. They do not become `require` modules.

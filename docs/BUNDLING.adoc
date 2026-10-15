@@ -63,6 +63,9 @@ app/
 The executable finds its own `.luai/` folder by asking the operating
 system, so starting it through a symlink or from `PATH` works.
 
+Windows/MSVC launchers load the Lua DLL from their own directory. A missing
+copy reports an error instead of loading Lua from the build machine's `PATH`.
+
 [#bundling-lua]
 == Where modules are looked up
 

@@ -689,12 +689,15 @@ local function abiProbeSource(lua_version)
     local source = [[
 #include <stdio.h>
 #include <string.h>
+#define LUAI_EXECUTABLE 1
 #include "lua_min.h"
 
 int main(void) {
-    lua_State *state = luaL_newstate();
+    lua_State *state;
     const char *version;
     int matches;
+    LUAI_PREPARE_RUNTIME();
+    state = luaL_newstate();
     if (!state) return 70;
     luaL_openlibs(state);
     lua_getglobal(state, "_VERSION");

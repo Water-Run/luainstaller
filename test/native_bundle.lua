@@ -195,6 +195,20 @@ for _, name in ipairs(names) do
             .. "\nprocess status: " .. tostring(moved_status and moved_status.code)
             .. " / " .. tostring(moved_status and moved_status.reason))
 end
+if native_config.host.os == "windows" and native_config.compiler_family == "msvc" then
+    local dll = path.join(relocated, native_config.runtime_name)
+    local held = dll .. ".held"
+    assert(fs.rename(dll, held))
+    local ran, diagnostic = process.outputCommand(
+        path.join(relocated, path.basename(built.executable)), {}, {
+            PATH=path.dirname(native_config.runtime_path) .. ";" .. (os.getenv("PATH") or ""),
+            LUA_PATH="", LUA_CPATH="",
+        }
+    )
+    assert(fs.rename(held, dll))
+    assert(not ran and not diagnostic:find("native-probe-ok", 1, true),
+        "missing bundled Lua DLL fell back to the build installation")
+end
 assert(fs.removeFile(path.join(relocated, ".luai/native/luai_native_probe." .. native_extension)))
 local missing_ok, missing_output = process.outputCommand(
     path.join(relocated, path.basename(built.executable)), {}, hostile_environment
