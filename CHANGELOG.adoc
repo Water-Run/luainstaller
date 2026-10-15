@@ -22,6 +22,8 @@ truth for the exact contents of a published version.
   both CLIs.
 * Manual MoonScript builds preprocess the entry and explicitly included files.
   Unselected sources no longer cause compilation errors or target collisions.
+* CI retains complete POSIX matrix logs alongside Windows evidence and reports
+  missing required logs as an error.
 
 === Documentation
 

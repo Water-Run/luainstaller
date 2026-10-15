@@ -67,6 +67,21 @@ expect_contains("docs/PLATFORMS-NATIVE-LIMITS.adoc", "weren't checked")
 expect_contains("docs/USAGE.adoc", "Build results include a `warnings` list")
 expect_contains("docs/USAGE.adoc", "Use manual discovery with `--include`, or use runtime discovery.")
 expect_contains("docs/zh-CN/USAGE.adoc", "用手动模式配合 `--include` 列出模块， 或者改用运行时模式。")
+
+local workflow = read_file(".github/workflows/ci.yml")
+local posix_matrix = assert(workflow:match("\n  version%-matrix:(.-)\n  linux%-x86%-native:"),
+    "POSIX version matrix job is missing")
+local windows_matrix = assert(workflow:match("\n  windows%-version%-matrix:(.*)"),
+    "Windows version matrix job is missing")
+for _, matrix in ipairs({
+    {text=posix_matrix, artifact="posix-lua-${{ matrix.lua }}-evidence"},
+    {text=windows_matrix, artifact="windows-lua-${{ matrix.lua }}-evidence"},
+}) do
+    for _, needle in ipairs({matrix.artifact, "if: always()", "actions/upload-artifact@",
+        "*.log", "if-no-files-found: error", "retention-days: 14"}) do
+        assert(matrix.text:find(needle, 1, true), "matrix evidence contract missing: " .. needle)
+    end
+end
 expect_contains("CHANGELOG.adoc", "This release reduces build setup")
 expect_contains("CHANGELOG.adoc", "Lua headers and development metadata aren't required")
 expect_contains("README.adoc", "A Lua library that matches that interpreter's version")
@@ -100,6 +115,9 @@ expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "使用相同的输出路径�
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "不保证 断电后的持久性")
 
 for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
+    for _, artifact in ipairs({"posix-lua-<version>-evidence", "windows-lua-<version>-evidence"}) do
+        expect_contains(prefix .. "TESTING.adoc", artifact)
+    end
     for _, needle in ipairs({"--file-mode", "auto", "extract", "no-extract", "moon_detect = false"}) do
         expect_contains(prefix .. "USAGE.adoc", needle)
     end

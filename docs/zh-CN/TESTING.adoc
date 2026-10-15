@@ -311,6 +311,10 @@ x86_64 与带 MSVC 的 Windows x86_64，外加原生 Linux x86 Lua 5.4 作业。
 的 `PASS` 记录。`version_contract.lua` 还会将解释器确切的补丁横幅与
 锁定的源码摘要进行匹配。
 
+GitHub Actions 将这些日志保留 14 天，产物名为
+`posix-lua-<version>-evidence` 和 `windows-lua-<version>-evidence`，
+矩阵作业失败时也会保留日志。
+
 [#testing-systems]
 == 必需的 CI 运行器类别
 

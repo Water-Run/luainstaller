@@ -337,6 +337,10 @@ Each per-version evidence log must contain both `lua ABI capabilities
 ok` and the final `PASS` record. `version_contract.lua` also matches the
 interpreter's exact patch banner to the pinned source digest.
 
+GitHub Actions retains these logs for 14 days as
+`posix-lua-<version>-evidence` and `windows-lua-<version>-evidence`
+artifacts, including logs from failed matrix jobs.
+
 [#testing-systems]
 == Required CI runner classes
 

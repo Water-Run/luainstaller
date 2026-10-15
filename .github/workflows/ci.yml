@@ -166,6 +166,15 @@ jobs:
             sh tools/test-lua-versions.sh
         timeout-minutes: 180
 
+      - name: Upload POSIX evidence
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: posix-lua-${{ matrix.lua }}-evidence
+          path: /tmp/luainstaller-lua-evidence/*.log
+          if-no-files-found: error
+          retention-days: 14
+
   linux-x86-native:
     name: Linux x86 native Lua 5.4
     runs-on: ubuntu-latest
@@ -250,5 +259,5 @@ jobs:
         with:
           name: windows-lua-${{ matrix.lua }}-evidence
           path: ${{ env.WINDOWS_EVIDENCE_DIR }}/*.log
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
