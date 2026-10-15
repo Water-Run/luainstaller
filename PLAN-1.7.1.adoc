@@ -2,7 +2,7 @@
 :toc:
 :sectanchors:
 
-基线为已发布的 `v1.7.0`。本轮交付包括详细审计、实现、完整验收和正式发布。
+基线为 `v1.7.0`。详细审计、实现、完整验收和正式发布均已完成。
 总路线见 xref:PLAN-1.6.1-1.9.0.adoc[开发计划]；审计结论和问题依据见
 xref:AUDIT-1.7.1.adoc[1.7.1 审计记录]。
 
@@ -75,16 +75,29 @@ xref:AUDIT-1.7.1.adoc[1.7.1 审计记录]。
 |原生/Lua/FFI 混合、同一文件的多个用途、排除项、入口和恰好达到上限
 |===
 
-== 发布前完成条件
+== 交付完成情况
 
 [%interactive]
 * [x] 确认缺陷在基线上有失败证据，修复后专项回归通过。
 * [x] 新回归接入官方 Lua 五 ABI、Linux x86 和 LuaJIT 矩阵。
 * [x] 同步版本、rockspec、手册、脚本、双语说明与文档契约。
-* [ ] 全部本地回归通过，审计发现逐项有结论；已确认的高优先级问题关闭。
-* [ ] 发布提交通过 13 个官方 Lua 作业及 5 个 LuaJIT 作业，完整日志下载核验。
-* [ ] 从源码包与 source rock 验证独立安装、1.7.0 升级、两种 CLI、API 和实际产物。
-* [ ] main、标签和五个发布附件身份一致，公开下载与 SHA256SUMS 核验通过。
+* [x] 全部本地回归通过，审计发现逐项有结论；已确认的高优先级问题关闭。
+* [x] 发布提交通过 13 个官方 Lua 作业及 5 个 LuaJIT 作业，完整日志下载核验。
+* [x] 从源码包与 source rock 验证独立安装、1.7.0 升级、两种 CLI、API 和实际产物。
+* [x] 发布时 main、标签和五个发布附件身份一致，公开下载与 SHA256SUMS 核验通过。
+* [x] 完成 xref:PLAN-1.8.0.adoc[1.8.0 完整计划]、xref:PLAN-1.9.0.adoc[1.9.0 草案]
+      和总路线调整，作为发布后的独立文档提交保存。
+
+发布版本：link:https://github.com/Water-Run/luainstaller/releases/tag/v1.7.1[v1.7.1]，
+提交 `ccb1a611c99c59a9fffb5202a535c204c7d8f833`。
+本地验收覆盖 40 个官方 Lua 套件和 23 个 LuaJIT 套件；
+原生门禁为 link:https://github.com/Water-Run/luainstaller/actions/runs/38755502703[官方 Lua 13 个作业]
+和 link:https://github.com/Water-Run/luainstaller/actions/runs/38755078536[LuaJIT 5 个作业]。
+全部 15 份矩阵日志核验完成，LuaJIT 每个配置执行 21 个套件。
+
+源码归档和 source rock 的 215 个受版本控制文件与发布提交逐一匹配。
+tar.gz、zip、rockspec、source rock 和 SHA256SUMS 均经公开下载、字节内容和 SHA-256 核验。
+标签固定发布源代码；main 在其后继续保存审计完成记录与未来版本计划。
 
 发布说明记录真实平台覆盖和保留的部署边界。缺少编译器或头文件的测试按受阻记录，
 不作为成功证据；不从模拟或交叉编译结果扩大平台承诺。
