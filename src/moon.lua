@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-13
 Updated:
-    2026-10-14
+    2026-10-15
 ]]
 
 local fs = require("luainstaller.fs")
@@ -179,6 +179,7 @@ function M.prepare(opts)
                 or item.path:find("/.luai/", 1, true) or item.path:match("^%.luai/")
                 or path.isWithin(original, workspace)
                 or (opts.out and path.isWithin(original, path.absolute(opts.out)))
+                or (manual and not explicit_inputs[WINDOWS and original:lower() or original])
             if not skipped and original ~= original_entry and item.type == "file"
                 and (lower:match("%.lua$") or lower:match("%.moon$") or lower:match("%.so[%.%d]*$")
                     or lower:match("%.dll$") or lower:match("%.dylib$")) then

@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-13
+    2026-10-15
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -191,6 +191,21 @@ require("plugin." .. name)
     })
     assert_error(dynamic, "DynamicRequireError")
     assert_contains(dynamic.error.message, "dynamic")
+    mkdir(dynamic_root .. "/plugin")
+    write_file(dynamic_root .. "/dynamic.lua", "return {}\n")
+    write_file(dynamic_root .. "/plugin/dynamic.lua", "return {}\n")
+    local dynamic_includes = { dynamic_root .. "/dynamic.lua", dynamic_root .. "/plugin/dynamic.lua" }
+    assert_error(luainstaller.analyze({
+        entry = dynamic_root .. "/main.lua",
+        include = dynamic_includes,
+    }), "DynamicRequireError")
+    local explicit_dynamic = luainstaller.analyze({
+        entry = dynamic_root .. "/main.lua",
+        discovery_mode = "manual",
+        include = dynamic_includes,
+    })
+    assert(explicit_dynamic.ok and #explicit_dynamic.dependencies.scripts == 2,
+        "manual discovery with includes must support computed require names")
 
     local limit_root = root .. "/limit"
     mkdir(limit_root)
@@ -695,7 +710,7 @@ local function check_documentation_contract()
     assert_contains(manpage, [[SHA\-256]])
     assert_contains(manpage, "luainstaller-generated-output-v2")
 
-    local rockspec = read_file("luainstaller-1.6.0-1.rockspec")
+    local rockspec = read_file("luainstaller-1.6.1-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
 
     local tool_scripts = table.concat({
@@ -708,7 +723,7 @@ local function check_documentation_contract()
     }, "\n")
     assert_not_contains(tool_scripts, "luainstaller-1.0.0-1.rockspec")
     assert_not_contains(tool_scripts, "luainstaller-1.1.0-1.rockspec")
-    assert_contains(tool_scripts, "luainstaller-1.6.0-1.rockspec")
+    assert_contains(tool_scripts, "luainstaller-1.6.1-1.rockspec")
 
     local direct_output = run(harness.command(lua_command, {
         "test/runtime_bundle/main.lua",

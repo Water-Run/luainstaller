@@ -590,7 +590,7 @@ run_version() {
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.6.0-1.rockspec
+    "$luarocks" lint luainstaller-1.6.1-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/standalone_install.lua
     "$lua" test/toolchain_native.lua

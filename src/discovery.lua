@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -223,18 +223,18 @@ local function makePrivateWorkDir(prefix)
     })
 end
 
-local function applyManualInputs(result, opts)
+local function applyManualInputs(discovered, opts)
     local scripts = {}
     local libraries = {}
     local trace = {}
     local source_hashes = {}
     local excludes = opts.exclude or {}
 
-    for source_path, digest in pairs(result.source_hashes or {}) do
+    for source_path, digest in pairs(discovered.source_hashes or {}) do
         source_hashes[normalizePath(absolutePath(source_path))] = digest
     end
 
-    for _, item in ipairs(result.trace or {}) do
+    for _, item in ipairs(discovered.trace or {}) do
         trace[#trace + 1] = item
     end
 
@@ -257,13 +257,13 @@ local function applyManualInputs(result, opts)
         }
     end
 
-    for _, path in ipairs(result.scripts or {}) do
+    for _, path in ipairs(discovered.scripts or {}) do
         if not isExcluded(path, excludes) and not listContains(scripts, path) then
             scripts[#scripts + 1] = path
         end
     end
 
-    for _, path in ipairs(result.libraries or {}) do
+    for _, path in ipairs(discovered.libraries or {}) do
         if not isExcluded(path, excludes) and not listContains(libraries, path) then
             libraries[#libraries + 1] = path
         end
@@ -315,7 +315,7 @@ local function applyManualInputs(result, opts)
         libraries = libraries,
         trace = trace,
         source_hashes = source_hashes,
-        discovery = result.discovery,
+        discovery = discovered.discovery,
     }
 end
 

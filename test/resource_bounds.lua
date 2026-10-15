@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-12
 Updated:
-    2026-10-12
+    2026-10-15
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -39,6 +39,31 @@ local called, failure = pcall(function()
     rejected = api.analyze({entry=file, discovery_mode="static", max_source_bytes=32})
     assert(not rejected.ok and rejected.error.type == "ResourceLimitExceededError"
         and rejected.error.path == dependency, "oversized dependency was not diagnosed")
+    assert(fs.writeFile(file, "return true\n"))
+    for _, action in ipairs({"analyze", "trace", "compatibility", "bundle"}) do
+        for _, mode in ipairs({"static", "manual", "runtime"}) do
+            local output = path.join(root, action .. "-" .. mode)
+            local returned, response = pcall(api[action], {
+                entry=file, discovery_mode=mode, include={dependency},
+                max_source_bytes=32, out=output,
+            })
+            assert(returned, action .. "/" .. mode .. " escaped the result boundary: " .. tostring(response))
+            assert(not response.ok and response.error.type == "ResourceLimitExceededError"
+                and response.error.resource == "source-bytes" and response.error.limit == 32
+                and response.error.path == dependency, "oversized manual include was not diagnosed")
+            assert(fs.pathType(output) == "missing", "oversized input created an output")
+        end
+    end
+    for _, program in ipairs({"luai", "luainstaller"}) do
+        local code, _, output = harness.invoke_cli(program, {
+            program == "luai" and "-a" or "analyze", file,
+            "--include", dependency, "--max-source-bytes", "32",
+        })
+        assert(code == 1, "CLI accepted an oversized include")
+        harness.assert_contains(output, "ResourceLimitExceededError")
+        harness.assert_not_contains(output, "stack traceback")
+    end
+    assert(fs.writeFile(file, "require('dependency')\n"))
     assert(fs.writeFile(dependency, "return '123456789012345'\n"))
     rejected = api.analyze({entry=file, discovery_mode="static", max_source_bytes=128,
         max_bundle_bytes=32})

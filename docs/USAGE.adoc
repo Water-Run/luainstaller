@@ -102,8 +102,8 @@ Reads your source and follows literal `require` calls such as
 entry script's folder, then uses `package.path` and `package.cpath`.
 +
 A computed name like `require("drivers." .. name)` can't be followed and
-stops the build with `DynamicRequireError`. Add those modules with
-`--include`, or switch modes.
+stops the build with `DynamicRequireError`.
+Use manual discovery with `--include`, or use runtime discovery.
 
 runtime::
 Runs the script once and records what it actually loads. Arguments after

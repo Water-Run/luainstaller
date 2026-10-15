@@ -98,8 +98,8 @@ static（默认）::
 目录开始，再使用 `package.path` 和 `package.cpath`。
 +
 `require("drivers." .. name)` 这样计算出来的名称无法跟踪，构建会以
-`DynamicRequireError` 中止。用 `--include` 补上这些模块，或者改用
-其他模式。
+`DynamicRequireError` 中止。用手动模式配合 `--include` 列出模块，
+或者改用运行时模式。
 
 runtime::
 把脚本真正运行一次，记录它实际加载的内容。`--` 之后的参数会传给

@@ -15,6 +15,19 @@ truth for the exact contents of a published version.
 * Introduction video link in the READMEs: bilibili in the Chinese README,
   YouTube in the English one.
 
+=== Fixed
+
+* Oversized files supplied with `--include` return a structured resource-limit
+  error in all discovery modes and public APIs, with the same diagnostic in
+  both CLIs.
+* Manual MoonScript builds preprocess the entry and explicitly included files.
+  Unselected sources no longer cause compilation errors or target collisions.
+
+=== Documentation
+
+* Dynamic `require` guidance specifies manual discovery with `--include` or
+  runtime discovery.
+
 == 1.6.0 - 2026-10-14
 
 === Added
