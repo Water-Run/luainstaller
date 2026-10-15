@@ -114,7 +114,7 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/lock_identity.lua`
 |进程启动身份、PID 重用、跨主机及命名空间的拒绝恢复，
-以及旧所有权记录的兼容性
+退出后仍被句柄保留的 Windows 进程对象、未知存活状态，以及旧所有权记录的兼容性
 
 |`test/process_bounds.lua`
 |无 GNU timeout 时的时限、子进程输出上限、退出码与参数原样传递

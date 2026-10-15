@@ -120,7 +120,8 @@ interrupted recovery, concurrent retries, and preservation of changed user files
 
 |`test/lock_identity.lua`
 |Process start identity, PID reuse, foreign host and namespace refusal,
-and compatibility with existing ownership records
+retained Windows process objects after exit, unknown liveness, and compatibility
+with existing ownership records
 
 |`test/process_bounds.lua`
 |Deadlines without GNU timeout, capped child output, exit codes and literal arguments

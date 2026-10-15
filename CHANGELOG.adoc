@@ -23,6 +23,9 @@ truth for the exact contents of a published version.
 * Standalone installations copy the LuaJIT license referenced by their notices.
 * Logs with equal timestamps retain write order. Default descending queries
   return the newest record before applying `--limit`.
+* Windows lock recovery checks whether a process has exited after matching
+  its start identity. Handles retained by another process no longer make an
+  exited owner appear alive.
 * Native CI runs the source-normalization and dependency-limit regressions on
   every official Lua ABI and LuaJIT configuration.
 

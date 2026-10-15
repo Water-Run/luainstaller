@@ -223,6 +223,7 @@ jobs:
           "$LUAI_TEST_LUA" test/resource_bounds.lua
           "$LUAI_TEST_LUA" test/dependency_limits.lua
           "$LUAI_TEST_LUA" test/logger_order.lua
+          "$LUAI_TEST_LUA" test/lock_identity.lua
           "$LUAI_TEST_LUA" test/source_normalization.lua
           "$LUAI_TEST_LUA" test/output_parents.lua
           "$LUAI_TEST_LUA" test/build_cleanup.lua

@@ -17,4 +17,5 @@ process_working_directory
 onefile_modes
 distribution_licenses
 output_transaction
+lock_identity
 build_cleanup
