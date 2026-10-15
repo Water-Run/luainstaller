@@ -109,6 +109,44 @@ int main(void)
         return 0;
     }
     if (wcscmp(argv[1], L"sleep") == 0) { Sleep(30000); return 0; }
+    if (wcscmp(argv[1], L"exit86") == 0) return 86;
+    if (wcscmp(argv[1], L"held-exit") == 0 && argc == 5) {
+        PROCESS_INFORMATION exited, observer;
+        wchar_t arguments[8192];
+        DWORD wait_result;
+        int result;
+        if (!start(argv[0], L"exit86", argv[4], &exited)) return 90;
+        if (WaitForSingleObject(exited.hProcess, 5000) != WAIT_OBJECT_0) {
+            TerminateProcess(exited.hProcess, 91);
+            WaitForSingleObject(exited.hProcess, 5000);
+            close_process(&exited);
+            return 91;
+        }
+        if (!GetExitCodeProcess(exited.hProcess, &code) || code != 86) {
+            close_process(&exited);
+            return 92;
+        }
+        result = _snwprintf(arguments, sizeof(arguments) / sizeof(arguments[0]),
+            L"\"%ls\" %lu", argv[3], (unsigned long)exited.dwProcessId);
+        if (result < 0 || (size_t)result >= sizeof(arguments) / sizeof(arguments[0])) {
+            close_process(&exited);
+            return 93;
+        }
+        if (!start(argv[2], arguments, argv[4], &observer)) {
+            close_process(&exited);
+            return 94;
+        }
+        wait_result = WaitForSingleObject(observer.hProcess, 60000);
+        if (wait_result != WAIT_OBJECT_0) {
+            TerminateProcess(observer.hProcess, 95);
+            WaitForSingleObject(observer.hProcess, 5000);
+            code = 95;
+        } else if (!GetExitCodeProcess(observer.hProcess, &code)) code = 96;
+        close_process(&observer);
+        /* Retain the exited child's process object until observation is done. */
+        close_process(&exited);
+        return (int)code;
+    }
     if (wcscmp(argv[1], L"flood") == 0) {
         char data[4096];
         DWORD written;

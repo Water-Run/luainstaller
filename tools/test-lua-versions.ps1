@@ -378,6 +378,7 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
     $env:PATH = "$(Split-Path -Parent $LuaRocks);$luaPrefix;$luaPrefix\bin;$env:PATH"
     Set-Location $ProjectRoot
     if ($PublicationDiagnostic) {
+        Invoke-Native $lua @('test/lock_identity.lua')
         Invoke-Native $lua @('test/output_transaction.lua')
         return
     }
