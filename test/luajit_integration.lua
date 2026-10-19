@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-15
 Updated:
-    2026-10-15
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -90,6 +90,33 @@ print("luajit-bundle-ok", jit.version, arg[1])
     local native, err = toolchain.resolve()
     assert(native, diagnostic(err or {}))
     assert(native.lua_version.kind == "luajit" and native.native_module_verified)
+
+    if native.host.os ~= "windows" and native.host.os ~= "macos"
+        and native.link_mode == "shared" and not native.runtime_path:find("%s") then
+        local canonical_entry = path.join(root, "canonical.lua")
+        local canonical_out = path.join(root, "canonical-runtime")
+        assert(fs.writeFile(canonical_entry, "assert(jit); print('canonical-runtime-ok')\n"))
+        local original_output = process.outputCommand
+        local called, built = pcall(function()
+            -- Bionic ldd reports the resolved file rather than its SONAME alias.
+            process.outputCommand = function(command, arguments, environment, options)
+                if command == "ldd" then
+                    return true, "\t" .. native.runtime_path .. " (0x1)\n"
+                end
+                return original_output(command, arguments, environment, options)
+            end
+            return api.bundle({entry=canonical_entry, out=canonical_out, mode="onedir"})
+        end)
+        process.outputCommand = original_output
+        assert(called, tostring(built))
+        assert(built.ok, diagnostic(built))
+        local ran, output = process.outputCommand(built.executable, {}, {
+            PATH="", LUA_PATH="", LUA_CPATH="",
+            LD_LIBRARY_PATH=path.join(canonical_out, ".luai/native"),
+        })
+        assert(ran and output:find("canonical-runtime-ok", 1, true), output)
+        print("LuaJIT canonical runtime filename ok")
+    end
 
     if require("luainstaller.compat").loadText("const value = 1") then
         local extra = path.join(root, "dependency.lua")

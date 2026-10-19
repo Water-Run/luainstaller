@@ -7,7 +7,7 @@ File:
     toolchain.lua
 Date:
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local compat = require("luainstaller.compat")
@@ -1503,11 +1503,11 @@ local function sharedRuntimeInstallName(config, candidate)
                 else
                     local install_name = trimmed(line)
                     local name = path.basename(install_name)
-                    if name ~= "" and not name:find("[\\/]", 1) then return name end
+                    if name ~= "" and not name:find("[\\/]", 1) then return name, true end
                 end
             end
         end
-        return path.basename(library_path)
+        return path.basename(library_path), false
     end
     for _, inspection in ipairs({
         { "readelf", { "-d", library_path } },
@@ -1524,7 +1524,7 @@ local function sharedRuntimeInstallName(config, candidate)
                     or line:match("^%s*SONAME%s+([^%s]+)")
                 if name and name ~= "" and name == path.basename(name)
                     and not name:find("[%c/\\]") then
-                    return name
+                    return name, true
                 end
             end
         end
@@ -1532,7 +1532,7 @@ local function sharedRuntimeInstallName(config, candidate)
     -- A shared object without DT_SONAME is loaded under the basename supplied
     -- to the linker. This is also the least-surprising fallback when a very
     -- small native environment has no object-file inspection utility.
-    return path.basename(library_path)
+    return path.basename(library_path), false
 end
 
 local LINUX_SYSTEM_LIBRARIES = {
@@ -1856,10 +1856,17 @@ local function verifyCandidate(config, candidate)
             )
         end
         runtime_path = fallback_path
-        local install_name = sharedRuntimeInstallName(config, candidate)
-        runtime_identity = install_name and normalizePath(
-            path.dirname(candidate.library_path) .. "/" .. install_name
-        ) or candidate.library_path
+        runtime_identity = candidate.library_path
+    end
+    if runtime_path and expected_link_mode == "shared" and config.host.os ~= "windows" then
+        -- ldd can report a resolved versioned file. The loader still requests
+        -- the library's declared install name, not that file's basename.
+        local install_name, declared = sharedRuntimeInstallName(config, {
+            library_path = runtime_path,
+        })
+        if declared then
+            runtime_identity = normalizePath(path.dirname(runtime_path) .. "/" .. install_name)
+        end
     end
     if runtime_path then
         local runtime_ok, runtime_err = native_profile.acceptsLibrary(
