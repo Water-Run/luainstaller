@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -218,7 +218,7 @@ local function validInventoryPath(value)
         and not value:find("[\t\r\n]")
 end
 
-local function listTree(root)
+local function listTree(root, hash_contents)
     root = normalizePath(root)
     local listed, list_err = fs.listTree(root)
     if not listed then
@@ -251,15 +251,17 @@ local function listTree(root)
         elseif listed_item.type == "directory" then
             item.kind = "dir"
         elseif listed_item.type == "file" then
-            local file_hash, hash_err = hash_mod.sha256File(absolute)
-            if file_hash == nil then
-                return nil, invalidOutputInventory(root, "Cannot hash generated output file", {
-                    unexpected_path = absolute,
-                    cause = hash_err,
-                })
-            end
             item.kind = "file"
-            item.hash = file_hash
+            if hash_contents ~= false then
+                local file_hash, hash_err = hash_mod.sha256File(absolute)
+                if file_hash == nil then
+                    return nil, invalidOutputInventory(root, "Cannot hash generated output file", {
+                        unexpected_path = absolute,
+                        cause = hash_err,
+                    })
+                end
+                item.hash = file_hash
+            end
         else
             return nil, invalidOutputInventory(root, "Output tree contains an unsupported file type", {
                 unexpected_path = absolute,
@@ -1293,7 +1295,9 @@ local function captureOutputSnapshot(path_value)
     if not pathExists(path_value) then
         return { kind = "absent" }
     end
-    local inventory, inventory_err = listTree(path_value)
+    -- Content is checked by validateOutputDirectory before each snapshot.
+    -- The snapshot only retains the directory state and ownership marker.
+    local inventory, inventory_err = listTree(path_value, false)
     if not inventory then return nil, inventory_err end
     if #inventory == 0 then
         return { kind = "empty" }
