@@ -8,6 +8,8 @@ their history remains in Git. User guides are in xref:../README.adoc#documentati
 |===
 |Document |Purpose
 |xref:PLAN.adoc[Roadmap] |Scope and order of upcoming releases
+|xref:PLAN-1.7.2.adoc[1.7.2 plan] |LuaRocks install delivers licenses, docs and the manual
+|xref:AUDIT-1.7.2.adoc[1.7.2 audit] |Error-audit findings for the 1.7.2 patch
 |xref:PLAN-1.8.0.adoc[1.8.0 plan] |The compact and modern command interfaces
 |xref:PLAN-1.9.0.adoc[1.9.0 draft] |o1/o2/o3 strategies for generated programs' runtime efficiency
 |xref:AUDIT-1.7.1.adoc[1.7.1 audit] |Findings, fixes and release verification

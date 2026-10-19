@@ -49,6 +49,7 @@ package.preload["luainstaller.bundler"] = function() return dofile("src/bundler.
 package.preload["luainstaller.discovery"] = function() return dofile("src/discovery.lua") end
 package.preload["luainstaller.onefile"] = function() return dofile("src/onefile.lua") end
 package.preload["luainstaller"] = function() return dofile("src/init.lua") end
+package.preload["luainstaller.cli_present"] = function() return dofile("src/cli_present.lua") end
 package.preload["luainstaller.cli"] = function() return assert(loadfile("src/cli.lua"))("luainstaller.cli") end
 ]]
 
@@ -1202,7 +1203,7 @@ print(result.executable)
 end
 
 local function check_release_metadata_contract()
-    local rockspec = read_file("luainstaller-1.7.1-1.rockspec")
+    local rockspec = read_file("luainstaller-1.8.0-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
@@ -1246,7 +1247,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luai", { "-v" })),
-        "luai 1.7.1\n"
+        "luai 1.8.0\n"
     )
 
     local full_help = run(cli_command("luainstaller", { "help" }))
@@ -1258,10 +1259,11 @@ local function check_cli_contract()
     assert_not_contains(full_help, "--require-engine")
     assert_not_contains(full_help, "engines")
 
-    assert_equals(
-        run(cli_command("luainstaller", { "version" })),
-        "luainstaller 1.7.1  LGPL 3.0 by WaterRun\n"
-    )
+    local modern_version = run(cli_command("luainstaller", { "version" }))
+    assert_contains(modern_version, "luainstaller 1.8.0  LGPL 3.0 by WaterRun\n")
+    assert_contains(modern_version, "runtime: ")
+    assert_contains(modern_version, "host: ")
+    assert_not_contains(modern_version, "cc ")
 
     local bad_luai = run(cli_command("luai", { "build", "test/single_file/01_hello_luainstaller.lua" }), {
         expect_failure = true,
@@ -1830,11 +1832,11 @@ local function check_installed_cli_bundle()
     local root = make_temp_dir("installed-cli")
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
-    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.7.1-1.rockspec")
-    assert_equals(
-        run(shell_quote(tree .. "/bin/luainstaller") .. " version"),
-        "luainstaller 1.7.1  LGPL 3.0 by WaterRun\n"
-    )
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.8.0-1.rockspec")
+    local installed_version = run(shell_quote(tree .. "/bin/luainstaller") .. " version")
+    assert_contains(installed_version, "luainstaller 1.8.0  LGPL 3.0 by WaterRun\n")
+    assert_contains(installed_version, "runtime: ")
+    assert_contains(installed_version, "host: ")
     run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
         .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
         .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")

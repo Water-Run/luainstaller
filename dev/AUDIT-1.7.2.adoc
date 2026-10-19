@@ -1,0 +1,254 @@
+= luainstaller 1.7.2 错误审计
+:toc:
+:sectanchors:
+
+基线：当前工作树，产品版本 1.7.1，发布提交
+`ccb1a611c99c59a9fffb5202a535c204c7d8f833`。
+本次审查当前 `src/`、宿主 C、`tools/install.lua` 和
+`luainstaller-1.7.1-1.rockspec`。1.7.2 尚未实现。
+已关闭的问题见 xref:AUDIT-1.7.1.adoc[1.7.1 审计]，更早的边界见
+xref:SECURITY-AUDIT.adoc[既有安全审计]。
+
+本机执行过的检查记在审查记录里。Windows/MSVC、物理主机和单文件编译没有在这里运行。
+
+== 子系统结论
+
+[cols="2,2,3",options="header"]
+|===
+|子系统 |结论 |依据
+
+|命令与公共 API（command and public API）
+|已检查，无新缺陷
+|本机执行 `cli.main`、`analyze` 的非法选项
+|发现与分析（discovery and analysis）
+|已检查，无新缺陷；动态 `require` 与运行时发现执行用户代码仍是保留边界
+|本机执行混合换行、依赖上限、`--include` 拒绝 C 文件
+|打包（bundling）
+|已检查，无新缺陷
+|本机执行缺失入口的 `bundle`；发布事务代码只阅读
+|单文件与运行时加载（onefile and runtime loading）
+|已检查，无新缺陷
+|本机执行 `runtime.stripSource` 和 `runtime.run`；单文件编译只阅读
+|文件系统（filesystem）
+|已检查，无新缺陷
+|本机执行路径判断和读写删除
+|进程与锁（process and locks）
+|已检查，无新缺陷；Windows 判活只阅读
+|本机执行命令超时、坏的 owner 记录、不存在的 PID
+|工具链与宿主代码（toolchain and host code）
+|已阅读，无新缺陷；Windows/MSVC 与补充物理主机仍是保留边界，这里没有运行
+|阅读 `toolchain`、`posix_host`、`windows_host` 和宿主 C 的失败返回
+|两种安装路径（both install paths）
+|LuaRocks 确认为 V72-01；独立安装已检查，无新缺陷
+|本机重新执行 `luarocks make`；独立安装清单只阅读
+|===
+
+== V72-01：LuaRocks 安装丢掉 LICENSES
+
+优先级：P2。安装报告成功，许可证目录不在安装树里。
+生成产物的许可证字节不受影响。
+
+触发：在本机用 LuaRocks 3.13.0 和 GNU cp 执行
+
+[source,bash]
+----
+luarocks make --tree "$TREE" luainstaller-1.7.1-1.rockspec
+----
+
+错误结果：命令退出码为 0，并打印
+`cp: 未指定 -r；略过目录 'LICENSES'`，随后写
+`luainstaller 1.7.1-1 is now installed`。
+安装树 `lib/luarocks/rocks-5.4/luainstaller/1.7.1-1/` 没有 `LICENSES/`。
+`doc/` 里有 `LICENSE`、两份 README、`THIRD_PARTY_NOTICES.md` 和 `AGENTS.md`，
+没有 `docs/`、`CHANGELOG.adoc` 或 `luainstaller.1`。
+系统树 `/usr/local/lib/luarocks/rocks-5.4/luainstaller/1.7.1-1` 同样没有
+`LICENSES/`。
+
+源码位置：`luainstaller-1.7.1-1.rockspec` 第 37–76 行的 `build` 表只有
+`type`、`modules` 和 `install.bin`，没有 `copy_directories`。
+LuaRocks 因此用默认文档复制。本机 LuaRocks 3.13.0 的
+`/usr/local/share/lua/5.4/luarocks/build.lua` 里，`install_default_docs`
+用 `^license` 命中目录名 `LICENSES`，调用不带 `-r` 的 `cp`，并且不检查返回值。
+那是安装器的行为，不是本仓库的函数。
+本仓库里独立安装的复制在 `tools/install.lua` 第 100–108 行：第 102–103 行复制三份
+`LICENSES` 文件，第 105 行复制 `CHANGELOG.adoc` 和 `luainstaller.1`，
+第 107–108 行复制 `docs/*.adoc`。
+
+`src/distribution_files.lua` 的内嵌文本与 `LICENSE`、三份 `LICENSES` 文件、
+`THIRD_PARTY_NOTICES.md`、`docs/RELINKING.adoc` 和
+`tools/generate-onefile-payload.lua` 逐字节相同。
+所以目录形式和单文件产物里的许可证文本没有新的偏差。
+
+`docs/`、变更记录和手册没有进 LuaRocks 安装树，与独立安装的材料集合不一致。
+这和 V72-01 是同一次默认复制的结果，不单列为另一个缺陷。
+`AGENTS.md` 出现在 `doc/` 里只是因为扩展名是 `.md`。
+
+== 命令与公共 API
+
+结论：已检查，无新缺陷。本机执行。
+
+`src/cli.lua` 第 731 行的 `runAction` 在失败时写 stderr。
+第 788 行：`InterruptedError` 退出 130，其他失败退出 1。
+本次没有构造中断，130 这条只阅读，没有执行。
+
+本机调用 `cli.main`：
+
+* `-v` 退出 0，输出 `luai 1.7.1`。
+* 未知命令退出 1，stderr 为 `unknown luai command`。
+* `-a` 没有入口时退出 1。
+* `program_name = luainstaller` 时，`version` 退出 0；`build` 没有入口时退出 1，
+  提示 `luainstaller help`。
+
+`src/init.lua` 第 191 行的 `validateMaxDeps` 在发现之前拒绝
+`max_deps` 为 0 或无穷大，类型是 `InvalidOptionsError`。
+`entry` 不是字符串时同样是 `InvalidOptionsError`。
+`src/result.lua` 的 `resourceLimit` 带有 `resource`、`limit` 和路径字段。
+
+`src/logger.lua` 第 866 行的 `getLogs` 在时间戳相同时按写入顺序稳定排序。
+这是 1.7.1 已关闭的行为，当前代码仍这样做。只阅读了排序，没有再跑日志套件。
+第 719–729 行的 `loadFromFile` 在主日志和备份都无法解析时返回空表，
+命令会显示没有日志并退出 0。本次没有改真实日志文件来复现，因此这是未确认线索，不算缺陷。
+
+结果：已检查，无新缺陷。退出码 130 和日志排序只阅读。
+
+== 发现与分析
+
+结论：已检查，无新缺陷。下面三条仍是保留边界，不是新缺陷：
+运行时发现会执行用户代码；动态 `require` 需要 `--include` 或运行时发现；
+`--include` 不接受 C 库。
+
+本机用 LF shebang 加下一行 CRLF 的入口做静态 `analyze`。
+`helper.lua` 仍出现在 `dependencies.scripts` 里。
+`src/analyzer.lua` 第 186 行的 `prepareSource` 和
+`src/runtime.lua` 第 26 行的 `stripSource` 都停在第一个换行。
+`src/cgen.lua` 第 343 行的副本算法相同，这一处只阅读。1.7.1 的混合换行修复仍然有效。
+
+`max_deps = 1` 且手动包含两个 Lua 文件时，`src/discovery.lua` 第 219 行的
+`applyManualInputs` 返回 `DependencyLimitExceededError`，计数为 2。
+包含 `missing.so` 时返回 `InvalidOptionsError`，消息要求 Lua 源文件
+（第 296 行）。
+`src/analyzer.lua` 第 1850 行计数 Lua 依赖，第 1885 行把新的原生库计入同一上限。
+这两处只阅读。这是 1.7.1 已关闭的配额行为，当前代码仍这样做。
+
+运行时发现会执行入口。本次没有再跑一个会执行用户代码的运行时扫描，
+这条边界保持 1.7.1 的结论。
+
+结果：已检查，无新缺陷。运行时发现执行用户代码、动态 `require` 和
+`--include` 不接受 C 库仍是保留边界。原生库计数只阅读。
+
+== 打包
+
+结论：已检查，无新缺陷。缺失入口已执行；发布事务只阅读。
+
+本机 `bundle` 一个不存在的入口，返回 `ScriptNotFoundError`。
+请求的输出路径类型是 `missing`，没有留下目录。
+
+`src/bundler.lua` 第 1183 行的 `releaseOutputLock` 在恢复失败时返回该失败，
+并设置 `recovery_required`。这一段只阅读。恢复已经失败之后，写 `released` 标记的结果不单独决定成功。
+`src/manifest.lua` 第 285 行起对重复目标路径返回 `DuplicateModuleError`，只阅读。
+`src/launcher.lua` 第 337 行在缺少 `entry` 时抛出 `InvalidOptionsError`，只阅读，没有生成启动器。
+目录改名之间的可见间隙和断电后不保证持久，仍是 1.7.1 保留的边界。
+本次没有再做中断或断电实验。
+
+结果：已检查，无新缺陷。发布事务、清单冲突和启动器生成只阅读。
+
+== 单文件与运行时加载
+
+结论：已检查，无新缺陷。运行时加载已执行；单文件编译只阅读。
+
+`runtime.stripSource` 保留混合换行文件的第二行。
+`runtime.run` 对空 payload 抛出 `InvalidPayloadError`。
+入口源码 `return 17` 时返回 17。
+`src/runtime.lua` 第 168–196 行在安装或入口失败时恢复 `package.loaded` 和 `arg`。
+这一段与上面的 `runtime.run` 调用是同一次执行。
+
+`src/onefile.lua` 第 1611 行的 `selectFileMode` 在 FFI 或原生库不能免解包时返回
+`UnsupportedOnefileModeError`；没有静态 Lua 且用户要求免解包时返回
+`StaticLuaUnavailableError`。
+第 158 行的 `cleanupDirectory` 把清理失败附在原失败上，不把原失败改成成功。
+这两处只阅读。本次没有编译单文件产物，也没有跑 Windows 提取器。
+
+结果：已检查，无新缺陷。单文件模式选择只阅读。
+
+== 文件系统
+
+结论：已检查，无新缺陷。本机执行了路径和普通文件操作。
+
+`src/path.lua` 第 71 行的 `isWithin`：`/tmp/foo/bar` 在 `/tmp/foo` 内，
+`/tmp/foobar` 不在 `/tmp/foo` 内。`C:rel` 被 `isDriveRelative` 认成驱动器相对路径。
+这些调用已在本机执行。
+
+`src/fs.lua` 第 107 行的 `writeFile` 检查写入、刷新和关闭。
+本次写入并读回 `probe`，然后删除。
+第 347 行的 `removeTree` 遇到重解析点或 `other` 条目时拒绝删除。
+本次没有构造这种树，所以拒绝分支只阅读。
+`src/windows_fs.lua` 把读写和删除交给 `windows_host.call`，失败时返回 `nil` 和宿主输出
+（第 39–42 行、第 74–78 行）。这个文件只阅读，没有在 Windows 上执行。
+符号链接逃逸和 Windows 重解析点没有在这里执行。
+
+结果：已检查，无新缺陷。Windows 文件系统只阅读。
+
+== 进程与锁
+
+结论：已检查，无新缺陷。POSIX 超时和判活已执行；Windows 判活只阅读。
+
+`process.outputCommand("sleep", {"2"}, {}, {timeout_seconds = 1})` 返回失败，
+`reason` 为 `timeout`，输出末尾是 `luainstaller: command timed out`
+（`src/process.lua` 第 211 行）。这次调用已执行。
+
+`lock_owner.decode("not-an-owner")` 失败。
+`lock_owner.isAlive(99999999)` 返回 `false`。这两次调用已执行。
+`src/lock_owner.lua` 第 265–268 行在 Windows 上身份匹配之后再查进程是否退出。
+这是 1.7.1 已关闭的修复。本次没有 Windows 进程，没有重新执行这条路径。
+
+结果：已检查，无新缺陷。Windows 判活只阅读。
+
+== 工具链与宿主代码
+
+结论：已阅读，无新缺陷。Windows/MSVC 和补充物理主机没有运行，仍是保留边界，
+不能写成已通过的测试。
+
+`src/toolchain.lua` 第 448 行的 `discoverCompiler` 在配置的编译器不可用时返回
+`ToolchainError`，找不到编译器时同样返回失败，而不是空的成功结果。
+本次机器上有编译器，没有故意做一次失败的工具链解析，所以这里只阅读。
+
+`src/posix_host.lua` 第 47 行的 `prepare` 在每个候选编译器都失败时返回
+`nil` 和诊断文本。`src/windows_host.lua` 第 266 行的 `call` 在参数非法或
+引导失败时返回 `false`。这两处只阅读。
+`src/host/posix_host.c` 第 273 行的 `output_parents` 在祖先目录不可信时向 stderr
+写 `unsafe output ancestor` 并返回失败。`src/host/windows_host.c` 的分配、路径和
+环境块失败走 `fail` 或 `win_fail` 并返回 `NULL`。
+`src/launcher/luai_launcher.c` 第 220–247 行在无法创建状态、运行时版本不匹配或
+加载失败时写 stderr 并返回非 0。这三个 C 文件只阅读，没有在这里编译。
+Windows 代码页行为保持 1.7.1 的保留边界。
+
+结果：已阅读，无新缺陷。Windows/MSVC 和补充物理主机没有运行，仍是保留边界。
+
+== 两种安装路径
+
+结论：LuaRocks 是确认缺陷 V72-01。独立安装已检查，无新缺陷。
+
+独立安装的复制清单在 `tools/install.lua` 第 100–108 行，包含许可证、
+`docs/*.adoc`、变更记录和手册。本次只阅读了这个清单，没有再跑 `tools/install.lua`。
+LuaRocks 路径的重新执行见 V72-01。
+
+结果：LuaRocks 是确认缺陷 V72-01。独立安装已检查，无新缺陷。
+
+== 未确认
+
+`logger.getLogs` 在两份日志都无法解析时返回空表，命令显示没有日志。
+没有在真实日志目录上复现，不算缺陷。
+
+== 继续保留的边界
+
+这些来自 1.7.1 和更早的审计。本次没有看到当前代码仍然做错的新证据，
+所以不重新打开：
+
+* 运行时发现执行用户代码。构建工具链和工作区仍需可信。
+* 不保证断电后的持久性。目录切换仍有可见间隙。
+* 动态 `require` 用 `--include` 或运行时发现。
+* `--include` 接受 Lua 源文件，不接受 C 库。本次执行仍拒绝 `.so`。
+* 系统库不打进产物。
+* Windows 代码页。
+* ARM64、macOS、FreeBSD、Termux 和旧 Windows 等补充物理主机。
+  本次没有运行它们。

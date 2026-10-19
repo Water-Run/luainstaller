@@ -42,6 +42,9 @@ luai -v
 `sudo` 读取 root 的配置，可能与你的用户设置不同。从该配置移除过期镜像：
 否则官方源下载失败时，仍可能回退到旧包。
 
+安装日志会写出选中的 rock 地址。地址已经位于 `https://luarocks.org/`，
+并且 `luai -v` 比当前 GitHub Release 旧时，安装该 Release 附带的 `.src.rock`。
+
 如果下载报 `unexpected eof while reading`，改用系统 HTTPS 下载器并开启证书校验：
 
 [source,bash]

@@ -12,6 +12,7 @@ out/
 target/
 
 # Local work and temporary files
+.local/notes/
 .worktrees/
 .mimocode/
 .tmp/

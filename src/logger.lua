@@ -719,14 +719,17 @@ end
 local function loadFromFile()
     local path = getLogFilePath()
     local primary = logFileState(path)
-    if primary.kind == "regular" and primary.logs then
-        return primary.logs
-    end
     local backup = logFileState(path .. ".bak")
-    if backup.kind == "regular" and backup.logs then
-        return backup.logs
+    if primary.kind == "regular" and primary.logs then
+        return primary.logs, "primary"
     end
-    return {}
+    if backup.kind == "regular" and backup.logs then
+        return backup.logs, "backup"
+    end
+    if primary.kind == "missing" and (backup.kind == "missing") then
+        return {}, "empty"
+    end
+    return {}, "unreadable"
 end
 
 local function removeRegular(path, state)
@@ -863,11 +866,11 @@ function M.logWarning(source, action, message, details)
     return M.log(LogLevel.WARNING, source, action, message, details)
 end
 
-function M.getLogs(opts)
+function M.queryLogs(opts)
     opts = opts or {}
-    local ok, logs = pcall(loadFromFile)
+    local ok, logs, status = pcall(loadFromFile)
     if not ok or type(logs) ~= "table" then
-        return {}
+        return { ok = false, logs = {}, status = "unreadable" }
     end
 
     for _, key in ipairs({ "level", "source", "action" }) do
@@ -902,7 +905,11 @@ function M.getLogs(opts)
         end
         logs = limited
     end
-    return logs
+    return { ok = status ~= "unreadable", logs = logs, status = status or "empty" }
+end
+
+function M.getLogs(opts)
+    return M.queryLogs(opts).logs
 end
 
 function M.clearLogs()

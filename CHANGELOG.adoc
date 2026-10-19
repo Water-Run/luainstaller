@@ -7,6 +7,29 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+== 1.8.0 - 2026-10-19
+
+=== Major changes
+
+* `luainstaller` accepts `--color`, `--progress`, and `--format json`.
+  JSON is one object on stdout, including option and command failures.
+  Progress redraws on stderr while a command runs, and diagnostics stay there.
+  `help <command>`, `-h`, `--help`, and `--version` work on that entry.
+  Version output names the runtime and host and does not probe a compiler.
+* Modern text uses 16-color, 256-color, or true color when the terminal says
+  it can, and lays out wide characters by display width. On Windows, color
+  stays off unless the console reports a virtual terminal.
+* Long options accept `--name=value`. Boolean flags reject an unexpected value.
+  `help` and `version` reject extra arguments.
+* Log reads distinguish an empty log from an unreadable log. A recovered
+  backup is reported. `getLogs` still returns the record list.
+
+=== Minor changes
+
+* LuaRocks installs `LICENSES/`, the user guides, the changelog, and the
+  manual. The rockspec copies those directories explicitly, so a directory
+  named `LICENSES` is no longer handed to a non-recursive copy.
+
 == 1.7.1 - 2026-10-15
 
 === Fixed

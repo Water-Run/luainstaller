@@ -60,7 +60,7 @@ if is_jit then
     assert(not lua_abi.isBuiltin(limited, "string.buffer"), "missing optional builtins must resolve as dependencies")
     local pinned = os.getenv("LUAI_JIT_RELEASE")
     if pinned then
-        assert(require("luainstaller").VERSION == "1.7.1")
+        assert(require("luainstaller").VERSION == "1.8.0")
         assert(jit.version == "LuaJIT " .. pinned, "matrix runtime does not match the pinned source")
         assert(jit.arch == "x64", "LuaJIT matrix requires native x86_64 execution")
         local configuration = os.getenv("LUAI_JIT_CONFIGURATION")

@@ -207,6 +207,13 @@ cross-compiling
 `--verbose`:: print more detail while working
 `-- ARGS`:: arguments passed to the script during runtime discovery
 
+.luainstaller display
+[horizontal]
+`--color MODE`:: `auto`, `always`, or `never`. `--no-color` is `never`. `luai` stays plain text.
+`--progress MODE`:: `auto`, `plain`, or `off`. Progress is written to stderr. `--no-progress` is `off`.
+`--format text`:: human text, the default
+`--format json`:: one JSON object on stdout. Color and progress stay off. The exit code is still non-zero on failure.
+
 [#usage-limits]
 == Time and size limits
 

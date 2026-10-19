@@ -70,10 +70,11 @@ assert(err == "")
 
 local logger = require("luainstaller.logger")
 local original_get_logs = logger.getLogs
+local original_query_logs = logger.queryLogs
 local log_options
-logger.getLogs = function(opts)
+logger.queryLogs = function(opts)
     log_options = opts
-    return {
+    return { ok = true, status = "primary", logs = {
         {
             timestamp = "2026-10-12T00:00:00Z",
             level = "error",
@@ -81,11 +82,12 @@ logger.getLogs = function(opts)
             action = "build",
             message = "log command fixture",
         },
-    }
+    } }
 end
 code, out, err = run_cli("luai", {
     "-l", "--level", "error", "--limit", "20", "--asc",
 })
+logger.queryLogs = original_query_logs
 logger.getLogs = original_get_logs
 assert(code == 0, err)
 assert(log_options.level == "error" and log_options.limit == 20
@@ -95,8 +97,9 @@ assert_contains(out, "2026-10-12T00:00:00Z\terror\tfixture:build\tlog command fi
 assert_not_contains(out, "\27[")
 assert(err == "")
 
-logger.getLogs = function() return {} end
+logger.queryLogs = function() return { ok = true, status = "empty", logs = {} } end
 code, out, err = run_cli("luai", { "-l" })
+logger.queryLogs = original_query_logs
 logger.getLogs = original_get_logs
 assert(code == 0 and out == "no logs\n" and err == "")
 for _, arguments in ipairs({

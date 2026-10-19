@@ -1,0 +1,379 @@
+.TH LUAINSTALLER 1 "October 2026" "luainstaller 1.8.0" "User Commands"
+.SH NAME
+luai, luainstaller \- package Lua applications for a matching runtime environment
+.SH SYNOPSIS
+.B luai
+.B \-h
+.br
+.B luai
+.B \-v
+.br
+.B luai
+.B \-l
+.RI [ options ]
+.br
+.B luai
+.BR \-a | \-t | \-b
+.I entry.lua
+.RI [ options ]
+.RI [ \-\- " args..." ]
+.PP
+.B luainstaller
+.BR help | version
+.br
+.B luainstaller
+.BR analyze | trace | build
+.I entry.lua
+.RI [ options ]
+.RI [ \-\- " args..." ]
+.br
+.B luainstaller logs
+.RI [ options ]
+.SH DESCRIPTION
+.B luainstaller
+discovers Lua
+.B require
+dependencies and builds a native launcher containing the entry script and
+pure-Lua modules. Lua C modules and, where required, the Lua shared runtime are
+placed beside the launcher in an inspectable directory bundle.
+.PP
+The output is not a universal executable. The target must match the selected
+operating-system family, CPU architecture, system ABI, and Lua ABI. External
+shared libraries required by Lua C modules are not copied automatically.
+Linux and macOS builds warn about external and missing libraries. Windows
+reports that DLL dependencies were not checked. These warnings do not stop builds.
+.PP
+Official Lua 5.1 through 5.5 and LuaJIT 2.1 with FFI are supported.
+LuaJIT is tested on native Linux x86_64 and Windows/MSVC x86_64.
+Discovery and linked runtimes match the active runtime kind, version and
+build configuration. Native modules match its Lua C ABI.
+.PP
+Before publishing, every native backend compiles and executes a linked-runtime
+probe on the build host. Generated launchers repeat the runtime version check
+when started. Cross-building is not provided.
+.PP
+POSIX hosts can use either a shared liblua or a verified static liblua.a.
+Native profiles cover 32-bit and 64-bit Linux, Android/Termux, FreeBSD,
+macOS, and capability-compatible POSIX systems. Windows selects the native
+x86, x86_64, ARM, or ARM64 linker machine. Generated x86/x86_64 Windows code
+uses the Windows XP API floor and records the matching 5.01/5.02 PE subsystem;
+the compiler CRT and Lua DLL must independently be XP-compatible. Onefile uses
+an inherited-handle watchdog when XP rejects the newer Job Object kill-on-close
+flag.
+.PP
+.B luai
+and
+.B luainstaller
+call the same Lua API but use separate command grammars. The short command uses
+flags; the descriptive command uses words. Their syntax is intentionally not
+interchangeable.
+.SH COMMANDS
+.TP
+.B luai \-a
+Analyze dependencies.
+.TP
+.B luai \-t
+Print dependency resolution decisions and compatibility notes.
+.TP
+.B luai \-b
+Build an onedir or onefile bundle.
+.TP
+.B luai \-l
+Read persistent diagnostic records.
+.TP
+.B luainstaller analyze
+Analyze dependencies.
+.TP
+.B luainstaller trace
+Print dependency resolution decisions and compatibility notes.
+.TP
+.B luainstaller build
+Build an onedir or onefile bundle.
+.TP
+.B luainstaller logs
+Read persistent diagnostic records.
+.TP
+.B luai \-h
+Print short-command help.
+.TP
+.B luainstaller help
+Print descriptive-command help.
+.TP
+.BR "luai \-v" ", " "luainstaller version"
+Print version information.
+.SH OPTIONS
+.TP
+.BR \-\-dir ", " \-\-onedir
+Build an inspectable directory. This is the default.
+.TP
+.BR \-\-file ", " \-\-onefile
+Build a single executable using automatic mode selection.
+.TP
+.BI \-\-file-mode " mode"
+Select auto, extract, or no-extract. Direct startup requires pure Lua and a verified static Lua library.
+.TP
+.BR \-M ", " \-\-no-moon-detect
+Skip MoonScript detection and treat the input as Lua.
+.TP
+.BR \-o " " path ", " \-\-out " " path
+Set the output directory or onefile executable path.
+.TP
+.BI \-\-include " path"
+Add a source file not found by automatic discovery. Repeatable.
+.TP
+.BI \-\-ffi-library " name=path"
+Bundle a LuaJIT FFI shared library under the name passed to ffi.load.
+Repeat for additional names. Automatic single-file mode extracts these libraries;
+no-extract rejects them. Dependencies of those libraries remain system dependencies.
+.TP
+.BI \-\-exclude " value"
+Exclude an exact path, basename, or path suffix. Repeatable. Exclusions take
+precedence over discovery and manual includes.
+.TP
+.BR \-d " " mode ", " \-\-discovery-mode " " mode
+Use
+.BR static ,
+.BR runtime ,
+or
+.B manual
+dependency discovery. Runtime discovery accepts only loaders backed by verified
+.B .lua
+source paths. Use static mode for literal native dependencies and other loaders.
+.TP
+.B \-\-no-depscan
+Disable automatic discovery; equivalent to manual mode.
+.TP
+.BI \-\-max-deps " number"
+Set the maximum discovered Lua source dependency count. Default: 36.
+.TP
+.BI \-\-runtime-timeout " seconds"
+Bound runtime discovery. Default: 30 seconds.
+.TP
+.BI \-\-max-source-bytes " bytes"
+Limit each Lua source. Default: 8388608.
+.TP
+.BI \-\-max-bundle-bytes " bytes"
+Limit combined inputs and the staged bundle. Default: 134217728.
+.TP
+.BI \-\-max-trace-bytes " bytes"
+Limit runtime trace data. Default: 33554432.
+.TP
+.BI \-\-lua " path"
+Select the interpreter used by runtime discovery. Its runtime kind, version
+and build configuration must match the active luainstaller process.
+When omitted, launcher arguments and
+.B lua
+on
+.B PATH
+are accepted only after the same identity check; otherwise use this option
+explicitly.
+.TP
+.BI \-\-target-os " os"
+Assert the detected native host OS. A different OS is rejected; this option
+does not enable cross-building.
+.TP
+.BI \-\-lua-prefix " path"
+Select matching native Lua libraries and runtime files. Lua headers are not required.
+.TP
+.B \-\-verbose
+Print additional trace or bundle counts and the selected Lua library and discovery path.
+.TP
+.B \-\-
+Pass the remaining arguments to the entry during runtime dependency discovery.
+They are not stored as executable defaults.
+.SS Log options
+.TP
+.BI \-\-limit " number"
+Limit returned log records to a positive integer.
+.TP
+.BI \-\-level " level"
+Filter by
+.BR debug ,
+.BR info ,
+.BR warning ,
+.BR error ,
+or
+.BR success .
+.TP
+.B \-\-asc
+Print oldest records first. The default is newest first.
+.SH DISCOVERY MODES
+.TP
+.B static
+Parse literal require calls without running the application. Literal Lua string
+escapes are decoded. Computed names return
+.BR DynamicRequireError .
+Resolution is entry-rooted: entry-directory templates precede the active
+.B package.path
+and
+.BR package.cpath .
+Raw Lua does not add the entry directory automatically.
+.TP
+.B runtime
+Execute the entry under a temporary require tracer. Only executed branches are
+observed. Successfully loaded modules are retained; missing modules caught by
+the application with
+.B pcall
+remain optional. Loader data, when available, records the path actually selected by
+.BR require ;
+incomplete or duplicate completion output is rejected.
+.TP
+.B manual
+Start with no automatic dependencies and use repeated
+.B \-\-include
+options.
+.SH EXAMPLES
+.PP
+Analyze, trace, then build onedir:
+.PP
+.nf
+luai \-a app/main.lua \-\-max-deps 120
+luai \-t app/main.lua \-\-max-deps 120
+luai \-b \-\-dir app/main.lua \-o build/app \-\-max-deps 120
+env \-i PATH=/usr/bin:/bin build/app/app
+.fi
+.PP
+Build onefile after onedir succeeds:
+.PP
+.nf
+luainstaller build \-\-file app/main.lua \-o build/app-onefile
+.fi
+.PP
+Trace a computed dependency path with build-time arguments:
+.PP
+.nf
+luai \-t app/main.lua \-d runtime \-\- profile_a input.json
+.fi
+.SH OUTPUT
+An onedir bundle contains the native executable and a hidden
+.B .luai
+directory with generated C source, manifest, output marker, and native files.
+Rebuilds occur in a private sibling staging directory. An existing recognized
+bundle is preserved while compilation runs. Final installation uses sequential
+directory renames, with a brief visibility gap, and is not crash-atomic. The
+moved backup is revalidated before publication and deletion; concurrent content
+aborts replacement and is restored or preserved at a reported backup path.
+.PP
+Manifest version 2 and the
+.B luainstaller-generated-output-v2
+marker use SHA\-256. The marker inventories every generated regular file and
+directory recursively; replacement requires the exact file set and hashes.
+Legacy v1 output requires one-time explicit review and removal and is never
+overwritten automatically.
+.PP
+Extracting onefile mode writes a content-addressed onedir payload below the user temporary
+directory. POSIX caches are separated by effective user ID and require
+owner-only permissions. Unsafe paths, parent symlinks, and Windows reparse
+points are rejected. Cache reuse compares complete bytes with the embedded
+payload. Its deterministic SHA\-256 ID frames every path, mode, size, and
+content. POSIX cache writes use no-follow, parent-directory-relative file
+operations after validating the parent chain.
+.PP
+Embedded Lua modules precede normal host searchers, but undeclared modules may
+fall through to the host. This same-environment behavior is not a hermetic
+sandbox; verify release bundles with
+.B LUA_PATH
+and
+.B LUA_CPATH
+cleared.
+.PP
+Pure-Lua no-extract mode loads embedded Lua in the same process and needs no
+extraction directory. Use --luainstaller-extract DIRECTORY to export licenses
+and relinking materials into an existing directory.
+.PP
+MoonScript .moon input uses the device's moonc compiler in a private working
+directory, then follows the Lua workflow. The generated application doesn't
+require MoonScript. The API option moon_detect=false skips detection.
+.SH ENVIRONMENT
+.TP
+.B LUAI_LUA
+Default matching interpreter for runtime discovery.
+.TP
+.B LUAI_LUA_PREFIX
+Default matching native Lua library/runtime prefix.
+.TP
+.B LUAI_TARGET_OS
+Optional assertion for the detected native host OS.
+.TP
+.B LUA_PATH, LUA_CPATH
+Search paths used during dependency discovery. Clear them when verifying that a
+finished bundle does not rely on host modules.
+.TP
+.B TMPDIR
+Temporary root for runtime discovery and POSIX onefile extraction.
+.TP
+.B PREFIX
+Termux installation prefix and fallback onefile temporary root.
+.TP
+.B HOME, USERPROFILE
+Home directory used for persistent logs.
+.TP
+.B NO_COLOR, CI
+Disable interactive color output.
+.SH FILES
+.TP
+.I ~/.luainstaller/logs.lua
+Persistent diagnostic records on POSIX when
+.B HOME
+is set.
+.TP
+.I output/.luai/manifest.lua
+Inspectable bundle manifest.
+.TP
+.I output/.luai/generated-output.txt
+Recursive v2 generated-output ownership and SHA\-256 marker.
+.SH EXIT STATUS
+Zero indicates success. Command parsing, analysis, build, extraction, or child
+application failure returns nonzero.
+.SH INSTALLATION
+.nf
+luarocks install luainstaller
+.fi
+.PP
+LuaRocks is optional. From an extracted source tree, install offline into a
+new dedicated directory with an existing parent:
+.nf
+lua tools/install.lua --prefix /path/to/luainstaller
+.fi
+.PP
+Add its bin directory to PATH; Windows uses luai.cmd and luainstaller.cmd.
+On Windows, use the native compiler's command prompt. Installation,
+packaging and generated programs do not require PowerShell.
+Source use also supports lua bin/luai.lua and lua bin/luainstaller.lua.
+See docs/INSTALL.adoc for library use, relocation and removal.
+Package metadata requires Lua
+versions at least 5.1 and below 5.6; LuaJIT uses the Lua 5.1 C ABI.
+Lua 5.5 requires LuaRocks 3.13.0 or newer.
+.SH LUA API
+The module
+.B luainstaller
+exports
+.BR analyze ,
+.BR trace ,
+.BR compatibility ,
+.BR bundle ,
+.BR getLogs ,
+and
+.BR clearLogs .
+The structured result contract applies to analyze, trace, compatibility, and bundle only.
+These operations return a table with
+.B ok=true
+or a structured
+.B error
+table containing at least
+.B type
+and
+.BR message .
+getLogs returns a list of log records; clearLogs returns a boolean.
+Successful log clearing empties both the primary and recovery generation.
+Windows logging rejects reparse-point paths.
+.SH SEE ALSO
+.B lua(1), luarocks(1), cc(1), pkg-config(1), ldd(1), otool(1)
+.PP
+Project documentation:
+.br
+https://github.com/Water-Run/luainstaller
+.SH AUTHORS
+WaterRun <linzhangrun49@gmail.com>
+.SH LICENSE
+LGPL-3.0-or-later.

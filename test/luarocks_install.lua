@@ -36,7 +36,7 @@ print(require("greeting").message(arg[1] or "missing"))
 local installed, install_output = process.outputCommand("luarocks", {
     "make",
     "--tree", tree,
-    path.absolute("luainstaller-1.7.1-1.rockspec"),
+    path.absolute("luainstaller-1.8.0-1.rockspec"),
 })
 assert(installed, install_output)
 
@@ -52,6 +52,25 @@ local lua_abi = assert(_VERSION:match("Lua (%d+%.%d+)"))
 assert(fs.pathType(path.join(
     tree, "share/lua/" .. lua_abi .. "/luainstaller/distribution_files.lua"
 )) == "file", "LuaRocks did not install distribution materials")
+local rock_root = path.join(tree, "lib/luarocks/rocks-" .. lua_abi
+    .. "/luainstaller/" .. require("luainstaller").VERSION .. "-1")
+local function sameFile(relative, source)
+    local installed = fs.readRegularFile(path.join(rock_root, relative))
+    local original = fs.readRegularFile(source)
+    assert(installed == original, "LuaRocks install mismatch: " .. relative)
+end
+sameFile("LICENSES/GPL-3.0-or-later.txt", "LICENSES/GPL-3.0-or-later.txt")
+sameFile("LICENSES/Lua-MIT.txt", "LICENSES/Lua-MIT.txt")
+sameFile("LICENSES/LuaJIT-MIT.txt", "LICENSES/LuaJIT-MIT.txt")
+sameFile("doc/LICENSE", "LICENSE")
+sameFile("doc/README.adoc", "README.adoc")
+sameFile("doc/README.zh-CN.adoc", "README.zh-CN.adoc")
+sameFile("doc/THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md")
+sameFile("doc/CHANGELOG.adoc", "CHANGELOG.adoc")
+sameFile("doc/luainstaller.1", "luainstaller.1")
+sameFile("docs/RELINKING.adoc", "docs/RELINKING.adoc")
+assert(fs.pathType(path.join(rock_root, "AGENTS.md")) == "missing", "AGENTS.md was installed")
+assert(fs.pathType(path.join(rock_root, "doc/AGENTS.md")) == "missing", "doc/AGENTS.md was installed")
 
 local function installedCommand(command, arguments, environment)
     if not windows then
@@ -68,7 +87,7 @@ local function installedCommand(command, arguments, environment)
 end
 
 local version_ok, version_output = installedCommand(luai, { "-v" })
-assert(version_ok and version_output == "luai 1.7.1\n", version_output)
+assert(version_ok and version_output == "luai 1.8.0\n", version_output)
 local runtime_ok, runtime_output = installedCommand(luai, {
     "-a", path.join(project, "main.lua"),
     "--discovery-mode", "runtime",

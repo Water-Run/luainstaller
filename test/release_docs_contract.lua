@@ -9,7 +9,7 @@ File:
 Date:
     2026-08-22
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local function read_file(path)
@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.7.1-1.rockspec",
+    "luainstaller-1.8.0-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -102,7 +102,27 @@ expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查"
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
-expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.7.1-1.rockspec")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.8.0-1.rockspec")
+expect_contains("docs/TESTING.adoc",
+    "luarocks upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock")
+expect_contains("docs/zh-CN/TESTING.adoc",
+    "luarocks upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock")
+expect_contains("docs/TESTING.adoc", "[#testing-luarocks]")
+expect_contains("docs/zh-CN/TESTING.adoc", "[#testing-luarocks]")
+expect_contains("AGENTS.md", "luarocks upload ROCKSPEC SRC.ROCK")
+expect_contains("docs/TROUBLESHOOTING.adoc", "install the `.src.rock` from that release")
+expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "安装该 Release 附带的 `.src.rock`")
+for _, path in ipairs({
+    "docs/TESTING.adoc",
+    "docs/zh-CN/TESTING.adoc",
+    "AGENTS.md",
+}) do
+    expect_contains(path, "unexpected eof while reading")
+    expect_contains(path, "sha256sum -c SHA256SUMS")
+end
+expect_contains("docs/TESTING.adoc", 'package.preload["ltn12"]')
+expect_contains("docs/zh-CN/TESTING.adoc", 'package.preload["ltn12"]')
+expect_contains("dev/PLAN.adoc", "unexpected eof while reading")
 expect_contains("docs/TESTING.adoc", "test/no_lua_target.lua")
 for _, prefix in ipairs({"docs/", "docs/zh-CN/"}) do
     expect_contains(prefix .. "LUAJIT.adoc", "--ffi-library")

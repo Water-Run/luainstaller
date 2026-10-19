@@ -2,8 +2,17 @@
 :toc:
 :sectanchors:
 
-已发布基线为 1.7.1。按 `1.8.0 → 1.9.0` 推进，每个版本独立验收。
+已发布基线为 1.7.1。按 `1.7.2 → 1.8.0 → 1.9.0` 推进，每个版本独立验收。
 本文件只保留后续工作；已完成计划从当前仓库移除，历史由 Git 保存。
+
+== 1.7.2：补齐 LuaRocks 安装材料
+
+LuaRocks 安装成功时丢掉 `LICENSES/`，也没有装上独立安装已经交付的文档和手册。
+修复范围、回归和完成条件见 xref:PLAN-1.7.2.adoc[1.7.2 计划]。
+审计判断见 xref:AUDIT-1.7.2.adoc[1.7.2 审计]。
+
+完成条件：隔离的 `luarocks make` 安装树包含许可证、文档和手册，且与源码字节一致；
+安装输出不再依赖 LuaRocks 对 `LICENSES` 目录的失败复制。
 
 == 1.8.0：重做两套命令
 
@@ -35,4 +44,9 @@ xref:PLAN-1.8.0.adoc[1.8.0 完整计划]。
 * 按 xref:../docs/TESTING.adoc[测试指南] 完成本地检查；发布提交通过官方 Lua 和 LuaJIT 原生门禁。
 * 验证独立安装、升级、两种 CLI、API 和移除源码后的产物运行。
 * 标签与发布附件来自同一提交；发布后下载并核对全部附件。
+* 发布步骤以 xref:../docs/TESTING.adoc#testing-luarocks[发布] 为准，中文副本保持一致。
+  包括五个 GitHub 附件的 `sha256sum -c SHA256SUMS`、`luarocks upload ROCKSPEC SRC.ROCK`、
+  上传报告 `unexpected eof while reading` 时改走文档中的 curl 命令、
+  LuaRocks 字节与 GitHub 文件一致，以及空树和旧版升级两次无版本号安装。
+  索引里缺的更早 GitHub rock 一并上传。API key 留在本机配置里。
 * Release 只写用户可见的变更和必要说明；审计、测试与发布证据另行保存。

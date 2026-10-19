@@ -77,6 +77,7 @@ local function installSourcePreloads()
         "luainstaller.discovery",
         "luainstaller.onefile",
         "luainstaller.runtime",
+        "luainstaller.cli_present",
     }
     for _, name in ipairs(module_names) do
         package.loaded[name] = nil
@@ -152,6 +153,9 @@ local function installSourcePreloads()
     package.preload["luainstaller.onefile"] = package.preload["luainstaller.onefile"] or function()
         return dofile(sourcePath("onefile.lua"))
     end
+    package.preload["luainstaller.cli_present"] = package.preload["luainstaller.cli_present"] or function()
+        return dofile(sourcePath("cli_present.lua"))
+    end
     package.preload["luainstaller"] = function()
         return dofile(sourcePath("init.lua"))
     end
@@ -161,8 +165,9 @@ installSourcePreloads()
 
 local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
+local present = require("luainstaller.cli_present")
 
-local VERSION = "1.7.1"
+local VERSION = "1.8.0"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
@@ -245,6 +250,11 @@ Build options:
   --max-bundle-bytes <n>       Combined bundle size limit.
   --max-trace-bytes <n>        Runtime trace size limit.
   --verbose                    Show additional details.
+  --color <mode>               auto, always, or never. --no-color is never.
+  --progress <mode>            auto, plain, or off. --no-progress is off.
+  --format <text|json>         JSON writes one object to stdout and disables color.
+  -h, --help                   Show help. `help <command>` covers one command.
+  --version                    Show version, runtime, and host. No compiler probe.
 
 Examples:
   luainstaller analyze test/student_management_system/main.lua --max-deps 250
@@ -262,6 +272,17 @@ local VALID_LEVELS = {
     success = true,
 }
 
+local KNOWN_VALUE_OPTIONS = {
+    ["--file-mode"] = true, ["--out"] = true, ["--include"] = true,
+    ["--exclude"] = true, ["--ffi-library"] = true, ["--target-os"] = true,
+    ["--lua"] = true, ["--lua-prefix"] = true, ["--discovery-mode"] = true,
+    ["--max-deps"] = true, ["--runtime-timeout"] = true,
+    ["--max-source-bytes"] = true, ["--max-bundle-bytes"] = true,
+    ["--max-trace-bytes"] = true, ["--level"] = true, ["--limit"] = true,
+    ["--color"] = true, ["--progress"] = true, ["--format"] = true,
+    ["-o"] = true, ["-d"] = true,
+}
+
 local ArgumentParser = {}
 ArgumentParser.__index = ArgumentParser
 
@@ -277,11 +298,21 @@ function ArgumentParser:hasNext()
 end
 
 function ArgumentParser:consume()
+    if self.pending ~= nil then
+        local value = self.pending
+        self.pending = nil
+        return value
+    end
     if not self:hasNext() then
         return nil
     end
     local value = self.args[self.pos]
     self.pos = self.pos + 1
+    local name, inline = tostring(value):match("^(--[%w%-]+)=(.*)$")
+    if name and KNOWN_VALUE_OPTIONS[name] then
+        self.pending = inline
+        return name
+    end
     return value
 end
 
@@ -297,6 +328,10 @@ local KNOWN_OPTION_TOKENS = {
     ["--verbose"] = true, ["--"] = true,
     ["--runtime-timeout"] = true, ["--max-source-bytes"] = true,
     ["--max-bundle-bytes"] = true, ["--max-trace-bytes"] = true,
+    ["--level"] = true, ["--limit"] = true, ["--asc"] = true,
+    ["--color"] = true, ["--no-color"] = true, ["--progress"] = true,
+    ["--no-progress"] = true, ["--format"] = true, ["--help"] = true,
+    ["--version"] = true,
 }
 
 function ArgumentParser:consumeValue(option_name)
@@ -358,14 +393,40 @@ function Ui.new(context)
     return setmetatable({
         color = supportsColor(context),
         animations = context.animations and true or false,
+        format = context.format or "text",
+        progress_mode = context.progress_mode or "off",
+        color_level = present.colorLevel(os.getenv, supportsColor(context)),
+        columns = present.columns(),
     }, Ui)
 end
+
+local TRUECOLOR = {
+    ["1;36"] = "1;38;2;125;211;252",
+    ["1;32"] = "1;38;2;74;222;128",
+    ["1;33"] = "1;38;2;251;191;36",
+    ["1;31"] = "1;38;2;248;113;113",
+    ["2"] = "38;2;148;163;184",
+    ["1"] = "1;38;2;226;232;240",
+    ["36"] = "38;2;56;189;248",
+}
+local COLOR_256 = {
+    ["1;36"] = "1;38;5;117",
+    ["1;32"] = "1;38;5;42",
+    ["1;33"] = "1;38;5;221",
+    ["1;31"] = "1;38;5;203",
+    ["2"] = "38;5;246",
+    ["1"] = "1;38;5;255",
+    ["36"] = "38;5;45",
+}
 
 function Ui:paint(code, text)
     if not self.color then
         return text
     end
-    return string.format("\27[%sm%s\27[0m", code, text)
+    local sequence = code
+    if self.color_level == "truecolor" then sequence = TRUECOLOR[code] or code end
+    if self.color_level == "256" then sequence = COLOR_256[code] or code end
+    return string.format("\27[%sm%s\27[0m", sequence, text)
 end
 
 function Ui:heading(text)
@@ -385,14 +446,24 @@ function Ui:err(text)
 end
 
 function Ui:progress(label)
-    if self.animations then
-        io.write(string.format("%s %s\r", self:paint("36", "|"), label))
+    if self.format == "json" or self.progress_mode == "off" then
+        return
     end
+    if self.progress_mode == "redraw" then
+        if self.redraw_stop then return end
+        self.redraw_stop = present.startRedraw(label)
+        return
+    end
+    local line = self:paint("36", "|") .. " " .. present.fit(tostring(label), self.columns - 4)
+    io.stderr:write(line .. "\n")
 end
 
 function Ui:clearProgress()
-    if self.animations then
-        io.write("                    \r")
+    if self.redraw_stop then
+        self.redraw_stop()
+        self.redraw_stop = nil
+        io.stderr:write("\r\27[K")
+        return
     end
 end
 
@@ -405,11 +476,12 @@ local function writeClassicHint(message)
 end
 
 local function writeModernError(ui, message)
+    io.stderr:write(ui:paint("2", "────────────────────────────────") .. "\n")
     io.stderr:write(string.format("%s %s\n", ui:err("error:"), message))
 end
 
 local function writeModernHint(message)
-    io.stderr:write(string.format("hint: %s\n", message))
+    io.stderr:write(string.format("%s %s\n", "hint:", message))
 end
 
 local function newOptions()
@@ -528,6 +600,11 @@ local function parseActionOptions(parser, action)
             opts[item:sub(3):gsub("-", "_")] = number
         elseif item == "--verbose" then
             opts.verbose = true
+        elseif item:match("^%-%-verbose=") or item:match("^%-%-no%-depscan=")
+            or item:match("^%-%-dir=") or item:match("^%-%-onedir=")
+            or item:match("^%-%-file=") or item:match("^%-%-onefile=")
+            or item:match("^%-M=") then
+            return nil, (item:match("^(--[%w%-]+)") or item) .. " does not take a value"
         elseif item == "--" then
             while parser:hasNext() do
                 opts.run_args[#opts.run_args + 1] = parser:consume()
@@ -662,18 +739,39 @@ local function renderClassicBundle(result, opts)
     renderBundleDiagnostics(result, opts.verbose)
 end
 
+local function modernRule(ui)
+    return ui:paint("2", "────────────────────────────────")
+end
+
+local function modernField(ui, label, value)
+    local shown = present.fit(tostring(value or ""), ui.columns - 20)
+    io.write(string.format("  %s  %s\n", ui:paint("2", string.format("%-16s", label)), shown))
+end
+
+local function modernList(ui, title, rows)
+    if #rows == 0 then return end
+    io.write("\n" .. ui:paint("1", title) .. "\n")
+    for index, row in ipairs(rows) do
+        io.write(string.format("  %s  %s\n", ui:paint("2", string.format("%2d", index)), row))
+    end
+end
+
 local function renderModernAnalyze(ui, result, verbose)
     local deps = result.dependencies or { scripts = {}, libraries = {} }
+    io.write(modernRule(ui) .. "\n")
     io.write(ui:heading("Analysis complete") .. "\n")
-    io.write(string.format("  Entry: %s\n", result.entry))
+    io.write(modernRule(ui) .. "\n")
+    modernField(ui, "Entry", result.entry or "")
     io.write(string.format("  Lua scripts: %s\n", ui:ok(tostring(#deps.scripts))))
-    io.write(string.format("  Native libraries: %s\n", ui:ok(tostring(#deps.libraries))))
+    modernField(ui, "Native libraries", ui:ok(tostring(#deps.libraries)))
+    modernList(ui, "Scripts", deps.scripts)
+    modernList(ui, "Libraries", deps.libraries)
     if verbose then
-        io.write("\nResolution trace\n")
+        io.write("\n" .. ui:paint("1", "Resolution trace") .. "\n")
         for i, item in ipairs(result.trace or {}) do
             io.write(string.format(
-                "  %d. %s %s%s%s\n",
-                i,
+                "  %s  %s %s%s%s\n",
+                ui:paint("2", string.format("%2d", i)),
                 item.requested or "(unknown)",
                 item.reason or "unknown",
                 item.selected_path and " -> " or "",
@@ -681,16 +779,20 @@ local function renderModernAnalyze(ui, result, verbose)
             ))
         end
     end
+    io.write(modernRule(ui) .. "\n")
 end
 
 local function renderModernTrace(ui, result)
+    io.write(modernRule(ui) .. "\n")
     io.write(ui:heading("Dependency trace") .. "\n")
-    io.write(string.format("  Entry: %s\n", result.entry))
+    io.write(modernRule(ui) .. "\n")
+    modernField(ui, "Entry", result.entry or "")
     for i, item in ipairs(result.trace or {}) do
+        local kind = item.classification or item.selected_type or "unknown"
         io.write(string.format(
-            "  %d. %s  %s  %s%s%s\n",
-            i,
-            item.classification or item.selected_type or "unknown",
+            "  %s  %s  %s  %s%s%s\n",
+            ui:paint("2", string.format("%2d", i)),
+            ui:paint("36", kind),
             item.reason or "unknown",
             item.requested or "(unknown)",
             item.selected_path and " -> " or "",
@@ -699,38 +801,50 @@ local function renderModernTrace(ui, result)
     end
     if result.compatibility then
         io.write("\n" .. ui:heading("Compatibility") .. "\n")
-        io.write(string.format("  %s\n", result.compatibility.summary or "unknown"))
+        modernField(ui, "Summary", result.compatibility.summary or "unknown")
         for _, note in ipairs(result.compatibility.notes or {}) do
-            io.write(string.format("  note: %s\n", note))
+            io.write(string.format("  %s %s\n", ui:paint("2", "note"), note))
         end
         for _, warning in ipairs(result.compatibility.warnings or {}) do
             io.write(string.format("  %s %s\n", ui:warn("warning:"), warning))
         end
     end
+    io.write(modernRule(ui) .. "\n")
 end
 
 local function renderModernBundle(ui, result, opts)
+    local manifest = result.manifest or {}
+    local modules = manifest.modules or {}
+    io.write(modernRule(ui) .. "\n")
     io.write(ui:heading("Build complete") .. "\n")
-    if result.executable then
-        io.write(string.format("  Executable: %s\n", ui:ok(result.executable)))
+    io.write(modernRule(ui) .. "\n")
+    if opts and opts.entry then modernField(ui, "Entry", opts.entry) end
+    if result.mode or (opts and opts.mode) then
+        modernField(ui, "Mode", result.mode or opts.mode)
     end
     if result.onefile_mode then
-        io.write(string.format("  File mode: %s\n", result.onefile_mode))
-        if opts.verbose and result.selection_reason then io.write("  Selection: " .. result.selection_reason .. "\n") end
+        modernField(ui, "File mode", result.onefile_mode)
     end
-    if opts.verbose then
-        local manifest = result.manifest or {}
-        local modules = manifest.modules or {}
-        io.write(string.format("  Mode: %s\n", result.mode or opts.mode or "unknown"))
-        io.write(string.format("  Lua modules: %d\n", #(modules.lua or {})))
-        io.write(string.format("  Native modules: %d\n", #(modules.native or {})))
+    if result.selection_reason then
+        modernField(ui, "Selection", result.selection_reason)
     end
+    modernField(ui, "Lua modules", tostring(#(modules.lua or {})))
+    modernField(ui, "Native modules", tostring(#(modules.native or {})))
+    if result.executable then
+        modernField(ui, "Executable", ui:ok(result.executable))
+    end
+    io.write(modernRule(ui) .. "\n")
     renderBundleDiagnostics(result, opts.verbose)
 end
 
 local function runAction(style, ui, parser, action)
     local opts, err = parseActionOptions(parser, action)
     if not opts then
+        if ui.format == "json" then
+            present.writeJson(present.envelope(action == "bundle" and "build" or action,
+                false, nil, nil, { type = "InvalidOptionsError", message = err }))
+            return 1
+        end
         if style == "modern" then
             writeModernError(ui, err)
             writeModernHint("run `luainstaller help`")
@@ -741,51 +855,58 @@ local function runAction(style, ui, parser, action)
         return 1
     end
 
+    local function emitSuccess(result)
+        if ui.format == "json" then
+            present.writeJson(present.envelope(action == "bundle" and "build" or action,
+                true, result, result.warnings))
+            return 0
+        end
+        if action == "analyze" then
+            if style == "modern" then renderModernAnalyze(ui, result, opts.verbose)
+            else renderClassicAnalyze(result, opts.verbose) end
+        elseif action == "trace" then
+            if style == "modern" then renderModernTrace(ui, result)
+            else renderClassicTrace(result) end
+        else
+            if style == "modern" then renderModernBundle(ui, result, opts)
+            else renderClassicBundle(result, opts) end
+        end
+        return 0
+    end
+
     local result
     if action == "analyze" then
         ui:progress("Analyzing")
         result = luainstaller.analyze(opts)
         ui:clearProgress()
-        if result.ok then
-            if style == "modern" then
-                renderModernAnalyze(ui, result, opts.verbose)
-            else
-                renderClassicAnalyze(result, opts.verbose)
-            end
-            return 0
-        end
+        if result.ok then return emitSuccess(result) end
     elseif action == "trace" then
         ui:progress("Tracing")
         result = luainstaller.trace(opts)
         ui:clearProgress()
-        if result.ok then
-            if style == "modern" then
-                renderModernTrace(ui, result)
-            else
-                renderClassicTrace(result)
-            end
-            return 0
-        end
+        if result.ok then return emitSuccess(result) end
     elseif action == "bundle" then
         ui:progress("Building")
         result = luainstaller.bundle(opts)
         ui:clearProgress()
-        if result.ok then
-            if style == "modern" then
-                renderModernBundle(ui, result, opts)
-            else
-                renderClassicBundle(result, opts)
-            end
-            return 0
-        end
+        if result.ok then return emitSuccess(result) end
     end
 
+    local code = result and result.error and result.error.type == "InterruptedError" and 130 or 1
+    if ui.format == "json" then
+        local err = result and result.error or { type = "LuaInstallerError", message = "operation failed" }
+        err.suggestion = present.suggestion(err)
+        present.writeJson(present.envelope(action == "bundle" and "build" or action, false, nil, nil, err))
+        return code
+    end
     if style == "modern" then
         writeModernError(ui, structuredErrorText(result, opts.verbose))
+        local hint = present.suggestion(result and result.error)
+        if hint then writeModernHint(hint) end
     else
         writeClassicError(structuredErrorText(result, opts.verbose))
     end
-    return result and result.error and result.error.type == "InterruptedError" and 130 or 1
+    return code
 end
 
 local function parseLogOptions(parser, style, ui)
@@ -831,6 +952,12 @@ end
 local function runLogs(parser, style, ui)
     local opts, err = parseLogOptions(parser, style, ui)
     if not opts then
+        if ui.format == "json" then
+            present.writeJson(present.envelope("logs", false, nil, nil, {
+                type = "InvalidOptionsError", message = err,
+            }))
+            return 1
+        end
         if style == "modern" then
             writeModernError(ui, err)
         else
@@ -839,9 +966,35 @@ local function runLogs(parser, style, ui)
         return 1
     end
 
-    local logs = logger.getLogs(opts)
+    local query = logger.queryLogs(opts)
+    if query.status == "unreadable" then
+        if ui.format == "json" then
+            present.writeJson(present.envelope("logs", false, nil, nil, {
+                type = "LogReadError",
+                message = "log file is unreadable",
+            }))
+        elseif style == "modern" then
+            writeModernError(ui, "LogReadError: log file is unreadable")
+        else
+            writeClassicError("LogReadError: log file is unreadable")
+        end
+        return 1
+    end
+    local logs = query.logs or {}
+    if query.status == "backup" then
+        io.stderr:write(style == "modern" and "warning: using recovered log copy\n"
+            or "warning: using recovered log copy\n")
+    end
     if #logs == 0 then
-        io.write(style == "modern" and "No logs found.\n" or "no logs\n")
+        if ui.format == "json" then
+            present.writeJson(present.envelope("logs", true, { logs = {}, status = query.status }))
+        else
+            io.write(style == "modern" and "No logs found.\n" or "no logs\n")
+        end
+        return 0
+    end
+    if ui.format == "json" then
+        present.writeJson(present.envelope("logs", true, { logs = logs, status = query.status }))
         return 0
     end
 
@@ -858,7 +1011,13 @@ local function runLogs(parser, style, ui)
         local action = entry.action or "unknown"
         local msg = entry.message or ""
         if style == "modern" then
-            io.write(string.format("  [%s] %-7s %s:%s %s\n", ts, lvl, src, action, msg))
+            local level_text = lvl
+            if lvl == "error" then level_text = ui:err(lvl)
+            elseif lvl == "warning" then level_text = ui:warn(lvl)
+            elseif lvl == "success" then level_text = ui:ok(lvl)
+            else level_text = ui:paint("36", lvl) end
+            io.write(string.format("  %s  %s  %s:%s\n", ui:paint("2", ts), level_text, src, action))
+            if msg ~= "" then io.write("      " .. msg .. "\n") end
         else
             io.write(string.format("%s\t%s\t%s:%s\t%s\n", ts, lvl, src, action, msg))
         end
@@ -877,9 +1036,17 @@ local function runLuai(args, context)
 
     local command = parser:consume()
     if command == "-h" then
+        if parser:hasNext() then
+            writeClassicError("help does not take extra arguments")
+            return 1
+        end
         io.write(LUAI_HELP)
         return 0
     elseif command == "-v" then
+        if parser:hasNext() then
+            writeClassicError("version does not take extra arguments")
+            return 1
+        end
         io.write(string.format("luai %s\n", VERSION))
         return 0
     elseif command == "-a" then
@@ -897,21 +1064,100 @@ local function runLuai(args, context)
     return 1
 end
 
+local function versionReport()
+    local compat = require("luainstaller.compat")
+    local platform = require("luainstaller.platform")
+    local runtime = compat.luaVersion()
+    local host = platform.detectHost()
+    return {
+        version = VERSION,
+        license = "LGPL-3.0-or-later",
+        runtime = runtime.version,
+        kind = runtime.kind,
+        host = { os = host.os, arch = host.arch },
+        project = PROJECT_URL,
+    }
+end
+
+local function writeModernVersion(ui)
+    local report = versionReport()
+    if ui.format == "json" then
+        present.writeJson(present.envelope("version", true, report))
+        return
+    end
+    io.write(string.format("luainstaller %s  LGPL 3.0 by WaterRun\n", VERSION))
+    io.write(string.format("runtime: %s\n", report.runtime or "unknown"))
+    io.write(string.format("host: %s %s\n", report.host.os or "unknown", report.host.arch or "unknown"))
+    io.write(string.format("project: %s\n", PROJECT_URL))
+end
+
 local function runLuainstaller(args, context)
-    local parser = ArgumentParser.new(args)
+    local display, stripped, display_err = present.takeDisplay(args)
+    context = context or {}
+    if not display then
+        if present.jsonRequested(args) then
+            present.writeJson(present.envelope(present.commandToken(args), false, nil, nil, {
+                type = "InvalidOptionsError", message = display_err,
+            }))
+            return 1
+        end
+        local ui = Ui.new(context)
+        writeModernError(ui, display_err)
+        return 1
+    end
+    context.format = display.format
+    local stdout_is_tty = present.streamIsTTY(1)
+    local stderr_is_tty = present.streamIsTTY(2)
+    context.progress_mode = present.wantProgress(display, context, stderr_is_tty)
+    context.color = present.wantColor(display, context, stdout_is_tty)
+    local parser = ArgumentParser.new(stripped)
     local ui = Ui.new(context)
 
-    if not parser:hasNext() then
+    local function rejectExtra(label)
+        if not parser:hasNext() then return nil end
+        local message = label .. " does not take extra arguments"
+        if ui.format == "json" then
+            present.writeJson(present.envelope(label, false, nil, nil, {
+                type = "InvalidOptionsError", message = message,
+            }))
+        else
+            writeModernError(ui, message)
+        end
+        return 1
+    end
+
+    local function writeModernHelp(topic)
+        if ui.format == "json" then
+            present.writeJson(present.envelope("help", true, { command = topic, text = LUAINSTALLER_HELP }))
+            return
+        end
+        io.write(ui:heading("luainstaller") .. "  " .. ui:paint("2", VERSION) .. "\n")
+        io.write(ui:paint("2", "Two commands, one builder. luai stays terse; this entry shows the full result.") .. "\n")
+        io.write(modernRule(ui) .. "\n")
+        if topic then io.write(ui:paint("1", "Command: " .. topic) .. "\n") end
         io.write(LUAINSTALLER_HELP)
+        io.write(modernRule(ui) .. "\n")
+    end
+
+    if not parser:hasNext() then
+        writeModernHelp(nil)
         return 0
     end
 
     local command = parser:consume()
-    if command == "help" then
-        io.write(LUAINSTALLER_HELP)
+    if command == "help" or command == "-h" or command == "--help" then
+        local topic = nil
+        if parser:hasNext() then
+            topic = parser:consume()
+            local extra = rejectExtra("help")
+            if extra then return extra end
+        end
+        writeModernHelp(topic)
         return 0
-    elseif command == "version" then
-        io.write(string.format("luainstaller %s  LGPL 3.0 by WaterRun\n", VERSION))
+    elseif command == "version" or command == "--version" then
+        local extra = rejectExtra("version")
+        if extra then return extra end
+        writeModernVersion(ui)
         return 0
     elseif command == "analyze" then
         return runAction("modern", ui, parser, "analyze")
@@ -923,6 +1169,13 @@ local function runLuainstaller(args, context)
         return runLogs(parser, "modern", ui)
     end
 
+    if ui.format == "json" then
+        present.writeJson(present.envelope(command, false, nil, nil, {
+            type = "InvalidOptionsError",
+            message = "unknown luainstaller command: " .. tostring(command),
+        }))
+        return 1
+    end
     writeModernError(ui, string.format("unknown luainstaller command: %s", command))
     writeModernHint("run `luainstaller help`")
     return 1

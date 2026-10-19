@@ -59,7 +59,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.7.1-1.rockspec
+luarocks lint luainstaller-1.8.0-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -499,8 +499,56 @@ source, configuration, suite exits and final `PASS` before accepting a run.
   clearly identified as non-blocking evidence
 . Documentation does not prescribe cross-build or a device allowlist
 . `git diff --check` and clean-checkout review
+. Publish the tag, GitHub assets, and LuaRocks rock in
+  xref:#testing-luarocks[Publish]
 
 The candidate is the tip of `main`. Save the command output used for
 the decision.
+
+[#testing-luarocks]
+== Publish
+
+The checklist above qualifies the commit. LuaRocks keeps serving the
+previous rock until this version's rock is uploaded.
+
+. Tag the qualified commit. The rockspec `source.tag` is that tag.
+. Publish the GitHub release from the tag. Attach
+  `luainstaller-1.8.0.tar.gz`, `luainstaller-1.8.0.zip`,
+  `luainstaller-1.8.0-1.rockspec`, `luainstaller-1.8.0-1.src.rock`, and
+  `SHA256SUMS`.
+. Download those five files into an empty directory and run
+  `sha256sum -c SHA256SUMS`.
+. Upload the downloaded rockspec and `.src.rock`. The second argument is
+  the release file, so the stored bytes are that file:
+
++
+[source,bash]
+----
+luarocks upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock
+----
++
+Use the maintainer account that holds the API key. Keep the key out of
+the repository and out of `--verbose` output.
+
+If the upload reports `unexpected eof while reading`, LuaSec did not
+reach the server. Repeat the upload through curl:
+
++
+[source,bash]
+----
+lua -e 'package.preload["ltn12"]=function() error("use curl", 0) end' \
+  "$(command -v luarocks)" upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock
+----
+
+. `https://luarocks.org/luainstaller-1.8.0-1.src.rock` and
+  `https://luarocks.org/luainstaller-1.8.0-1.rockspec` both download, and
+  their bytes match the GitHub release files.
+. Install with no version into an empty tree, then over the previous
+  install. Both select 1.8.0. `luai -v` prints `luai 1.8.0`, and
+  `luainstaller version` prints that version. Remove the empty tree.
+. When an older Git tag has a GitHub rock that luarocks.org does not
+  serve, upload that rock the same way.
+
+Save the upload output and both install results with the audit record.
 
 xref:../README.adoc#documentation-index[Back to documentation index]

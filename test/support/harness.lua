@@ -114,6 +114,7 @@ local PRELOADS = {
     { "luainstaller.bundler", "src/bundler.lua" },
     { "luainstaller.onefile", "src/onefile.lua" },
     { "luainstaller.cli", "src/cli.lua" },
+    { "luainstaller.cli_present", "src/cli_present.lua" },
 }
 
 function M.install_loader()

@@ -45,6 +45,10 @@ luai -v
 Remove an outdated mirror from that configuration: a failed official download
 can otherwise fall back to an older package.
 
+The install log names the rock it selected. When that address is already
+on `https://luarocks.org/` and `luai -v` is older than the current GitHub
+release, install the `.src.rock` from that release.
+
 If the download reports `unexpected eof while reading`, use the system
 HTTPS downloader and enable certificate checks:
 

@@ -1,10 +1,10 @@
 rockspec_format = "3.0"
 package = "luainstaller"
-version = "1.7.1-1"
+version = "1.8.0-1"
 
 source = {
     url = "git+https://github.com/Water-Run/luainstaller.git",
-    tag = "v1.7.1",
+    tag = "v1.8.0",
 }
 
 description = {
@@ -66,7 +66,9 @@ build = {
         ["luainstaller.discovery"]  = "src/discovery.lua",
         ["luainstaller.onefile"]  = "src/onefile.lua",
         ["luainstaller.cli"]      = "src/cli.lua",
+        ["luainstaller.cli_present"] = "src/cli_present.lua",
     },
+    copy_directories = { "doc", "docs", "LICENSES" },
     install = {
         bin = {
             ["luai"] = "src/cli.lua",

@@ -199,6 +199,13 @@ FFI 名称数量也受这个上限约束
 `--verbose`:: 工作时输出更多细节
 `-- ARGS`:: 运行时发现期间传给脚本的参数
 
+.luainstaller 显示
+[horizontal]
+`--color MODE`:: `auto`、`always` 或 `never`。`--no-color` 等于 `never`。`luai` 保持纯文本。
+`--progress MODE`:: `auto`、`plain` 或 `off`。进度写到 stderr。`--no-progress` 等于 `off`。
+`--format text`:: 给人读的文本，这是默认值
+`--format json`:: stdout 上一个 JSON 对象。色彩和进度关闭。失败时退出码仍非零。
+
 [#usage-limits]
 == 时间和大小限制
 

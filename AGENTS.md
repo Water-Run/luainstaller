@@ -70,4 +70,14 @@ User docs (`README.adoc`, `docs/*.adoc` except `IMPLEMENTATION` and
   cross-compiled results alone.
 - `docs/RELINKING.adoc` is also embedded in `src/distribution_files.lua`
   and shipped inside every bundle; keep the two in step.
+- Publish with the ordered steps in `docs/TESTING.adoc`
+  (`#testing-luarocks`) and `docs/zh-CN/TESTING.adoc`. Tag the qualified
+  commit, attach the five GitHub assets, and check `sha256sum -c SHA256SUMS`
+  on a fresh download. Then `luarocks upload ROCKSPEC SRC.ROCK` using that
+  downloaded `.src.rock`. If the upload reports `unexpected eof while reading`,
+  repeat it with the curl command in that section, and do not pass
+  `--verbose`. The LuaRocks bytes must match the GitHub files. A versionless
+  install into an empty tree and over the previous install must select this
+  version, and `luai -v` must match the tag. Upload any older GitHub rock
+  the index does not serve. Leave the API key out of the repository.
 - Don't commit machine credentials, chat exports or old `.rock` files.

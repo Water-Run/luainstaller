@@ -1,0 +1,71 @@
+= luainstaller 1.7.2：LuaRocks 安装材料
+:toc:
+:sectanchors:
+
+本文件规划 1.7.2，基线为已发布的 1.7.1。它描述待实现的修复，不表示这些行为已经发布。
+审计依据见 xref:AUDIT-1.7.2.adoc[1.7.2 审计]。总路线见 xref:PLAN.adoc[开发计划]。
+1.8.0 的命令重做和 1.9.0 的产物运行效率不纳入这一版。
+
+== 交付目标
+
+`luarocks make` 和 `luarocks install` 装上的材料与 `tools/install.lua` 的许可证、
+文档、变更记录和手册一致。安装不再走 LuaRocks 对根目录 `LICENSES` 的失败复制。
+模块、两个命令名和生成产物的行为保持 1.7.1。
+
+== 安装树
+
+rockspec 设置：
+
+[source,lua]
+----
+copy_directories = { "doc", "docs", "LICENSES" }
+----
+
+`doc/`、`docs/` 和 `LICENSES/` 都是仓库里的真实目录，LuaRocks 会递归复制。
+显式设置之后，LuaRocks 不再按文件名扫描根目录，因此不会再对 `LICENSES` 执行不带
+`-r` 的 `cp`。
+
+`doc/` 是安装副本，内容与这些源文件字节相同：
+
+* `LICENSE`
+* `README.adoc`
+* `README.zh-CN.adoc`
+* `THIRD_PARTY_NOTICES.md`
+* `CHANGELOG.adoc`
+* `luainstaller.1`
+
+`docs/` 使用现有用户指南。`LICENSES/` 使用现有三份许可证。
+`AGENTS.md` 是仓库维护说明，不进入安装树。
+
+`src/distribution_files.lua` 的内嵌文本继续与磁盘文件保持一致，本版不改这些字节。
+
+== 回归
+
+在 `test/luarocks_install.lua` 的隔离 `luarocks make` 之后检查安装树。
+版本目录使用 `require("luainstaller").VERSION`，不另写一套版本号。
+
+安装树中这些路径与仓库文件字节相同：
+
+* `LICENSES/GPL-3.0-or-later.txt`
+* `LICENSES/Lua-MIT.txt`
+* `LICENSES/LuaJIT-MIT.txt`
+* `doc/LICENSE`
+* `doc/README.adoc`
+* `doc/README.zh-CN.adoc`
+* `doc/THIRD_PARTY_NOTICES.md`
+* `doc/CHANGELOG.adoc`
+* `doc/luainstaller.1`
+* `docs/RELINKING.adoc`
+
+安装树中不存在 `AGENTS.md`。现有的命令版本、运行时发现、构建和空搜索路径运行保持通过。
+
+另加一个不依赖 LuaRocks 的比较：`doc/` 里六个副本与上表源文件字节相同。
+源文件变更而副本未更新时，这个比较失败。
+
+== 完成条件
+
+* 隔离安装树包含上面的许可证、文档和手册，字节与源文件一致。
+* 安装结果成功，且不再依赖对 `LICENSES` 目录的非递归复制。
+* `lua test/luarocks_install.lua` 和许可证比较通过。
+* 版本号在实现 1.7.2 时再改。本计划不提前改版本。
+* 发布时按 xref:../docs/TESTING.adoc#testing-luarocks[发布] 执行，中文副本保持一致。

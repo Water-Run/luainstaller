@@ -57,7 +57,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.7.1-1.rockspec
+luarocks lint luainstaller-1.8.0-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -460,7 +460,52 @@ Linux 还在隔离目标文件系统中运行 `test/no_lua_target.lua`。
   证据
 . 文档不规定交叉构建或设备允许列表
 . `git diff --check` 与干净检出的复查
+. 按 xref:#testing-luarocks[发布] 发布标签、GitHub 附件和 LuaRocks rock
 
 候选提交是 `main` 的顶端。请保存用于决策的命令输出。
+
+[#testing-luarocks]
+== 发布
+
+上面的清单用来确认提交可以发布。在这一版的 rock 上传之前，LuaRocks
+继续提供上一版。
+
+. 给确认过的提交打标签。rockspec 的 `source.tag` 就是这个标签。
+. 用该标签发布 GitHub Release，并附上 `luainstaller-1.8.0.tar.gz`、
+  `luainstaller-1.8.0.zip`、`luainstaller-1.8.0-1.rockspec`、
+  `luainstaller-1.8.0-1.src.rock` 和 `SHA256SUMS`。
+. 把这五个文件下载到一个空目录，执行 `sha256sum -c SHA256SUMS`。
+. 上传刚下载的 rockspec 和 `.src.rock`。第二个参数就是 Release 里的文件，
+  仓库保存的是这个文件的字节：
+
++
+[source,bash]
+----
+luarocks upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock
+----
++
+用保存了 API key 的维护者账号执行。key 不要进入仓库，也不要出现在
+`--verbose` 输出里。
+
+如果上传报告 `unexpected eof while reading`，说明 LuaSec 没有连上服务器。
+改用 curl 再传一次：
+
++
+[source,bash]
+----
+lua -e 'package.preload["ltn12"]=function() error("use curl", 0) end' \
+  "$(command -v luarocks)" upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock
+----
+
+. `https://luarocks.org/luainstaller-1.8.0-1.src.rock` 和
+  `https://luarocks.org/luainstaller-1.8.0-1.rockspec` 都能下载，
+  并且字节与 GitHub Release 的文件一致。
+. 先向空树做无版本号安装，再覆盖上一版安装。两次都选中 1.8.0。
+  `luai -v` 输出 `luai 1.8.0`，`luainstaller version` 也输出这一版。
+  然后删除空树。
+. 更早的 Git 标签如果已经有 GitHub rock，而 luarocks.org 还没有，
+  用同样的步骤上传。
+
+把上传输出和两次安装结果写入审计记录。
 
 xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
