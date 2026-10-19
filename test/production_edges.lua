@@ -49,6 +49,12 @@ local function commandResultWithWatchdog(command, seconds)
     return commandResult(harness.command("sh", { "-c", script }))
 end
 
+local fixture_system_path = "/usr/bin:/bin"
+if os.getenv("TERMUX_VERSION") then
+    fixture_system_path = assert(os.getenv("PREFIX"), "Termux prefix is missing")
+        .. "/bin:/system/bin"
+end
+
 local luaCommand = shellQuote(harness.lua_command())
 local compat = require("luainstaller.compat")
 local loadText = compat.loadText
@@ -2229,7 +2235,7 @@ assert(io.open(%q, "rb") == nil, "failed build must not publish output")
     runCommand(table.concat({
         "LUAI_MUTATE_SOURCE=" .. shellQuote(dependency),
         "LUAI_REAL_CC=" .. shellQuote(real_cc),
-        "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
+        "PATH=" .. shellQuote(fake_bin .. ":" .. fixture_system_path),
         luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     removeTree(root)
@@ -3582,7 +3588,7 @@ local ran, output = process.outputCommand(built.executable, { "without-ldd" }, {
 assert(ran and output:find("hello without-ldd", 1, true), tostring(output))
 ]], linked_prefix, linked_name, no_ldd_out, linked_prefix,
             no_ldd_empty_path, no_ldd_out .. "/.luai/native")
-        runCommand("PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin")
+        runCommand("PATH=" .. shellQuote(fake_bin .. ":" .. fixture_system_path)
             .. " " .. luaCommand .. " -e " .. shellQuote(no_ldd_child))
         assert(fileExists(no_ldd_out .. "/.luai/native/" .. linked_name),
             "no-ldd bundle did not preserve the ELF DT_SONAME")
@@ -3663,7 +3669,7 @@ assert(io.open(%q, "rb") == nil, "compiler was invoked before ABI rejection")
         "LUAI_COMPILER_MARKER=" .. shellQuote(compiler_marker),
         "LUAI_LUA=" .. shellQuote(fake_bin .. "/lua-no-dev"),
         "LUAI_LUA_PREFIX=" .. shellQuote(""),
-        "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
+        "PATH=" .. shellQuote(fake_bin .. ":" .. fixture_system_path),
         luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(not fileExists(out .. "/out"), "ABI failure published an executable")
@@ -3715,7 +3721,7 @@ assert(result.error.token == "-I/tmp/lua-include;injected", tostring(result.erro
         "LUAI_COMPILER_MARKER=" .. shellQuote(compiler_marker),
         "LUAI_LUA=" .. shellQuote(fake_bin .. "/lua-no-dev"),
         "LUAI_LUA_PREFIX=" .. shellQuote(""),
-        "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
+        "PATH=" .. shellQuote(fake_bin .. ":" .. fixture_system_path),
         luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(not fileExists(compiler_marker),
@@ -3809,7 +3815,7 @@ assert(diagnostic:find(%q, 1, true), diagnostic)
     runCommand(table.concat({
         "LUAI_LUA=" .. shellQuote(fake_bin .. "/lua-no-dev"),
         "LUAI_LUA_PREFIX=" .. shellQuote(""),
-        "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
+        "PATH=" .. shellQuote(fake_bin .. ":" .. fixture_system_path),
         luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(not fileExists(out .. "/out"), "ABI probe failure published an executable")
@@ -4139,7 +4145,7 @@ assert(result.error.path == %q, "committed output path missing")
 ]], out, out)
     runCommand(table.concat({
         "LUAI_REAL_RM=" .. shellQuote(commandOutputTrimmed("command -v rm")),
-        "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
+        "PATH=" .. shellQuote(fake_bin .. ":" .. fixture_system_path),
         luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(fileExists(out), "committed output was lost after cleanup failure")
@@ -4203,7 +4209,7 @@ assert(result.ok, result.error and (result.error.message .. ": " .. tostring(res
     runCommand(table.concat({
         "LUAI_CAPTURE_EXTRACTOR=" .. shellQuote(captured),
         "LUAI_REAL_CC=" .. shellQuote(commandOutputTrimmed("command -v cc")),
-        "PATH=" .. shellQuote(fake_bin .. ":/usr/bin:/bin"),
+        "PATH=" .. shellQuote(fake_bin .. ":" .. fixture_system_path),
         luaCommand .. " -e " .. shellQuote(child),
     }, " "))
     assert(fileExists(captured), "extractor C source was not captured")
