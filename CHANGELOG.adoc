@@ -44,6 +44,8 @@ truth for the exact contents of a published version.
   process IDs are reused.
 * Reduce delays when rebuilding and recovering existing bundles with older
   Lua versions.
+* Fix LuaJIT runtime loading when the system reports resolved, versioned
+  shared-library filenames.
 
 == 1.8.1 - 2026-10-19
 
