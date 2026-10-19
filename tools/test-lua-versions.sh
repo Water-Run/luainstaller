@@ -617,6 +617,11 @@ run_production_edges() {
 run_version() {
     version=$1
     source_sha256=$2
+    version_tmp=$WORK_ROOT/luainstaller-tmp-$version
+    require_safe_tmp_path "$version_tmp"
+    mkdir -p "$version_tmp"
+    require_owned_private_root "$version_tmp"
+    export TMPDIR="$version_tmp" TEMP="$version_tmp" TMP="$version_tmp"
     lua_prefix=$(build_lua "$version" "$source_sha256")
     if [ -n "${TERMUX_VERSION:-}" ]; then
         export LD_LIBRARY_PATH="$lua_prefix/lib:$PREFIX/lib"

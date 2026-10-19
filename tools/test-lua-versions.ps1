@@ -458,12 +458,18 @@ $msvc = Initialize-Msvc
 Test-NativeRunner
 foreach ($spec in $SelectedVersions) {
     $log = Join-Path $EvidenceDir "$HostLabel-lua-$($spec.Version).log"
+    $previousTemp, $previousTmp = $env:TEMP, $env:TMP
     try {
+        $versionTemp = Assert-SafeRoot (Join-Path $previousTemp "luainstaller-test-$($spec.Version)-$PID")
+        $null = [IO.Directory]::CreateDirectory($versionTemp)
+        $env:TEMP, $env:TMP = $versionTemp, $versionTemp
         $result = Run-Version $spec $msvc $luaRocks 2>&1 | Tee-Object -FilePath $log
         $result | Select-Object -Last 1
     } catch {
         $_ | Out-String | Add-Content -LiteralPath $log
         Get-Content -LiteralPath $log
         throw
+    } finally {
+        $env:TEMP, $env:TMP = $previousTemp, $previousTmp
     }
 }

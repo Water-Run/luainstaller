@@ -127,7 +127,8 @@ failures, parser fixtures for macOS, and unchecked Windows diagnostics
 |`test/windows_native.lua`
 |Native Win32 file and process operations without PowerShell: Unicode data,
 concurrent private directories, binary files, junction rejection, simultaneous
-stdout/stderr capture, timeouts and owner-death descendant cleanup
+stdout/stderr capture, transient and persistent file locks, timeouts and
+owner-death descendant cleanup
 
 |`test/no_lua_target.lua`
 |Native Linux execution in an isolated filesystem without an installed Lua
@@ -165,7 +166,7 @@ with existing ownership records
 
 |`test/moon_case_aliases.lua`
 |Case aliases for MoonScript entries and includes, distinct-file collision refusal;
-native Windows file identity and an explicit POSIX backend model
+native case-insensitive filesystems and an explicit backend model
 
 |`test/moon_compiler_bounds.lua`
 |Real subprocess deadlines and output quotas, failed compilation, original diagnostics,
@@ -500,6 +501,7 @@ identity, builtin versus source modules, explicit FFI files, all artifact
 modes, JIT on/off and execution after source removal. Shared suites cover
 installation, headerless relinking, quotas, publication and cleanup.
 Linux also runs `test/no_lua_target.lua` in an isolated target filesystem.
+Windows also runs `test/windows_native.lua` against the selected LuaJIT runtime.
 
 Artifacts named `luajit-linux-<configuration>-evidence` and
 `luajit-windows-<configuration>-evidence` retain complete logs for 14 days,

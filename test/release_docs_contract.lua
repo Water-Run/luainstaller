@@ -77,6 +77,7 @@ for _, suite in ipairs({"dependency_limits", "source_normalization", "logger_ord
     expect_contains("tools/test-lua-versions.ps1", "'" .. suite .. ".lua'")
     expect_contains("tools/luajit-suites.txt", suite)
 end
+expect_contains("tools/test-luajit.ps1", "test/windows_native.lua")
 
 local workflow = read_file(".github/workflows/ci.yml")
 local posix_matrix = assert(workflow:match("\n  version%-matrix:(.-)\n  linux%-x86%-native:"),

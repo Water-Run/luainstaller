@@ -1385,6 +1385,56 @@ static int execute(context *ctx)
     return 1;
 }
 
+static int rename_retryable(DWORD error)
+{
+    return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION
+        || error == ERROR_LOCK_VIOLATION;
+}
+
+static int rename_path(context *ctx, const wchar_t *source, const wchar_t *destination)
+{
+    DWORD error;
+    HANDLE original, current;
+    BY_HANDLE_FILE_INFORMATION expected, actual;
+    unsigned int attempt;
+    if (MoveFileW(source, destination)) return 1;
+    error = GetLastError();
+    if (!rename_retryable(error) || GetFileAttributesW(destination) != INVALID_FILE_ATTRIBUTES) {
+        SetLastError(error); return win_fail(ctx, "rename");
+    }
+    /* Scanners can briefly retain a file after a process exits. Keep the
+       original object alive while waiting; don't move a replacement source. */
+    original = CreateFileW(source, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (original == INVALID_HANDLE_VALUE) { SetLastError(error); return win_fail(ctx, "rename"); }
+    if (!track(ctx, original)) return 0;
+    if (!GetFileInformationByHandle(original, &expected)) return win_fail(ctx, "inspect rename source");
+    if (expected.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return fail(ctx, "rename source is a reparse point");
+    for (attempt = 0; attempt < 40; ++attempt) {
+        Sleep(25);
+        current = CreateFileW(source, FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (current == INVALID_HANDLE_VALUE) return win_fail(ctx, "inspect rename source");
+        if (!GetFileInformationByHandle(current, &actual)) {
+            error = GetLastError(); CloseHandle(current);
+            SetLastError(error); return win_fail(ctx, "inspect rename source");
+        }
+        CloseHandle(current);
+        if (actual.dwVolumeSerialNumber != expected.dwVolumeSerialNumber
+            || actual.nFileIndexHigh != expected.nFileIndexHigh
+            || actual.nFileIndexLow != expected.nFileIndexLow
+            || (actual.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            return fail(ctx, "rename source changed while waiting");
+        if (MoveFileW(source, destination)) return 1;
+        error = GetLastError();
+        if (!rename_retryable(error) || GetFileAttributesW(destination) != INVALID_FILE_ATTRIBUTES) break;
+    }
+    SetLastError(error);
+    return win_fail(ctx, "rename");
+}
+
 static int dispatch(context *ctx)
 {
     field *op = &ctx->fields[0];
@@ -1547,7 +1597,7 @@ static int dispatch(context *ctx)
         attributes = GetFileAttributesW(path);
         if (attributes == INVALID_FILE_ATTRIBUTES) return win_fail(ctx, "inspect source");
         if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return fail(ctx, "source is a reparse point");
-        if (equals(op, "rename")) return MoveFileW(path, other) ? 1 : win_fail(ctx, "rename");
+        if (equals(op, "rename")) return rename_path(ctx, path, other);
         if (attributes & FILE_ATTRIBUTE_DIRECTORY) return fail(ctx, "source is not a regular file");
         if (equals(op, "link")) return CreateHardLinkW(other, path, NULL) ? 1 : win_fail(ctx, "create hard link");
         return CopyFileW(path, other, TRUE) ? 1 : win_fail(ctx, "copy file");

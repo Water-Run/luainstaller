@@ -103,6 +103,8 @@ try {
             "`nRUN $suite" | Out-File -FilePath $Log -Append -Encoding utf8
             Invoke-Logged $env:LUAI_TEST_LUA @("test/$suite.lua")
         }
+        "RUN windows_native" | Out-File -FilePath $Log -Append -Encoding utf8
+        Invoke-Logged $env:LUAI_TEST_LUA @('test/windows_native.lua')
     } finally { Pop-Location }
     "PASS luainstaller 1.8.2 LuaJIT $($Pin.version) $Configuration" |
         Out-File -FilePath $Log -Append -Encoding utf8

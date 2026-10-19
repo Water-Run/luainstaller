@@ -122,7 +122,8 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/windows_native.lua`
 |不依赖 PowerShell 的 Win32 文件与进程操作：Unicode 数据、并发私有目录、
-二进制文件、目录联接拒绝、同时捕获标准输出与错误、超时和属主退出后的子进程清理
+二进制文件、目录联接拒绝、同时捕获标准输出与错误、暂时与持续文件占用、
+超时和属主退出后的子进程清理
 
 |`test/no_lua_target.lua`
 |在未安装 Lua 解释器、库、头文件或 LuaRocks 的隔离文件系统中进行
@@ -157,7 +158,7 @@ x86_64 生成 C 代码和 PE 审计
 |被引用排除项、传递发现、未使用排除项与首次读取后的源码变更
 
 |`test/moon_case_aliases.lua`
-|MoonScript 入口与 include 的大小写别名、不同文件冲突拒绝；真实 Windows 文件身份和明确的 POSIX 后端模型
+|MoonScript 入口与 include 的大小写别名、不同文件冲突拒绝；真实大小写不敏感文件系统和明确的后端模型
 
 |`test/moon_compiler_bounds.lua`
 |真实子进程超时和输出配额、编译失败、原始路径诊断、预处理总量预算及已有输出保留
@@ -465,6 +466,7 @@ powershell -NoProfile -File tools/test-luajit.ps1 -Configuration lua52compat
 与源码模块、显式 FFI 文件、全部产物模式、JIT 开关以及删除源码后的执行。
 共用套件覆盖安装、无头文件重链接、配额、发布与清理。
 Linux 还在隔离目标文件系统中运行 `test/no_lua_target.lua`。
+Windows 还在所选 LuaJIT 运行时下运行 `test/windows_native.lua`。
 
 `luajit-linux-<configuration>-evidence` 和
 `luajit-windows-<configuration>-evidence` 归档保留 14 天完整日志，包括失败记录。

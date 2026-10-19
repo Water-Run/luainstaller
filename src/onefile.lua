@@ -732,7 +732,7 @@ static int luai_open_absolute_dir(const char *path) {
     const char *cursor;
     int current_fd;
     int parent_access = O_RDONLY;
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && defined(O_PATH)
     /* App sandboxes may search platform ancestors without reading them.
        O_PATH still pins each directory for fstat and no-follow openat. */
     parent_access = O_PATH;

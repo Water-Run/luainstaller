@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-12
+    2026-10-19
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -49,6 +49,32 @@ assert(unexpected_root_result == nil,
     "successful private-directory creation leaked an auxiliary return value")
 
 local fixture = dofile("test/support/windows_fixture.lua")(root)
+local function checkRenameLock(kind, succeeds)
+    local rename_source = path.join(root, kind .. "-source")
+    local rename_target = path.join(root, kind .. "-target")
+    local rename_ready = path.join(root, kind .. "-ready")
+    local rename_worker = path.join(root, kind .. "-worker.lua")
+    assert(fs.makeDirectory(rename_source))
+    assert(fs.writeFile(path.join(rename_source, "keep"), "rename preserves contents"))
+    assert(fs.writeFile(rename_worker, harness.loader_prelude() .. string.format([[
+local fs = require("luainstaller.fs")
+assert(fs.writeFile(%q, "ready"))
+local moved, err = fs.rename(%q, %q)
+if %s then assert(moved, err)
+else assert(not moved, "a persistent lock was ignored") end
+]], rename_ready, rename_source, rename_target, tostring(succeeds))))
+    local arguments = {"rename-transient", lua, rename_worker,
+        rename_source, rename_ready, path.currentDirectory()}
+    if not succeeds then arguments[#arguments + 1] = "persistent" end
+    local renamed, output, status = process.outputCommand(fixture, arguments, {}, {timeout_seconds=20})
+    assert(renamed, kind .. " source-directory lock: " .. tostring(output)
+        .. " status=" .. tostring(status and status.code))
+    assert(fs.pathType(succeeds and rename_source or rename_target) == "missing")
+    assert(fs.readRegularFile(path.join(succeeds and rename_target or rename_source, "keep"))
+        == "rename preserves contents")
+end
+checkRenameLock("transient", true)
+checkRenameLock("persistent", false)
 local flooded, flood_output = process.outputCommand(fixture, { "flood" }, {}, { timeout_seconds = 15 })
 assert(flooded and flood_output == string.rep("a", 64 * 4096) .. string.rep("b", 64 * 4096),
     "simultaneous stdout/stderr capture failed")

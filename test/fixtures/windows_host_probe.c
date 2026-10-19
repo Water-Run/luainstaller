@@ -109,6 +109,32 @@ int main(void)
         return 0;
     }
     if (wcscmp(argv[1], L"sleep") == 0) { Sleep(30000); return 0; }
+    if (wcscmp(argv[1], L"rename-transient") == 0 && (argc == 7 || argc == 8)) {
+        PROCESS_INFORMATION child;
+        wchar_t arguments[8192];
+        char ready[32];
+        HANDLE held = CreateFileW(argv[4], GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        if (held == INVALID_HANDLE_VALUE) return 100;
+        if (_snwprintf(arguments, sizeof(arguments) / sizeof(arguments[0]),
+                L"\"%ls\"", argv[3]) < 0 || !start(argv[2], arguments, argv[6], &child)) {
+            CloseHandle(held); return 101;
+        }
+        if (!wait_ready(argv[5], child.hProcess, ready, sizeof(ready))) {
+            CloseHandle(held); TerminateProcess(child.hProcess, 102);
+            WaitForSingleObject(child.hProcess, 5000); close_process(&child); return 102;
+        }
+        Sleep(argc == 8 ? 3000 : 300);
+        CloseHandle(held);
+        if (WaitForSingleObject(child.hProcess, 10000) != WAIT_OBJECT_0) {
+            TerminateProcess(child.hProcess, 103); WaitForSingleObject(child.hProcess, 5000);
+            close_process(&child); return 103;
+        }
+        if (!GetExitCodeProcess(child.hProcess, &code)) code = 104;
+        close_process(&child);
+        return (int)code;
+    }
     if (wcscmp(argv[1], L"exit86") == 0) return 86;
     if (wcscmp(argv[1], L"held-exit") == 0 && argc == 5) {
         PROCESS_INFORMATION exited, observer;

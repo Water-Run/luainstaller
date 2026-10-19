@@ -250,8 +250,16 @@ test("external command timeouts kill runaway children", function()
     assert(child_pid, "timed argv command did not report its child PID: "
         .. tostring(direct_output))
     local child_alive = process.outputCommand("kill", { "-0", child_pid })
+    local descendant_state = ""
+    if child_alive then
+        local described, state = process.outputCommand("ps", {"-p", child_pid, "-o", "stat="})
+        descendant_state = tostring(state or "")
+        -- A terminated grandchild can await init's reap on a busy BSD host.
+        if described and descendant_state:match("^%s*Z") then child_alive = false
+        elseif not described then child_alive = process.outputCommand("kill", {"-0", child_pid}) end
+    end
     assert(child_alive == false,
-        "timed argv command left a descendant alive: " .. child_pid)
+        "timed argv command left a descendant alive: " .. child_pid .. " " .. descendant_state)
 
     local env_ok, env_output = process.outputCommand(
         "sh",
