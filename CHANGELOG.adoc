@@ -40,6 +40,8 @@ truth for the exact contents of a published version.
   reliable output-lock ownership.
 * Regenerate onefile payloads from the extracted working directory using the
   documented `.` root.
+* Keep Windows process cleanup from terminating unrelated processes when
+  process IDs are reused.
 
 == 1.8.1 - 2026-10-19
 

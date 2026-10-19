@@ -85,6 +85,13 @@ assert(fs.makeDirectory(pin_source))
 local pinned, pin_output = process.outputCommand(pin_probe, {pin_source, pin_target})
 assert(pinned, pin_output)
 assert(fs.pathType(pin_source) == "directory" and fs.pathType(pin_target) == "missing")
+local cleanup_probe = path.join(root, "process-identity.exe")
+local cleanup_built, cleanup_build_output = require("luainstaller.toolchain").compileStandalone(
+    pin_compiler, path.absolute("test/fixtures/windows_process_identity.c"), cleanup_probe, {work_dir=root})
+assert(cleanup_built, cleanup_build_output)
+local cleanup_ok, cleanup_output = process.outputCommand(cleanup_probe, {}, {}, {timeout_seconds=20})
+assert(cleanup_ok, cleanup_output)
+print((cleanup_output:gsub("%s+$", "")))
 local flooded, flood_output = process.outputCommand(fixture, { "flood" }, {}, { timeout_seconds = 15 })
 assert(flooded and flood_output == string.rep("a", 64 * 4096) .. string.rep("b", 64 * 4096),
     "simultaneous stdout/stderr capture failed")

@@ -829,22 +829,63 @@ static wchar_t *environment(context *ctx, unsigned int first, DWORD count)
     return (wchar_t *)block.data;
 }
 
-static void kill_descendants(DWORD root, unsigned int depth)
+static int process_parent_is(DWORD child, DWORD parent)
+{
+    HANDLE snapshot;
+    PROCESSENTRY32W entry;
+    int found = 0;
+    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return 0;
+    memset(&entry, 0, sizeof(entry)); entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) do {
+        if (entry.th32ProcessID == child) {
+            found = entry.th32ParentProcessID == parent;
+            break;
+        }
+    } while (Process32NextW(snapshot, &entry));
+    CloseHandle(snapshot);
+    return found;
+}
+
+static void kill_descendants_checked(HANDLE root_process, DWORD root,
+    unsigned int depth, DWORD *ancestors)
 {
     HANDLE snapshot, process;
     PROCESSENTRY32W entry;
-    if (depth > 64) return;
+    FILETIME root_birth, child_birth, ended, kernel, user;
+    unsigned int index;
+    int cycle;
+    if (depth > 64 || !GetProcessTimes(root_process, &root_birth, &ended, &kernel, &user)) return;
+    ancestors[depth] = root;
     snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return;
     memset(&entry, 0, sizeof(entry)); entry.dwSize = sizeof(entry);
     if (Process32FirstW(snapshot, &entry)) do {
-        if (entry.th32ParentProcessID == root && entry.th32ProcessID != root) {
-            kill_descendants(entry.th32ProcessID, depth + 1);
-            process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, entry.th32ProcessID);
-            if (process) { TerminateProcess(process, 124); CloseHandle(process); }
+        if (entry.th32ParentProcessID != root) continue;
+        cycle = 0;
+        for (index = 0; index <= depth; ++index)
+            if (ancestors[index] == entry.th32ProcessID) { cycle = 1; break; }
+        if (cycle) continue;
+        process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
+            FALSE, entry.th32ProcessID);
+        if (!process) continue;
+        /* A recorded parent PID may refer to an older, unrelated process.
+           Hold each identity before descending and recheck the live relation. */
+        if (GetProcessTimes(process, &child_birth, &ended, &kernel, &user)
+            && CompareFileTime(&child_birth, &root_birth) >= 0
+            && process_parent_is(entry.th32ProcessID, root)) {
+            kill_descendants_checked(process, entry.th32ProcessID, depth + 1, ancestors);
+            TerminateProcess(process, 124);
         }
+        CloseHandle(process);
     } while (Process32NextW(snapshot, &entry));
     CloseHandle(snapshot);
+}
+
+static void kill_descendants(HANDLE root_process, DWORD root, unsigned int depth)
+{
+    DWORD ancestors[65] = {0};
+    kill_descendants_checked(root_process, root, depth, ancestors);
 }
 
 static int legacy_jobs(void)
@@ -1017,7 +1058,7 @@ __declspec(dllexport) void CALLBACK luainstaller_host_watchdogW(HWND window, HIN
     CloseHandle((HANDLE)values[5]);
     waits[0] = (HANDLE)values[0]; waits[1] = (HANDLE)values[1];
     if (WaitForMultipleObjects(2, waits, FALSE, INFINITE) == WAIT_OBJECT_0) {
-        kill_descendants((DWORD)values[4], 0);
+        kill_descendants((HANDLE)values[3], (DWORD)values[4], 0);
         if (values[2]) TerminateJobObject((HANDLE)values[2], 124);
         TerminateProcess((HANDLE)values[3], 124);
     }
@@ -1046,7 +1087,8 @@ static HANDLE watchdog(context *ctx, HANDLE child, DWORD pid, HANDLE job, HANDLE
     if (!DuplicateHandle(current, current, current, &inherited[0], SYNCHRONIZE, TRUE, 0)
         || !DuplicateHandle(current, finished, current, &inherited[1], SYNCHRONIZE, TRUE, 0)
         || (job && !DuplicateHandle(current, job, current, &inherited[2], JOB_OBJECT_TERMINATE, TRUE, 0))
-        || !DuplicateHandle(current, child, current, &inherited[3], SYNCHRONIZE | PROCESS_TERMINATE, TRUE, 0)
+        || !DuplicateHandle(current, child, current, &inherited[3],
+            SYNCHRONIZE | PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, TRUE, 0)
         || !DuplicateHandle(current, ready, current, &inherited[4], EVENT_MODIFY_STATE, TRUE, 0)) {
         win_fail(ctx, "duplicate watchdog handles"); goto done;
     }
@@ -1362,14 +1404,14 @@ static int execute(context *ctx)
         Sleep(1);
     }
     if (timed_out || failed || exceeded) {
-        if (legacy || !job) kill_descendants(child.dwProcessId, 0);
+        if (legacy || !job) kill_descendants(child.hProcess, child.dwProcessId, 0);
         if (job) TerminateJobObject(job, 124);
         else TerminateProcess(child.hProcess, 124);
     }
     if (WaitForSingleObject(child.hProcess, 5000) != WAIT_OBJECT_0)
         return fail(ctx, "cannot confirm child shutdown within five seconds");
     if (!GetExitCodeProcess(child.hProcess, &status)) return win_fail(ctx, "read process status");
-    if (legacy || !job) kill_descendants(child.dwProcessId, 0);
+    if (legacy || !job) kill_descendants(child.hProcess, child.dwProcessId, 0);
     if (finished) {
         SetEvent(finished);
         if (WaitForSingleObject(guard, 5000) != WAIT_OBJECT_0) TerminateProcess(guard, 125);

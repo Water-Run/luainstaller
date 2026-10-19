@@ -130,7 +130,8 @@ failures, parser fixtures for macOS, and unchecked Windows diagnostics
 |Native Win32 file and process operations without PowerShell: Unicode data,
 concurrent private directories, binary files, junction rejection, simultaneous
 stdout/stderr capture, transient and persistent file locks, timeouts and
-owner-death descendant cleanup, and directory reservations during file operations
+owner-death descendant cleanup, PID reuse and stale parent cycles, and directory
+reservations during file operations
 
 |`test/no_lua_target.lua`
 |Native Linux execution in an isolated filesystem without an installed Lua
