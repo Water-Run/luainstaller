@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.8.0-1.rockspec",
+    "luainstaller-1.8.1-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -98,15 +98,21 @@ expect_contains("README.adoc", "A Lua library that matches that interpreter's ve
 expect_contains("README.zh-CN.adoc", "构建可执行文件不需要 Lua 头文件")
 expect_not_contains("README.zh-CN.adoc", "Lua 头文件和 Lua 库")
 expect_contains("docs/zh-CN/INSTALL.adoc", "不需要 Lua 头文件")
+expect_contains("docs/USAGE.adoc", "Arguments after `--` are passed unchanged")
+expect_contains("docs/zh-CN/USAGE.adoc", "`--` 后的参数原样传给运行时发现")
+for _, path in ipairs({"docs/TESTING.adoc", "docs/zh-CN/TESTING.adoc"}) do
+    expect_contains(path, "test/cli_boundaries.lua")
+    expect_contains(path, "test/doc_payload.lua")
+end
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查")
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
-expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.8.0-1.rockspec")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.8.1-1.rockspec")
 expect_contains("docs/TESTING.adoc",
-    "luarocks upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock")
+    "luarocks upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock")
 expect_contains("docs/zh-CN/TESTING.adoc",
-    "luarocks upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock")
+    "luarocks upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock")
 expect_contains("docs/TESTING.adoc", "[#testing-luarocks]")
 expect_contains("docs/zh-CN/TESTING.adoc", "[#testing-luarocks]")
 expect_contains("AGENTS.md", "luarocks upload ROCKSPEC SRC.ROCK")

@@ -26,17 +26,28 @@ local COLOR_VALUES = { auto = true, always = true, never = true }
 local PROGRESS_VALUES = { auto = true, plain = true, off = true }
 local FORMAT_VALUES = { text = true, json = true }
 
-local JSON_COMMANDS = {
-    analyze = true, trace = true, build = true, logs = true,
-    help = true, version = true,
-}
+local function optionParts(item)
+    local name, inline = tostring(item):match("^(--[%w%-]+)=(.*)$")
+    return name or item, inline
+end
 
-function M.jsonRequested(args)
+local function knownOption(item, options)
+    local token = optionParts(item)
+    return VALUE_OPTIONS[token] or token == "--no-color" or token == "--no-progress"
+        or (options and options[token])
+end
+
+local function opaqueValue(args, index, values, options)
+    local token, inline = optionParts(args[index])
+    return inline == nil and values and values[token] and args[index + 1] ~= nil
+        and not knownOption(args[index + 1], options)
+end
+
+function M.jsonRequested(args, values, options)
     local index = 1
     while index <= #args do
-        local item = tostring(args[index])
-        local name, inline = item:match("^(--[%w%-]+)=(.*)$")
-        local token = name or item
+        local token, inline = optionParts(args[index])
+        if token == "--" then break end
         if token == "--format" then
             local value = inline
             if value == nil then
@@ -44,6 +55,8 @@ function M.jsonRequested(args)
                 value = args[index]
             end
             if value == "json" then return true end
+        elseif opaqueValue(args, index, values, options) then
+            index = index + 1
         end
         index = index + 1
     end
@@ -51,8 +64,16 @@ function M.jsonRequested(args)
 end
 
 function M.commandToken(args)
-    for _, item in ipairs(args) do
-        if JSON_COMMANDS[item] then return item end
+    local index = 1
+    while index <= #args do
+        local token, inline = optionParts(args[index])
+        if token == "--" then break end
+        if VALUE_OPTIONS[token] then
+            if inline == nil then index = index + 1 end
+        elseif token ~= "--no-color" and token ~= "--no-progress" then
+            return token
+        end
+        index = index + 1
     end
     return "cli"
 end
@@ -65,19 +86,31 @@ local function fail(message)
     return nil, nil, message
 end
 
-function M.takeDisplay(args)
+function M.takeDisplay(args, values, options)
     local display = M.newDisplay()
     local rest = {}
+    local selected = {}
+    local function assign(key, value)
+        if selected[key] ~= nil and selected[key] ~= value then
+            return "conflicting values for --" .. key
+        end
+        display[key], selected[key] = value, value
+        return nil
+    end
     local index = 1
     while index <= #args do
         local item = args[index]
-        local name, inline = tostring(item):match("^(--[%w%-]+)=(.*)$")
-        local token = name or item
-        if token == "--no-color" or token == "--no-progress" then
+        local token, inline = optionParts(item)
+        if token == "--" then
+            for remaining = index, #args do rest[#rest + 1] = args[remaining] end
+            break
+        elseif token == "--no-color" or token == "--no-progress" then
             if inline ~= nil then
                 return fail(token .. " does not take a value")
             end
-            if token == "--no-color" then display.color = "never" else display.progress = "off" end
+            local err = token == "--no-color" and assign("color", "never") or nil
+            if token == "--no-progress" then err = assign("progress", "off") end
+            if err then return fail(err) end
         elseif VALUE_OPTIONS[token] then
             local value = inline
             if value == nil then
@@ -96,11 +129,14 @@ function M.takeDisplay(args)
             if token == "--format" and not FORMAT_VALUES[value] then
                 return fail("--format must be text or json")
             end
-            if token == "--color" then display.color = value end
-            if token == "--progress" then display.progress = value end
-            if token == "--format" then display.format = value end
+            local err = assign(token:sub(3), value)
+            if err then return fail(err) end
         else
             rest[#rest + 1] = item
+            if opaqueValue(args, index, values, options) then
+                index = index + 1
+                rest[#rest + 1] = args[index]
+            end
         end
         index = index + 1
     end
@@ -210,7 +246,8 @@ function M.visible(text)
     local parts, index = {}, 1
     while index <= #text do
         local codepoint, next_index = nextCodepoint(text, index)
-        if codepoint < 32 or codepoint == 127 then
+        if codepoint < 32 or codepoint == 127
+            or (codepoint >= 128 and next_index == index + 1) then
             parts[#parts + 1] = string.format("\\x%02X", codepoint)
         else
             parts[#parts + 1] = text:sub(index, next_index - 1)
@@ -218,6 +255,10 @@ function M.visible(text)
         index = next_index
     end
     return table.concat(parts)
+end
+
+function M.multiline(text)
+    return (tostring(text or ""):gsub("[^\n]+", M.visible))
 end
 
 function M.fit(text, columns)
@@ -327,11 +368,21 @@ function M.wantProgress(display, context, stderr_is_tty)
 end
 
 local function encodeString(value)
-    return '"' .. value:gsub("[%z\1-\31\"\\]", function(char)
-        local byte = char:byte()
-        if char == '"' or char == "\\" then return "\\" .. char end
-        return string.format("\\u%04x", byte)
-    end) .. '"'
+    local parts, index = {'"'}, 1
+    while index <= #value do
+        local codepoint, next_index = nextCodepoint(value, index)
+        local char = value:sub(index, next_index - 1)
+        if char == '"' or char == "\\" then
+            parts[#parts + 1] = "\\" .. char
+        elseif codepoint < 32 or (codepoint >= 128 and next_index == index + 1) then
+            parts[#parts + 1] = string.format("\\u%04x", codepoint)
+        else
+            parts[#parts + 1] = char
+        end
+        index = next_index
+    end
+    parts[#parts + 1] = '"'
+    return table.concat(parts)
 end
 
 local function isArray(value)
@@ -354,7 +405,10 @@ local function encode(value, seen)
         if value ~= value or value == math.huge or value == -math.huge then
             return "null"
         end
-        return string.format("%.14g", value)
+        if type(math.type) == "function" and math.type(value) == "integer" then
+            return tostring(value)
+        end
+        return (string.format("%.17g", value):gsub(",", "."))
     end
     if kind == "string" then return encodeString(value) end
     if kind ~= "table" then return "null" end

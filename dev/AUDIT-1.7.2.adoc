@@ -1,11 +1,12 @@
-= luainstaller 1.7.2 错误审计
+= luainstaller LuaRocks 安装材料历史审计
 :toc:
 :sectanchors:
 
 基线：当前工作树，产品版本 1.7.1，发布提交
 `ccb1a611c99c59a9fffb5202a535c204c7d8f833`。
 本次审查当前 `src/`、宿主 C、`tools/install.lua` 和
-`luainstaller-1.7.1-1.rockspec`。1.7.2 尚未实现。
+`luainstaller-1.7.1-1.rockspec`。原定的 1.7.2 安装材料修复已并入 1.8.0，未单独发布。
+下文保留当时的检查范围与结论；1.8.0 之后的问题见 xref:AUDIT-1.8.x.adoc[1.8.x 质量审计]。
 已关闭的问题见 xref:AUDIT-1.7.1.adoc[1.7.1 审计]，更早的边界见
 xref:SECURITY-AUDIT.adoc[既有安全审计]。
 

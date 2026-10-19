@@ -31,6 +31,8 @@ LUA=${LUA:-lua}
 "$LUA" test/version_contract.lua
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/cli_surface.lua
+"$LUA" test/cli_boundaries.lua
+"$LUA" test/doc_payload.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
 "$LUA" test/headerless_build.lua
@@ -60,7 +62,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.8.0-1.rockspec
+luarocks lint luainstaller-1.8.1-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -81,6 +83,13 @@ source parsing
 
 |`test/cli_surface.lua`
 |JSON results, color and progress policy, log reads, and display width
+
+|`test/cli_boundaries.lua`
+|Literal application arguments, explicit values, conflicting options, help,
+complete paths, terminal controls, JSON precision and recovered-log warnings
+
+|`test/doc_payload.lua`
+|Byte identity of the documentation and license installation copies
 
 |`test/contract_docs.lua`
 |Public documentation contracts
@@ -517,8 +526,8 @@ previous rock until this version's rock is uploaded.
 
 . Tag the qualified commit. The rockspec `source.tag` is that tag.
 . Publish the GitHub release from the tag. Attach
-  `luainstaller-1.8.0.tar.gz`, `luainstaller-1.8.0.zip`,
-  `luainstaller-1.8.0-1.rockspec`, `luainstaller-1.8.0-1.src.rock`, and
+  `luainstaller-1.8.1.tar.gz`, `luainstaller-1.8.1.zip`,
+  `luainstaller-1.8.1-1.rockspec`, `luainstaller-1.8.1-1.src.rock`, and
   `SHA256SUMS`.
 . Download those five files into an empty directory and run
   `sha256sum -c SHA256SUMS`.
@@ -528,7 +537,7 @@ previous rock until this version's rock is uploaded.
 +
 [source,bash]
 ----
-luarocks upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock
+luarocks upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock
 ----
 +
 Use the maintainer account that holds the API key. Keep the key out of
@@ -541,14 +550,14 @@ reach the server. Repeat the upload through curl:
 [source,bash]
 ----
 lua -e 'package.preload["ltn12"]=function() error("use curl", 0) end' \
-  "$(command -v luarocks)" upload luainstaller-1.8.0-1.rockspec luainstaller-1.8.0-1.src.rock
+  "$(command -v luarocks)" upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock
 ----
 
-. `https://luarocks.org/luainstaller-1.8.0-1.src.rock` and
-  `https://luarocks.org/luainstaller-1.8.0-1.rockspec` both download, and
+. `https://luarocks.org/luainstaller-1.8.1-1.src.rock` and
+  `https://luarocks.org/luainstaller-1.8.1-1.rockspec` both download, and
   their bytes match the GitHub release files.
 . Install with no version into an empty tree, then over the previous
-  install. Both select 1.8.0. `luai -v` prints `luai 1.8.0`, and
+  install. Both select 1.8.1. `luai -v` prints `luai 1.8.1`, and
   `luainstaller version` prints that version. Remove the empty tree.
 . When an older Git tag has a GitHub rock that luarocks.org does not
   serve, upload that rock the same way.

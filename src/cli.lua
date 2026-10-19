@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local function localFileExists(path)
@@ -167,7 +167,7 @@ local luainstaller = require("luainstaller")
 local logger = require("luainstaller.logger")
 local present = require("luainstaller.cli_present")
 
-local VERSION = "1.8.0"
+local VERSION = "1.8.1"
 local PROJECT_URL = "https://github.com/Water-Run/luainstaller"
 local DEFAULT_MAX_DEPS = 36
 
@@ -272,6 +272,10 @@ local VALID_LEVELS = {
     success = true,
 }
 
+local MODERN_COMMANDS = {
+    help = true, version = true, analyze = true, trace = true, build = true, logs = true,
+}
+
 local KNOWN_VALUE_OPTIONS = {
     ["--file-mode"] = true, ["--out"] = true, ["--include"] = true,
     ["--exclude"] = true, ["--ffi-library"] = true, ["--target-os"] = true,
@@ -294,10 +298,10 @@ function ArgumentParser.new(args)
 end
 
 function ArgumentParser:hasNext()
-    return self.pos <= #self.args
+    return self.pending ~= nil or self.pos <= #self.args
 end
 
-function ArgumentParser:consume()
+function ArgumentParser:consume(literal)
     if self.pending ~= nil then
         local value = self.pending
         self.pending = nil
@@ -309,7 +313,7 @@ function ArgumentParser:consume()
     local value = self.args[self.pos]
     self.pos = self.pos + 1
     local name, inline = tostring(value):match("^(--[%w%-]+)=(.*)$")
-    if name and KNOWN_VALUE_OPTIONS[name] then
+    if not literal and name and KNOWN_VALUE_OPTIONS[name] then
         self.pending = inline
         return name
     end
@@ -335,14 +339,16 @@ local KNOWN_OPTION_TOKENS = {
 }
 
 function ArgumentParser:consumeValue(option_name)
-    local value = self:consume()
+    local explicit = self.pending ~= nil
+    local value = self:consume(true)
     if value == nil then
         return nil, string.format("%s requires a value", option_name)
     end
     -- A value that is itself a recognized option token is almost always a
     -- misplaced option (luai -b entry -o --dir). Dash-prefixed paths remain
     -- valid values as long as they do not collide with a known option.
-    if type(value) == "string" and KNOWN_OPTION_TOKENS[value] then
+    local token = type(value) == "string" and (value:match("^(--[%w%-]+)=") or value)
+    if not explicit and token and KNOWN_OPTION_TOKENS[token] then
         return nil, string.format(
             "%s requires a value; got the option-like token %s",
             option_name,
@@ -420,6 +426,7 @@ local COLOR_256 = {
 }
 
 function Ui:paint(code, text)
+    text = present.visible(text)
     if not self.color then
         return text
     end
@@ -468,7 +475,7 @@ function Ui:clearProgress()
 end
 
 local function writeClassicError(message)
-    io.stderr:write(string.format("error: %s\n", message))
+    io.stderr:write(string.format("error: %s\n", present.multiline(message)))
 end
 
 local function writeClassicHint(message)
@@ -477,7 +484,7 @@ end
 
 local function writeModernError(ui, message)
     io.stderr:write(ui:paint("2", "────────────────────────────────") .. "\n")
-    io.stderr:write(string.format("%s %s\n", ui:err("error:"), message))
+    io.stderr:write(string.format("%s %s\n", ui:err("error:"), present.multiline(message)))
 end
 
 local function writeModernHint(message)
@@ -508,15 +515,23 @@ end
 local function parseActionOptions(parser, action)
     local opts = newOptions()
     local explicit_mode
+    local selected, conflict = {}, nil
+    local function assign(key, value)
+        if selected[key] ~= nil and selected[key] ~= value then
+            conflict = conflict or ("conflicting values for " .. key:gsub("_", "-"))
+        else
+            opts[key], selected[key] = value, value
+        end
+    end
     opts.action = action
 
     while parser:hasNext() do
         local item = parser:consume()
         if item == "--dir" or item == "--onedir" then
-            opts.mode = "onedir"
+            assign("mode", "onedir")
             explicit_mode = "onedir"
         elseif item == "--file" or item == "--onefile" then
-            opts.mode = "onefile"
+            assign("mode", "onefile")
             explicit_mode = "onefile"
         elseif item == "--file-mode" then
             local value, err = parser:consumeValue(item)
@@ -524,7 +539,7 @@ local function parseActionOptions(parser, action)
             if value ~= "auto" and value ~= "extract" and value ~= "no-extract" then
                 return nil, "--file-mode must be auto, extract, or no-extract"
             end
-            opts.onefile_mode = value
+            assign("onefile_mode", value)
         elseif item == "--no-moon-detect" or item == "-M" then
             opts.moon_detect = false
         elseif item == "-o" or item == "--out" then
@@ -532,7 +547,7 @@ local function parseActionOptions(parser, action)
             if not value then
                 return nil, err
             end
-            opts.out = value
+            assign("out", value)
         elseif item == "--include" then
             local value, err = parser:consumeValue(item)
             if not value then
@@ -557,28 +572,28 @@ local function parseActionOptions(parser, action)
             if not value then
                 return nil, err
             end
-            opts.target_os = value
+            assign("target_os", value)
         elseif item == "--lua" then
             local value, err = parser:consumeValue(item)
             if not value then
                 return nil, err
             end
-            opts.lua = value
+            assign("lua", value)
         elseif item == "--lua-prefix" then
             local value, err = parser:consumeValue(item)
             if not value then
                 return nil, err
             end
-            opts.lua_prefix = value
+            assign("lua_prefix", value)
         elseif item == "-d" or item == "--discovery-mode" then
             local value, err = parser:consumeValue(item)
             if not value then
                 return nil, err
             end
-            opts.discovery_mode = value
+            assign("discovery_mode", value)
         elseif item == "--no-depscan" then
             opts.depscan = false
-            opts.discovery_mode = "manual"
+            assign("discovery_mode", "manual")
         elseif item == "--max-deps" then
             local value, value_err = parser:consumeValue(item)
             if not value then
@@ -588,7 +603,7 @@ local function parseActionOptions(parser, action)
             if not number then
                 return nil, err
             end
-            opts.max_deps = number
+            assign("max_deps", number)
         elseif item == "--runtime-timeout" or item == "--max-source-bytes"
             or item == "--max-bundle-bytes" or item == "--max-trace-bytes" then
             local value, value_err = parser:consumeValue(item)
@@ -597,7 +612,7 @@ local function parseActionOptions(parser, action)
             if not number or number ~= number or number <= 0 or number == math.huge then
                 return nil, item .. " must be finite and positive"
             end
-            opts[item:sub(3):gsub("-", "_")] = number
+            assign(item:sub(3):gsub("-", "_"), number)
         elseif item == "--verbose" then
             opts.verbose = true
         elseif item:match("^%-%-verbose=") or item:match("^%-%-no%-depscan=")
@@ -607,7 +622,7 @@ local function parseActionOptions(parser, action)
             return nil, (item:match("^(--[%w%-]+)") or item) .. " does not take a value"
         elseif item == "--" then
             while parser:hasNext() do
-                opts.run_args[#opts.run_args + 1] = parser:consume()
+                opts.run_args[#opts.run_args + 1] = parser:consume(true)
             end
             break
         elseif not opts.entry and item:sub(1, 1) ~= "-" then
@@ -617,6 +632,7 @@ local function parseActionOptions(parser, action)
         end
     end
 
+    if conflict then return nil, conflict end
     if not opts.entry then
         return nil, string.format("%s requires an entry script", action)
     end
@@ -658,10 +674,10 @@ local function renderClassicVerboseTrace(result)
         io.write(string.format(
             "trace[%d]: %s %s%s%s\n",
             i,
-            item.requested or "(unknown)",
-            item.reason or "unknown",
+            present.visible(item.requested or "(unknown)"),
+            present.visible(item.reason or "unknown"),
             item.selected_path and " -> " or "",
-            item.selected_path or ""
+            present.visible(item.selected_path or "")
         ))
     end
 end
@@ -669,14 +685,14 @@ end
 local function renderClassicAnalyze(result, verbose)
     local deps = result.dependencies or { scripts = {}, libraries = {} }
     io.write("ok\n")
-    io.write(string.format("entry: %s\n", result.entry))
+    io.write(string.format("entry: %s\n", present.visible(result.entry)))
     io.write(string.format("scripts: %d\n", #deps.scripts))
     io.write(string.format("libraries: %d\n", #deps.libraries))
     for i, path in ipairs(deps.scripts) do
-        io.write(string.format("script[%d]: %s\n", i, path))
+        io.write(string.format("script[%d]: %s\n", i, present.visible(path)))
     end
     for i, path in ipairs(deps.libraries) do
-        io.write(string.format("library[%d]: %s\n", i, path))
+        io.write(string.format("library[%d]: %s\n", i, present.visible(path)))
     end
     if verbose then
         renderClassicVerboseTrace(result)
@@ -685,25 +701,25 @@ end
 
 local function renderClassicTrace(result)
     io.write("trace\n")
-    io.write(string.format("entry: %s\n", result.entry))
+    io.write(string.format("entry: %s\n", present.visible(result.entry)))
     for i, item in ipairs(result.trace or {}) do
         io.write(string.format(
             "%d: %s %s %s%s%s\n",
             i,
-            item.classification or item.selected_type or "unknown",
-            item.reason or "unknown",
-            item.requested or "(unknown)",
+            present.visible(item.classification or item.selected_type or "unknown"),
+            present.visible(item.reason or "unknown"),
+            present.visible(item.requested or "(unknown)"),
             item.selected_path and " -> " or "",
-            item.selected_path or ""
+            present.visible(item.selected_path or "")
         ))
     end
     if result.compatibility then
-        io.write(string.format("compatibility: %s\n", result.compatibility.summary or "unknown"))
+        io.write(string.format("compatibility: %s\n", present.visible(result.compatibility.summary or "unknown")))
         for _, note in ipairs(result.compatibility.notes or {}) do
-            io.write(string.format("note: %s\n", note))
+            io.write(string.format("note: %s\n", present.visible(note)))
         end
         for _, warning in ipairs(result.compatibility.warnings or {}) do
-            io.write(string.format("warning: %s\n", warning))
+            io.write(string.format("warning: %s\n", present.visible(warning)))
         end
     end
 end
@@ -712,22 +728,25 @@ local function renderBundleDiagnostics(result, verbose)
     if verbose and result.toolchain then
         local selected = result.toolchain
         io.write(string.format("toolchain: %s; %s; Lua declarations: %s\n",
-            selected.source or "unknown", selected.link_mode or "unknown", selected.lua_header))
-        io.write(string.format("lua-library: %s\n", selected.library_path or "unknown"))
+            present.visible(selected.source or "unknown"), present.visible(selected.link_mode or "unknown"),
+            present.visible(selected.lua_header)))
+        io.write(string.format("lua-library: %s\n", present.visible(selected.library_path or "unknown")))
     end
     for _, warning in ipairs(result.warnings or {}) do
-        io.stderr:write("warning: " .. warning.message .. "\n")
+        io.stderr:write("warning: " .. present.multiline(warning.message) .. "\n")
     end
 end
 
 local function renderClassicBundle(result, opts)
     io.write("ok\n")
     if result.executable then
-        io.write(string.format("executable: %s\n", result.executable))
+        io.write(string.format("executable: %s\n", present.visible(result.executable)))
     end
     if result.onefile_mode then
         io.write(string.format("file-mode: %s\n", result.onefile_mode))
-        if opts.verbose and result.selection_reason then io.write("selection: " .. result.selection_reason .. "\n") end
+        if opts.verbose and result.selection_reason then
+            io.write("selection: " .. present.visible(result.selection_reason) .. "\n")
+        end
     end
     if opts.verbose then
         local manifest = result.manifest or {}
@@ -744,7 +763,7 @@ local function modernRule(ui)
 end
 
 local function modernField(ui, label, value)
-    local shown = present.fit(tostring(value or ""), ui.columns - 20)
+    local shown = present.visible(value)
     io.write(string.format("  %s  %s\n", ui:paint("2", string.format("%-16s", label)), shown))
 end
 
@@ -752,7 +771,7 @@ local function modernList(ui, title, rows)
     if #rows == 0 then return end
     io.write("\n" .. ui:paint("1", title) .. "\n")
     for index, row in ipairs(rows) do
-        io.write(string.format("  %s  %s\n", ui:paint("2", string.format("%2d", index)), row))
+        io.write(string.format("  %s  %s\n", ui:paint("2", string.format("%2d", index)), present.visible(row)))
     end
 end
 
@@ -763,7 +782,7 @@ local function renderModernAnalyze(ui, result, verbose)
     io.write(modernRule(ui) .. "\n")
     modernField(ui, "Entry", result.entry or "")
     io.write(string.format("  Lua scripts: %s\n", ui:ok(tostring(#deps.scripts))))
-    modernField(ui, "Native libraries", ui:ok(tostring(#deps.libraries)))
+    modernField(ui, "Native libraries", tostring(#deps.libraries))
     modernList(ui, "Scripts", deps.scripts)
     modernList(ui, "Libraries", deps.libraries)
     if verbose then
@@ -772,10 +791,10 @@ local function renderModernAnalyze(ui, result, verbose)
             io.write(string.format(
                 "  %s  %s %s%s%s\n",
                 ui:paint("2", string.format("%2d", i)),
-                item.requested or "(unknown)",
-                item.reason or "unknown",
+                present.visible(item.requested or "(unknown)"),
+                present.visible(item.reason or "unknown"),
                 item.selected_path and " -> " or "",
-                item.selected_path or ""
+                present.visible(item.selected_path or "")
             ))
         end
     end
@@ -793,20 +812,20 @@ local function renderModernTrace(ui, result)
             "  %s  %s  %s  %s%s%s\n",
             ui:paint("2", string.format("%2d", i)),
             ui:paint("36", kind),
-            item.reason or "unknown",
-            item.requested or "(unknown)",
+            present.visible(item.reason or "unknown"),
+            present.visible(item.requested or "(unknown)"),
             item.selected_path and " -> " or "",
-            item.selected_path or ""
+            present.visible(item.selected_path or "")
         ))
     end
     if result.compatibility then
         io.write("\n" .. ui:heading("Compatibility") .. "\n")
         modernField(ui, "Summary", result.compatibility.summary or "unknown")
         for _, note in ipairs(result.compatibility.notes or {}) do
-            io.write(string.format("  %s %s\n", ui:paint("2", "note"), note))
+            io.write(string.format("  %s %s\n", ui:paint("2", "note"), present.visible(note)))
         end
         for _, warning in ipairs(result.compatibility.warnings or {}) do
-            io.write(string.format("  %s %s\n", ui:warn("warning:"), warning))
+            io.write(string.format("  %s %s\n", ui:warn("warning:"), present.visible(warning)))
         end
     end
     io.write(modernRule(ui) .. "\n")
@@ -831,7 +850,7 @@ local function renderModernBundle(ui, result, opts)
     modernField(ui, "Lua modules", tostring(#(modules.lua or {})))
     modernField(ui, "Native modules", tostring(#(modules.native or {})))
     if result.executable then
-        modernField(ui, "Executable", ui:ok(result.executable))
+        modernField(ui, "Executable", result.executable)
     end
     io.write(modernRule(ui) .. "\n")
     renderBundleDiagnostics(result, opts.verbose)
@@ -913,6 +932,7 @@ local function parseLogOptions(parser, style, ui)
     local limit = nil
     local ascending = false
     local level = nil
+    local conflict
 
     while parser:hasNext() do
         local item = parser:consume()
@@ -921,11 +941,13 @@ local function parseLogOptions(parser, style, ui)
             if not value then
                 return nil, value_err
             end
+            local previous = limit
             limit = tonumber(value)
             if not limit or limit ~= limit or limit == math.huge
                 or limit <= 0 or limit ~= math.floor(limit) then
                 return nil, "--limit must be a positive integer"
             end
+            if previous ~= nil and previous ~= limit then conflict = "conflicting values for --limit" end
         elseif item == "--asc" then
             ascending = true
         elseif item == "--level" then
@@ -936,12 +958,14 @@ local function parseLogOptions(parser, style, ui)
             if not VALID_LEVELS[value] then
                 return nil, string.format("invalid log level: %s", value)
             end
+            if level ~= nil and level ~= value then conflict = "conflicting values for --level" end
             level = value
         else
             return nil, string.format("unknown option for logs: %s", item)
         end
     end
 
+    if conflict then return nil, conflict end
     return {
         limit = limit,
         level = level,
@@ -981,20 +1005,21 @@ local function runLogs(parser, style, ui)
         return 1
     end
     local logs = query.logs or {}
+    local warnings = {}
     if query.status == "backup" then
-        io.stderr:write(style == "modern" and "warning: using recovered log copy\n"
-            or "warning: using recovered log copy\n")
+        warnings[1] = {type = "LogRecoveryWarning", message = "using recovered log copy"}
+        if ui.format ~= "json" then io.stderr:write("warning: using recovered log copy\n") end
     end
     if #logs == 0 then
         if ui.format == "json" then
-            present.writeJson(present.envelope("logs", true, { logs = {}, status = query.status }))
+            present.writeJson(present.envelope("logs", true, { logs = {}, status = query.status }, warnings))
         else
             io.write(style == "modern" and "No logs found.\n" or "no logs\n")
         end
         return 0
     end
     if ui.format == "json" then
-        present.writeJson(present.envelope("logs", true, { logs = logs, status = query.status }))
+        present.writeJson(present.envelope("logs", true, { logs = logs, status = query.status }, warnings))
         return 0
     end
 
@@ -1016,10 +1041,14 @@ local function runLogs(parser, style, ui)
             elseif lvl == "warning" then level_text = ui:warn(lvl)
             elseif lvl == "success" then level_text = ui:ok(lvl)
             else level_text = ui:paint("36", lvl) end
-            io.write(string.format("  %s  %s  %s:%s\n", ui:paint("2", ts), level_text, src, action))
-            if msg ~= "" then io.write("      " .. msg .. "\n") end
+            io.write(string.format("  %s  %s  %s:%s\n", ui:paint("2", ts), level_text,
+                present.visible(src), present.visible(action)))
+            if msg ~= "" then
+                io.write("      " .. present.multiline(msg):gsub("\n", "\n      ") .. "\n")
+            end
         else
-            io.write(string.format("%s\t%s\t%s:%s\t%s\n", ts, lvl, src, action, msg))
+            io.write(string.format("%s\t%s\t%s:%s\t%s\n", present.visible(ts), present.visible(lvl),
+                present.visible(src), present.visible(action), present.multiline(msg)))
         end
     end
     return 0
@@ -1092,10 +1121,10 @@ local function writeModernVersion(ui)
 end
 
 local function runLuainstaller(args, context)
-    local display, stripped, display_err = present.takeDisplay(args)
+    local display, stripped, display_err = present.takeDisplay(args, KNOWN_VALUE_OPTIONS, KNOWN_OPTION_TOKENS)
     context = context or {}
     if not display then
-        if present.jsonRequested(args) then
+        if present.jsonRequested(args, KNOWN_VALUE_OPTIONS, KNOWN_OPTION_TOKENS) then
             present.writeJson(present.envelope(present.commandToken(args), false, nil, nil, {
                 type = "InvalidOptionsError", message = display_err,
             }))
@@ -1145,12 +1174,36 @@ local function runLuainstaller(args, context)
     end
 
     local command = parser:consume()
+    if MODERN_COMMANDS[command] and command ~= "help" then
+        local index = parser.pos
+        while index <= #parser.args do
+            local item = parser.args[index]
+            if item == "--" then break end
+            if item == "--help" or item == "-h" then
+                writeModernHelp(command)
+                return 0
+            end
+            if KNOWN_VALUE_OPTIONS[item] then index = index + 1 end
+            index = index + 1
+        end
+    end
     if command == "help" or command == "-h" or command == "--help" then
         local topic = nil
         if parser:hasNext() then
             topic = parser:consume()
             local extra = rejectExtra("help")
             if extra then return extra end
+            if not MODERN_COMMANDS[topic] then
+                local message = "unknown help topic: " .. topic
+                if ui.format == "json" then
+                    present.writeJson(present.envelope("help", false, nil, nil, {
+                        type = "InvalidOptionsError", message = message,
+                    }))
+                else
+                    writeModernError(ui, message)
+                end
+                return 1
+            end
         end
         writeModernHelp(topic)
         return 0

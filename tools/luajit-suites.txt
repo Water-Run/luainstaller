@@ -1,4 +1,8 @@
 luajit_identity
+cli_split_smoke
+cli_surface
+cli_boundaries
+doc_payload
 luajit_syntax
 toolchain_native
 luajit_mismatch

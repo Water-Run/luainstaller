@@ -17,6 +17,9 @@ xref:../../README.zh-CN.adoc#documentation-index[返回文档索引]
 本指南介绍日常打包：工作流程、各选项、依赖的发现方式以及 Lua API。
 示例使用短命令 `luai`；`luainstaller build` 等长命令做的是同样的事。
 
+`--` 后的参数原样传给运行时发现。文件名看起来像选项时，使用
+`--include=--name.lua`。列表选项可以重复累加；其他选项的值冲突时会报错。
+
 toc::[]
 
 [#usage-workflow]

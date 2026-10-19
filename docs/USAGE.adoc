@@ -18,6 +18,10 @@ This guide covers everyday packaging: the workflow, the options, how
 dependencies are found, and the Lua API. Examples use the short `luai`
 commands; `luainstaller build` and friends do the same thing.
 
+Arguments after `--` are passed unchanged to runtime discovery. Use
+`--include=--name.lua` for a filename that looks like an option. Repeated
+list options accumulate; conflicting values for other options report an error.
+
 toc::[]
 
 [#usage-workflow]

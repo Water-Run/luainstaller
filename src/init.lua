@@ -10,7 +10,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 
@@ -45,7 +45,7 @@ local moon_contexts = setmetatable({}, {__mode="k"})
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.8.0"
+M.VERSION = "1.8.1"
 
 --@description: Package author name
 --@const: AUTHOR

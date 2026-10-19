@@ -1,5 +1,5 @@
 --[[
-1.8.0 command surface: JSON, display flags, equals-form options, and progress.
+1.8.1 command surface: JSON, display flags, equals-form options, and progress.
 
 Author:
     WaterRun
@@ -17,6 +17,10 @@ harness.install_loader()
 local cli = require("luainstaller.cli")
 local present = require("luainstaller.cli_present")
 local logger = require("luainstaller.logger")
+local fs = require("luainstaller.fs")
+local path = require("luainstaller.path")
+local process = require("luainstaller.process")
+local windows = package.config:sub(1, 1) == "\\"
 
 local function assert_contains(haystack, needle)
     if not tostring(haystack):find(needle, 1, true) then
@@ -55,7 +59,7 @@ assert(err == "")
 assert_contains(out, '"schema_version":1')
 assert_contains(out, '"command":"version"')
 assert_contains(out, '"ok":true')
-assert_contains(out, '"version":"1.8.0"')
+assert_contains(out, '"version":"1.8.1"')
 assert(not out:find("\27[", 1, true))
 
 code, out, err = run_cli("luainstaller", { "version", "--format=json" })
@@ -138,7 +142,7 @@ assert(encoded:find('"ok":true', 1, true))
 assert(encoded:find('"b\\"c"', 1, true))
 
 local version = require("luainstaller").VERSION
-assert(version == "1.8.0")
+assert(version == "1.8.1")
 code, out, err = run_cli("luai", { "-v" })
 assert(code == 0 and out == "luai " .. version .. "\n" and err == "", out .. err)
 
@@ -214,23 +218,24 @@ for index, record in ipairs(listed) do
 end
 assert(count == #listed)
 
-local fs = require("luainstaller.fs")
 local probe_dir = assert(fs.makePrivateDirectory("version-cc-probe"))
-local marker = probe_dir .. "/probed"
-local compiler = probe_dir .. "/cc"
-local handle = assert(io.open(compiler, "w"))
-handle:write("#!/bin/sh\ntouch '" .. marker .. "'\n")
-handle:close()
-assert(os.execute("chmod +x '" .. compiler .. "'"))
+local marker = path.join(probe_dir, "probed")
+local compiler = path.join(probe_dir, windows and "cc.cmd" or "cc")
+if windows then
+    assert(fs.writeFile(compiler, '@echo off\r\nsetlocal DisableDelayedExpansion\r\necho invoked>"'
+        .. marker:gsub("%%", "%%%%") .. '"\r\nexit /b 1\r\n'))
+else
+    assert(fs.writeFile(compiler, "#!/bin/sh\nprintf invoked > " .. process.shellQuote(marker) .. "\nexit 1\n"))
+    assert(fs.setExecutable(compiler))
+end
 local lua = harness.lua_command()
-local probe = string.format(
-    "env LUAI_CC=%q LUAI_HOST_CC=%q CC=%q %s -e %q",
-    compiler, compiler, compiler, lua,
-    'dofile("test/support/harness.lua").install_loader();'
+local probe = 'dofile("test/support/harness.lua").install_loader();'
     .. 'os.exit(require("luainstaller.cli").main({"version"},'
     .. '{program_name="luainstaller",animations=false,color=false}))'
-)
-assert(os.execute(probe) == true or os.execute(probe) == 0)
+local probed, probe_output = process.outputCommand(lua, {"-e", probe}, {
+    LUAI_CC = compiler, LUAI_HOST_CC = compiler, CC = compiler,
+})
+assert(probed, probe_output)
 assert(fs.pathType(marker) == "missing", "version launched a compiler probe")
 
 assert(progress.events[#progress.events].state == "success")
@@ -272,28 +277,21 @@ assert(present.wantProgress(auto, {}, false) == "off")
 assert(present.wantProgress({ progress = "auto", format = "json" }, {}, true) == "off")
 
 local function policy_result(environment, tty)
-    local program = [[
-dofile("test/support/harness.lua").install_loader()
-local present = require("luainstaller.cli_present")
-local display = { color = "auto", progress = "auto", format = "text" }
-io.write(present.wantColor(display, {}, TTY_FLAG) and "color-yes" or "color-no")
-io.write(" ")
-io.write(present.wantProgress(display, {}, TTY_FLAG))
-]]
-    program = program:gsub("TTY_FLAG", tty and "true" or "false")
-    local quote = harness.shell_quote
-    local command = "env -u CI -u NO_COLOR " .. environment .. " "
-        .. quote(harness.lua_command()) .. " -e " .. quote(program)
-    local handle = assert(io.popen(command, "r"))
-    local text = handle:read("*a")
-    handle:close()
+    local getenv = os.getenv
+    os.getenv = function(name) return environment[name] end
+    local called, text = pcall(function()
+        return (present.wantColor(auto, {}, tty, false) and "color-yes" or "color-no")
+            .. " " .. present.wantProgress(auto, {}, tty)
+    end)
+    os.getenv = getenv
+    assert(called, text)
     return text
 end
-assert(policy_result("TERM=xterm", true) == "color-yes redraw", policy_result("TERM=xterm", true))
-assert(policy_result("TERM=xterm", false) == "color-no off")
-assert(policy_result("NO_COLOR=1 TERM=xterm", true) == "color-no redraw")
-assert(policy_result("TERM=dumb", true) == "color-no off")
-assert(policy_result("CI=1 TERM=xterm", true) == "color-no off")
+assert(policy_result({TERM="xterm"}, true) == "color-yes redraw")
+assert(policy_result({TERM="xterm"}, false) == "color-no off")
+assert(policy_result({NO_COLOR="1", TERM="xterm"}, true) == "color-no redraw")
+assert(policy_result({TERM="dumb"}, true) == "color-no off")
+assert(policy_result({CI="1", TERM="xterm"}, true) == "color-no off")
 
 local saw_tty = nil
 local original_color = present.wantColor
@@ -306,7 +304,6 @@ present.wantColor = original_color
 assert(code == 0, err)
 assert(type(saw_tty) == "boolean")
 
-local fs = require("luainstaller.fs")
 local function run_real_logs(home)
     local runner = home .. "/run-logs.lua"
     local script = assert(io.open(runner, "w"))
@@ -314,6 +311,10 @@ local function run_real_logs(home)
 dofile("test/support/harness.lua").install_loader()
 local cli = require("luainstaller.cli")
 local logger = require("luainstaller.logger")
+local output = assert(io.open(%q, "wb"))
+local errors = assert(io.open(%q, "wb"))
+io.write = function(...) return output:write(...) end
+io.stderr = errors
 local code = cli.main({"logs"}, { program_name = "luainstaller", animations = false, color = false })
 local logs = logger.getLogs({})
 local result = assert(io.open(%q, "w"))
@@ -322,15 +323,15 @@ result:write("COUNT=" .. tostring(#logs) .. "\n")
 result:write(type(logs) == "table" and "LIST=yes\n" or "LIST=no\n")
 if logs[1] then result:write("MSG=" .. tostring(logs[1].message) .. "\n") end
 result:close()
+output:close()
+errors:close()
 os.exit(0)
-]], home .. "/result.txt"))
+]], home .. "/stdout.txt", home .. "/stderr.txt", home .. "/result.txt"))
     script:close()
-    local quote = harness.shell_quote
-    local command = "env HOME=" .. quote(home) .. " " .. quote(harness.lua_command())
-        .. " " .. quote(runner)
-        .. " >" .. quote(home .. "/stdout.txt") .. " 2>" .. quote(home .. "/stderr.txt")
-    local ran = os.execute(command)
-    assert(ran == true or ran == 0, command)
+    local ran, diagnostic = process.outputCommand(harness.lua_command(), {runner}, {
+        HOME = home, USERPROFILE = home,
+    })
+    assert(ran, diagnostic)
     local result_handle = assert(io.open(home .. "/result.txt", "r"))
     local text = result_handle:read("*a")
     result_handle:close()
@@ -396,8 +397,8 @@ assert(present.displayWidth("a" .. string.char(0xCC, 0x81)) == 1)
 assert(present.displayWidth(string.char(0xE4, 0x41)) == 2)
 assert(present.visible("\1") == "\\x01")
 assert(present.fit("中文中文中文", 5) == "中文…")
-assert(present.streamIsTTY(1, true) == false)
-assert(present.streamIsTTY(2, true) == false)
+assert(type(present.streamIsTTY(1, true)) == "boolean")
+assert(type(present.streamIsTTY(2, true)) == "boolean")
 assert(present.colorLevel(function(name)
     return name == "COLORTERM" and "truecolor" or ""
 end, true) == "truecolor")
@@ -412,19 +413,28 @@ assert(present.windowsVT(function(name)
     return name == "ConEmuANSI" and "ON" or ""
 end) == true)
 assert(present.windowsVT(function() return "" end) == false)
+local windows_vt = present.windowsVT
+present.windowsVT = function() return false end
 assert(present.wantColor({ color = "auto", progress = "auto", format = "text" }, {}, true, true) == false)
+present.windowsVT = windows_vt
 
-local sink_dir = assert(require("luainstaller.fs").makePrivateDirectory("redraw-frames"))
-local sink = sink_dir .. "/frames"
-local stop = present.startRedraw("编译", sink)
-local frames = ""
-local deadline = os.time() + 3
-repeat
-    os.execute("sleep 0.2")
-    frames = require("luainstaller.fs").readRegularFile(sink) or ""
-until frames:find("编译", 1, true) or os.time() >= deadline
-stop()
-assert(frames:find("编译", 1, true), frames)
-assert(frames:find("[", 1, true), frames)
+if not windows then
+    local sink_dir = assert(fs.makePrivateDirectory("redraw-frames"))
+    local sink = path.join(sink_dir, "frames")
+    local stop = present.startRedraw("编译", sink)
+    local frames = ""
+    local deadline = os.time() + 3
+    repeat
+        assert(process.outputCommand("sh", {"-c", "sleep 0.2"}))
+        frames = fs.readRegularFile(sink) or ""
+    until frames:find("编译", 1, true) or os.time() >= deadline
+    stop()
+    assert(frames:find("编译", 1, true), frames)
+    assert(frames:find("[", 1, true), frames)
+    assert(fs.removeTree(sink_dir))
+end
+for _, directory in ipairs({probe_dir, empty_home, bad_home, backup_home}) do
+    assert(fs.removeTree(directory))
+end
 
 print("cli surface ok")

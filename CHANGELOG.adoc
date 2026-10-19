@@ -7,6 +7,19 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+== 1.8.1 - 2026-10-19
+
+=== Changes
+
+* Preserve application arguments after `--`, including option-like values and
+  empty arguments, in both commands.
+* Accept explicit option-like values in `--name=value`. Reject conflicting
+  scalar options and discovery modes instead of silently selecting one.
+* Support command-specific `--help` and reject unknown help topics.
+* Keep complete paths in modern output and display control bytes safely in
+  paths, logs and diagnostics.
+* Preserve finite number precision in JSON, escape malformed UTF-8 bytes and
+  include recovered-log warnings in the structured result.
 * Wide-character layout uses the same display widths on Lua 5.1, Lua 5.2,
   and LuaJIT as on later Lua versions.
 
