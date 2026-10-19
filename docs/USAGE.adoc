@@ -218,6 +218,10 @@ cross-compiling
 `--format text`:: human text, the default
 `--format json`:: one JSON object on stdout. Color and progress stay off. The exit code is still non-zero on failure.
 
+Automatic color and progress follow each output stream. Redirected output stays
+plain. Build and analysis output uses native Unicode on Windows consoles; consoles without virtual
+terminal support fall back to plain progress. Help and version don't need a compiler.
+
 [#usage-limits]
 == Time and size limits
 

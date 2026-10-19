@@ -2,6 +2,8 @@ luajit_identity
 cli_split_smoke
 cli_surface
 cli_boundaries
+cli_lifecycle
+progress_lifecycle
 doc_payload
 luajit_syntax
 toolchain_native

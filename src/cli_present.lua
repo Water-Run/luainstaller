@@ -12,6 +12,8 @@ Updated:
 ]]
 
 local M = {}
+local original_write, original_stderr = io.write, io.stderr
+local windows = package.config:sub(1, 1) == "\\"
 
 -- A table field cannot store nil, so missing JSON values use this sentinel.
 M.NULL = {}
@@ -296,43 +298,59 @@ end
 
 function M.startRedraw(label, sink_path)
     local fitted = M.fit(label, M.columns() - 4)
-    local function quote(value)
-        return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-    end
-    local sink = sink_path or "/dev/stderr"
-    local script = table.concat({
-        "echo $$",
-        "i=0",
-        "while true; do",
-        "  i=$((i + 1))",
-        "  case $((i % 4)) in",
-        "    1) g='|';;",
-        "    2) g='/';;",
-        "    3) g='-';;",
-        "    *) g='\\';;",
-        "  esac",
-        "  printf '\\r[%s] %s' \"$g\" \"$LUAI_PROGRESS_LABEL\" > " .. quote(sink),
-        "  sleep 0.1",
-        "done",
-    }, "\n")
-    local pipe = io.popen("LUAI_PROGRESS_LABEL=" .. quote(fitted)
-        .. " sh -c " .. quote(script), "r")
-    if not pipe then return function() end end
-    local pid = pipe:read("*l")
-    return function()
-        if pid and pid:match("^%d+$") then
-            os.execute("kill -TERM " .. pid .. " >/dev/null 2>&1")
-            os.execute("kill -KILL " .. pid .. " >/dev/null 2>&1")
+    if windows then
+        local host = require("luainstaller.windows_host")
+        local ok, token = host.call("progress_start", fitted)
+        if not ok then return nil, token end
+        local stopped, paused = false, false
+        return function()
+            if stopped then return end
+            stopped = true
+            local closed, err = host.call("progress_stop", token)
+            if not closed then error({ type = "OutputError", message = err }) end
+        end, function()
+            if stopped or paused then return end
+            local cleared, err = host.call("progress_pause", token)
+            if not cleared then error({ type = "OutputError", message = err }) end
+            paused = true
         end
-        pcall(function() pipe:close() end)
-        pid = nil
+    end
+    local process = require("luainstaller.process")
+    local prepared, err = process.prepareNative()
+    if not prepared then return nil, err end
+    local binary = require("luainstaller.posix_host").ready()
+    if not binary then return nil, "native progress helper is unavailable" end
+    local owner = process.currentPid()
+    if not owner then return nil, "cannot identify progress owner" end
+    local command = "exec " .. process.quote(binary) .. " progress " .. process.quote(owner)
+        .. " " .. process.quote(fitted)
+    if sink_path then command = command .. " " .. process.quote(sink_path) end
+    local pipe = io.popen(command, "w")
+    if not pipe then return nil, "cannot start progress display" end
+    return function()
+        if not pipe then return end
+        local closing = pipe
+        pipe = nil
+        pcall(function() closing:close() end)
     end
 end
 
-function M.streamIsTTY(fd, windows)
-    if windows == nil then windows = package.config:sub(1, 1) == "\\" end
-    -- cmd.exe has no `[`, and a failed probe would print onto the console.
-    if windows then return false end
+function M.consoleInfo(fd, prepare)
+    if not windows then return nil end
+    local host = require("luainstaller.windows_host")
+    local call = prepare and host.call or host.peek
+    local ok, output = call("console_info", tostring(fd))
+    if not ok then return nil end
+    local mode, columns, capable = output:match("^console:(%d+):(%d+):(%d+)$")
+    return { tty = mode ~= nil, columns = tonumber(columns), capable = capable == "1" }
+end
+
+function M.streamIsTTY(fd, is_windows)
+    if is_windows == nil then is_windows = windows end
+    if is_windows then
+        local info = M.consoleInfo(fd)
+        return info and info.tty or false
+    end
     if type(fd) ~= "number" or fd < 0 or fd > 9 or fd ~= math.floor(fd) then
         return false
     end
@@ -340,7 +358,7 @@ function M.streamIsTTY(fd, windows)
     return called and M.commandSucceeded(first)
 end
 
-function M.wantColor(display, context, stdout_is_tty, windows)
+function M.wantColor(display, context, stdout_is_tty, is_windows, capable)
     context = context or {}
     if display and display.format == "json" then return false end
     if display and display.color == "always" then return true end
@@ -349,8 +367,8 @@ function M.wantColor(display, context, stdout_is_tty, windows)
     if os.getenv("NO_COLOR") or os.getenv("CI") or os.getenv("TERM") == "dumb" then
         return false
     end
-    if windows == nil then windows = package.config:sub(1, 1) == "\\" end
-    if windows and not M.windowsVT() then return false end
+    if is_windows == nil then is_windows = windows end
+    if is_windows and (capable == false or (capable == nil and not M.windowsVT())) then return false end
     return stdout_is_tty and true or false
 end
 
@@ -450,7 +468,36 @@ function M.envelope(command, ok, result, warnings, err)
 end
 
 function M.writeJson(value)
-    io.write(M.encodeJson(value) .. "\n")
+    M.write(M.encodeJson(value) .. "\n")
+end
+
+local function write(stream, value)
+    value = tostring(value)
+    local native = windows and (stream == 1 and io.write == original_write
+        or stream == 2 and io.stderr == original_stderr)
+    local info = native and M.consoleInfo(stream)
+    if info and info.tty then
+        local ok, err = require("luainstaller.windows_host").peek("console_write", tostring(stream), value)
+        if not ok then error({ type = "OutputError", message = tostring(err) }) end
+        return true
+    end
+    local ok, err
+    if stream == 1 then ok, err = io.write(value) else ok, err = io.stderr:write(value) end
+    -- Test and embedding writers may return no value on success.
+    if ok == nil and err ~= nil then error({ type = "OutputError", message = tostring(err) }) end
+    return ok
+end
+
+function M.write(value) return write(1, value) end
+function M.writeError(value) return write(2, value) end
+
+function M.flush()
+    for _, stream in ipairs({ io.stdout, io.stderr }) do
+        if type(stream.flush) == "function" then
+            local ok, err = stream:flush()
+            if ok == nil and err ~= nil then error({ type = "OutputError", message = tostring(err) }) end
+        end
+    end
 end
 
 function M.suggestion(err)

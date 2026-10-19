@@ -7,6 +7,22 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+== 1.8.2 - 2026-10-19
+
+=== Changes
+
+* Stop progress displays on normal exit, failures, interruption and owner death.
+* Detect native Windows consoles, render Unicode correctly and restore console
+  modes after animated progress. Older consoles use plain progress.
+* Keep caller-provided CLI settings unchanged and report write or flush failures
+  with a non-zero exit status.
+* Install LuaRocks documentation and licenses in a consistent layout with
+  working local links, using the canonical source files.
+* Link Android C modules to the selected Lua runtime and retain process identity
+  on kernels built without PID namespaces.
+* Keep shared-Lua bundles runnable after relocation into FreeBSD paths
+  containing colons or semicolons.
+
 == 1.8.1 - 2026-10-19
 
 === Changes

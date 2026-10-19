@@ -45,7 +45,7 @@ local moon_contexts = setmetatable({}, {__mode="k"})
 
 --@description: Semantic version string of the package
 --@const: VERSION
-M.VERSION = "1.8.1"
+M.VERSION = "1.8.2"
 
 --@description: Package author name
 --@const: AUTHOR

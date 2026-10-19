@@ -1,5 +1,5 @@
 --[[
-1.8.1 command surface: JSON, display flags, equals-form options, and progress.
+1.8.2 command surface: JSON, display flags, equals-form options, and progress.
 
 Author:
     WaterRun
@@ -59,7 +59,7 @@ assert(err == "")
 assert_contains(out, '"schema_version":1')
 assert_contains(out, '"command":"version"')
 assert_contains(out, '"ok":true')
-assert_contains(out, '"version":"1.8.1"')
+assert_contains(out, '"version":"1.8.2"')
 assert(not out:find("\27[", 1, true))
 
 code, out, err = run_cli("luainstaller", { "version", "--format=json" })
@@ -142,7 +142,7 @@ assert(encoded:find('"ok":true', 1, true))
 assert(encoded:find('"b\\"c"', 1, true))
 
 local version = require("luainstaller").VERSION
-assert(version == "1.8.1")
+assert(version == "1.8.2")
 code, out, err = run_cli("luai", { "-v" })
 assert(code == 0 and out == "luai " .. version .. "\n" and err == "", out .. err)
 

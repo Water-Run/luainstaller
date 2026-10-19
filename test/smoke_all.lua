@@ -15,6 +15,7 @@ local harness = dofile("test/support/harness.lua")
 harness.install_loader()
 local shell_quote = harness.shell_quote
 local lua_command = shell_quote(harness.lua_command())
+local temporary_directories = {}
 
 local function lua_eval(source)
     return lua_command .. " -e " .. shell_quote(source)
@@ -86,10 +87,7 @@ local function host_system()
 end
 
 local function file_mtime(path)
-    if host_system() == "Darwin" then
-        return command_output_trimmed("stat -f %m " .. shell_quote(path))
-    end
-    return command_output_trimmed("stat -c %Y " .. shell_quote(path))
+    return tostring(assert(require("luainstaller.fs").modifiedAt(path)))
 end
 
 local function remove_file(path)
@@ -127,15 +125,15 @@ local function file_exists(path)
 end
 
 local function remove_tree(path)
-    if path and path ~= "" and path:match("^/tmp/luainstaller%-") then
+    if temporary_directories[path] then
         run("rm -rf " .. shell_quote(path))
+        temporary_directories[path] = nil
     end
 end
 
 local function make_temp_dir(name)
-    local path = "/tmp/luainstaller-" .. name .. "-" .. tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
-    remove_tree(path)
-    run("mkdir -m 700 " .. shell_quote(path))
+    local path = assert(require("luainstaller.fs").makePrivateDirectory(name))
+    temporary_directories[path] = true
     return path
 end
 
@@ -1072,7 +1070,7 @@ assert(result.ok == false, "forced toolchain failure must fail the rebuild")
 assert(result.error.type == "ToolchainError")
 print("failed rebuild reported")
 ]], rebuild_out)
-    assert_contains(run("PATH=" .. shell_quote(failing_bin .. ":/usr/bin:/bin")
+    assert_contains(run("PATH=" .. shell_quote(failing_bin .. ":" .. (os.getenv("PATH") or "/usr/bin:/bin"))
         .. " " .. shell_quote(lua_bin) .. " -e " .. shell_quote(failed_rebuild_script)),
         "failed rebuild reported")
     assert_file_exists(rebuild_out .. "/rebuild-generated")
@@ -1106,7 +1104,7 @@ print("onedir output race rejected")
 ]], race_out)
     assert_contains(run("LUAI_RACE_OUT=" .. shell_quote(race_out)
         .. " LUAI_REAL_CC=" .. shell_quote(real_cc)
-        .. " PATH=" .. shell_quote(racing_bin .. ":/usr/bin:/bin")
+        .. " PATH=" .. shell_quote(racing_bin .. ":" .. (os.getenv("PATH") or "/usr/bin:/bin"))
         .. " " .. shell_quote(lua_bin) .. " -e " .. shell_quote(race_script)),
         "onedir output race rejected")
     assert(read_file(race_out .. "/sentinel.txt") == "user data created during build\n")
@@ -1138,7 +1136,7 @@ print("onefile output race rejected")
 ]], onefile_race_out)
     assert_contains(run("LUAI_RACE_ONEFILE_OUT=" .. shell_quote(onefile_race_out)
         .. " LUAI_REAL_CC=" .. shell_quote(real_cc)
-        .. " PATH=" .. shell_quote(racing_cc_bin .. ":/usr/bin:/bin")
+        .. " PATH=" .. shell_quote(racing_cc_bin .. ":" .. (os.getenv("PATH") or "/usr/bin:/bin"))
         .. " " .. shell_quote(lua_bin) .. " -e " .. shell_quote(onefile_race_script)),
         "onefile output race rejected")
     assert(read_file(onefile_race_out) == "user file created during build\n")
@@ -1203,7 +1201,7 @@ print(result.executable)
 end
 
 local function check_release_metadata_contract()
-    local rockspec = read_file("luainstaller-1.8.1-1.rockspec")
+    local rockspec = read_file("luainstaller-1.8.2-1.rockspec")
     assert_contains(rockspec, '"lua >= 5.1, < 5.6"')
     local changelog = read_file("CHANGELOG.adoc")
     assert_contains(changelog, "== Unreleased")
@@ -1247,7 +1245,7 @@ local function check_cli_contract()
 
     assert_equals(
         run(cli_command("luai", { "-v" })),
-        "luai 1.8.1\n"
+        "luai 1.8.2\n"
     )
 
     local full_help = run(cli_command("luainstaller", { "help" }))
@@ -1260,7 +1258,7 @@ local function check_cli_contract()
     assert_not_contains(full_help, "engines")
 
     local modern_version = run(cli_command("luainstaller", { "version" }))
-    assert_contains(modern_version, "luainstaller 1.8.1  LGPL 3.0 by WaterRun\n")
+    assert_contains(modern_version, "luainstaller 1.8.2  LGPL 3.0 by WaterRun\n")
     assert_contains(modern_version, "runtime: ")
     assert_contains(modern_version, "host: ")
     assert_not_contains(modern_version, "cc ")
@@ -1832,13 +1830,14 @@ local function check_installed_cli_bundle()
     local root = make_temp_dir("installed-cli")
     local tree = root .. "/tree"
     local out_dir = root .. "/runtime"
-    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.8.1-1.rockspec")
+    run("luarocks make --tree " .. shell_quote(tree) .. " luainstaller-1.8.2-1.rockspec")
     local installed_version = run(shell_quote(tree .. "/bin/luainstaller") .. " version")
-    assert_contains(installed_version, "luainstaller 1.8.1  LGPL 3.0 by WaterRun\n")
+    assert_contains(installed_version, "luainstaller 1.8.2  LGPL 3.0 by WaterRun\n")
     assert_contains(installed_version, "runtime: ")
     assert_contains(installed_version, "host: ")
-    run("cd /tmp && " .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
-        .. shell_quote(os.getenv("PWD") .. "/test/runtime_bundle/main.lua")
+    run("cd " .. shell_quote(require("luainstaller.fs").temporaryRoot()) .. " && "
+        .. shell_quote(tree .. "/bin/luainstaller") .. " build --dir "
+        .. shell_quote(require("luainstaller.path").absolute("test/runtime_bundle/main.lua"))
         .. " -o " .. shell_quote(out_dir) .. " --max-deps 120")
     assert_contains(run(shell_quote(out_dir .. "/runtime") .. " installed"), "hello installed")
     remove_tree(root)

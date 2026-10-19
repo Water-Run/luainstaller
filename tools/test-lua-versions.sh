@@ -2,9 +2,24 @@
 set -eu
 
 # Native POSIX release matrix for the final official release of every Lua 5.x ABI.
-SOURCE_CACHE=${SOURCE_CACHE:-/tmp/luainstaller-source-cache}
-WORK_ROOT=${WORK_ROOT:-/tmp/luainstaller-lua-matrix}
-EVIDENCE_DIR=${EVIDENCE_DIR:-/tmp/luainstaller-lua-evidence}
+MATRIX_TMP_ROOT=/tmp
+MATRIX_SYSTEM_PATH=/usr/bin:/bin:/usr/sbin:/sbin
+MATRIX_MAKE=make
+if [ "$(uname -s)" = FreeBSD ]; then
+    MATRIX_MAKE=gmake
+    MATRIX_SYSTEM_PATH=/usr/local/bin:$MATRIX_SYSTEM_PATH
+elif [ -n "${TERMUX_VERSION:-}" ]; then
+    case "${PREFIX:-}" in
+        /data/data/com.termux/files/usr|/data/user/[0-9]*/com.termux/files/usr)
+            MATRIX_TMP_ROOT=$PREFIX/tmp
+            MATRIX_SYSTEM_PATH=$PREFIX/bin:/system/bin
+            ;;
+        *) echo 'unrecognized Termux prefix' >&2; exit 2 ;;
+    esac
+fi
+SOURCE_CACHE=${SOURCE_CACHE:-$MATRIX_TMP_ROOT/luainstaller-source-cache}
+WORK_ROOT=${WORK_ROOT:-$MATRIX_TMP_ROOT/luainstaller-lua-matrix}
+EVIDENCE_DIR=${EVIDENCE_DIR:-$MATRIX_TMP_ROOT/luainstaller-lua-evidence}
 HOST_LABEL=${HOST_LABEL:-$(uname -n | tr -c 'A-Za-z0-9._-' '-')}
 LUAI_MATRIX_EDGE_COVERAGE_MODE=${LUAI_MATRIX_EDGE_COVERAGE_MODE:-full}
 PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
@@ -17,7 +32,7 @@ LSQLITE3_URL=https://sources.debian.org/data/main/l/lua-lsqlite3/0.9.6-1/lsqlite
 SQLITE_ZIP=sqlite-amalgamation-3530200.zip
 SQLITE_SHA256=8a310d0a16c7a90cacd4c884e70faa51c902afed2a89f63aaa0126ab83558a32
 SQLITE_SOURCE_MEMBER=sqlite-amalgamation-3530200/sqlite3.c
-CACHE_SCHEMA=luainstaller-posix-matrix-cache-v2
+CACHE_SCHEMA=luainstaller-posix-matrix-cache-v3
 ROCK_SOURCES='lua-cjson-2.1.0.10-1.src.rock:02dea368d07753647c75bd9e6660dd4d06ff7d09956d90d5afc4c3f5b78ed187
 luafilesystem-1.9.0-1.src.rock:3de68d619f6ad95a27f4728814375447d921305194b7050dee6199057c31282f
 luasocket-3.1.0-1.src.rock:f4a207f50a3f99ad65def8e29c54ac9aac668b216476f7fae3fae92413398ed2
@@ -44,8 +59,8 @@ VERSIONS='5.1.5:2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
 
 require_no_symlink_ancestors() {
     candidate=$1
-    remainder=${candidate#/tmp/}
-    current=/tmp
+    remainder=${candidate#"$MATRIX_TMP_ROOT"/}
+    current=$MATRIX_TMP_ROOT
     old_ifs=$IFS
     IFS=/
     # shellcheck disable=SC2086 # The validated path is intentionally split on '/'.
@@ -63,7 +78,7 @@ require_no_symlink_ancestors() {
 
 require_safe_tmp_path() {
     case "$1" in
-        /tmp/luainstaller-?*) ;;
+        "$MATRIX_TMP_ROOT"/luainstaller-?*) ;;
         *) echo "unsafe temporary path: $1" >&2; exit 2 ;;
     esac
     case "$1" in
@@ -211,7 +226,7 @@ case "$LUAI_MATRIX_EDGE_COVERAGE_MODE" in
         exit 2
         ;;
 esac
-for command in ar awk cat cc chmod cp curl find git grep id ls make readlink tar unzip; do
+for command in ar awk cat cc chmod cp curl find git grep id ls "$MATRIX_MAKE" readlink tar unzip; do
     command -v "$command" >/dev/null 2>&1 || { echo "missing command: $command" >&2; exit 1; }
 done
 sha256_file "$0" >/dev/null
@@ -297,17 +312,21 @@ build_lua() {
     source_dir=$source_dir/lua-$version
     case "$(uname -s):$version" in
         Linux:*)
-            make -C "$source_dir/src" all \
+            "$MATRIX_MAKE" CC=cc -C "$source_dir/src" all \
                 MYCFLAGS='-fPIC -DLUA_USE_POSIX -DLUA_USE_DLOPEN' \
                 MYLIBS='-Wl,-E -ldl' >&2
             ;;
         Darwin:*)
-            make -C "$source_dir" macosx MYCFLAGS=-fPIC >&2
+            "$MATRIX_MAKE" CC=cc -C "$source_dir" macosx MYCFLAGS=-fPIC >&2
+            ;;
+        FreeBSD:*)
+            "$MATRIX_MAKE" CC=cc -C "$source_dir/src" all \
+                MYCFLAGS='-fPIC -DLUA_USE_POSIX -DLUA_USE_DLOPEN' MYLIBS='-Wl,-E' >&2
             ;;
         *) echo "unsupported POSIX build host: $(uname -s)" >&2; return 1 ;;
     esac
-    make -C "$source_dir" INSTALL_TOP="$prefix" install >&2
-    if [ "$(uname -s)" = Linux ]; then
+    "$MATRIX_MAKE" CC=cc -C "$source_dir" INSTALL_TOP="$prefix" install >&2
+    if [ "$(uname -s)" = Linux ] || [ "$(uname -s)" = FreeBSD ]; then
         archive=$source_dir/src/liblua.a
         runtime=$prefix/lib/liblua.so.$abi
         members=$(ar t "$archive")
@@ -318,8 +337,11 @@ build_lua() {
         fi
         # Archive members are source-pinned and validated above; intentional splitting.
         # shellcheck disable=SC2086
+        if [ "$(uname -s)" = FreeBSD ]; then dl_library=; else dl_library=-ldl; fi
+        # The library option is either absent or a single fixed compiler argument.
+        # shellcheck disable=SC2086
         (cd "$source_dir/src" && cc -shared -Wl,-soname,"liblua.so.$abi" \
-            -o "$runtime" $members -lm -ldl)
+            -o "$runtime" $members -lm $dl_library)
         rm -f "$prefix/lib/liblua.so.${version%%.*}" "$prefix/lib/liblua.so"
         ln -s "liblua.so.$abi" "$prefix/lib/liblua.so.${version%%.*}"
         ln -s "liblua.so.$abi" "$prefix/lib/liblua.so"
@@ -369,6 +391,7 @@ build_luarocks() {
     host_id=$(uname -s)-$(uname -m)
     compiler_hash=$(sha256_file "$(command -v cc)")
     build_id=$CACHE_SCHEMA'|component=luarocks|version='$LUAROCKS_VERSION'|source='$LUAROCKS_SHA256'|lua='$version'|lua-source='$lua_source'|host='$host_id'|cc='$compiler_hash'|recipe=configure-v2'
+    if [ -n "${TERMUX_VERSION:-}" ]; then build_id=$build_id'|provider=termux-native'; fi
     if cache_marker_matches "$marker" "$build_id" \
         && owned_regular_file "$command" \
         && [ -x "$command" ] \
@@ -378,12 +401,40 @@ build_luarocks() {
     fi
     source_dir=$WORK_ROOT/source-luarocks-$version
     rm -rf "$prefix" "$source_dir"
+    if [ -n "${TERMUX_VERSION:-}" ]; then
+        # The distro's ELF detection supports Android. The manager runs on its
+        # own Lua; --lua-dir and --lua-version select the ABI being tested.
+        "$PREFIX/bin/luarocks" --version 2>&1 | grep -F "$LUAROCKS_VERSION" >/dev/null
+        mkdir -p "$prefix/bin"
+        cat >"$prefix/termux-config.lua" <<EOF
+link_lua_explicitly = true
+variables = {
+    LUA_DIR = "$lua_prefix", LUA_BINDIR = "$lua_prefix/bin",
+    LUA_INCDIR = "$lua_prefix/include", LUA_LIBDIR = "$lua_prefix/lib",
+    LUA = "$lua_prefix/bin/lua", LUA_VERSION = "${version%.*}",
+    LUALIB = "lua", CC = "cc", LD = "cc",
+}
+EOF
+        cat >"$command" <<EOF
+#!$PREFIX/bin/sh
+unset LUA_PATH LUA_CPATH LUA_PATH_5_1 LUA_CPATH_5_1 LUA_PATH_5_2 LUA_CPATH_5_2
+unset LUA_PATH_5_3 LUA_CPATH_5_3 LUA_PATH_5_4 LUA_CPATH_5_4 LUA_PATH_5_5 LUA_CPATH_5_5
+export LUAROCKS_CONFIG='$prefix/termux-config.lua'
+exec '$PREFIX/bin/luarocks' --lua-version '${version%.*}' --lua-dir '$lua_prefix' "\$@"
+EOF
+        chmod 700 "$command"
+        "$command" --version 2>&1 | grep -F "$LUAROCKS_VERSION" >/dev/null
+        write_cache_marker "$marker" "$build_id"
+        printf 'LuaRocks provider: native Termux package %s\n' "$LUAROCKS_VERSION" >&2
+        printf '%s\n' "$prefix"
+        return
+    fi
     mkdir -p "$source_dir"
     tar -xzf "$SOURCE_CACHE/$LUAROCKS_TARBALL" -C "$source_dir"
     source_dir=$source_dir/luarocks-$LUAROCKS_VERSION
     (cd "$source_dir" && ./configure --prefix="$prefix" --with-lua="$lua_prefix") >&2
-    make -C "$source_dir" >&2
-    make -C "$source_dir" install >&2
+    "$MATRIX_MAKE" CC=cc -C "$source_dir" >&2
+    "$MATRIX_MAKE" CC=cc -C "$source_dir" install >&2
     "$command" --version 2>&1 | grep -F "$LUAROCKS_VERSION" >/dev/null
     write_cache_marker "$marker" "$build_id"
     printf '%s\n' "$prefix"
@@ -485,11 +536,23 @@ build_native_dependencies() {
     mkdir -p "$deps_module_dir"
     case "$(uname -s)" in
         Linux)
+            if [ -n "${TERMUX_VERSION:-}" ]; then
+                set -- -L"$deps_lua_prefix/lib" -llua
+            else
+                set --
+            fi
             cc -std=c11 -O2 -shared -fPIC \
                 -I"$deps_lua_prefix/include" -I"$deps_sqlite_dir" \
                 -DLSQLITE_VERSION=\"0.9.6\" \
                 "$deps_lsqlite_file" "$deps_sqlite_file" \
-                -o "$deps_module_dir/lsqlite3.so" -ldl -lm -pthread >&2
+                -o "$deps_module_dir/lsqlite3.so" "$@" -ldl -lm -pthread >&2
+            ;;
+        FreeBSD)
+            cc -std=c11 -O2 -shared -fPIC \
+                -I"$deps_lua_prefix/include" -I"$deps_sqlite_dir" \
+                -DLSQLITE_VERSION=\"0.9.6\" \
+                "$deps_lsqlite_file" "$deps_sqlite_file" \
+                -o "$deps_module_dir/lsqlite3.so" -lm -pthread >&2
             ;;
         Darwin)
             cc -std=c11 -O2 -bundle -undefined dynamic_lookup \
@@ -555,6 +618,9 @@ run_version() {
     version=$1
     source_sha256=$2
     lua_prefix=$(build_lua "$version" "$source_sha256")
+    if [ -n "${TERMUX_VERSION:-}" ]; then
+        export LD_LIBRARY_PATH="$lua_prefix/lib:$PREFIX/lib"
+    fi
     luarocks_prefix=$(build_luarocks "$version" "$lua_prefix" "$source_sha256")
     native_deps=$(build_native_dependencies \
         "$version" "$source_sha256" "$lua_prefix" "$luarocks_prefix")
@@ -569,7 +635,7 @@ run_version() {
         test -L "$lua_prefix/lib/liblua.so"
         test "$(readlink "$lua_prefix/lib/liblua.so")" = "liblua.so.$abi"
     fi
-    export PATH="$native_deps/bin:$luarocks_prefix/bin:$lua_prefix/bin:/usr/bin:/bin"
+    export PATH="$native_deps/bin:$luarocks_prefix/bin:$lua_prefix/bin:$MATRIX_SYSTEM_PATH"
     export LUAI_TEST_LUA="$lua"
     export LUAI_TEST_LUAC="$lua_prefix/bin/luac"
     export LUAI_LUA_PREFIX="$lua_prefix"
@@ -591,15 +657,17 @@ run_version() {
     "$lua" test/cli_split_smoke.lua
     "$lua" test/cli_surface.lua
     "$lua" test/cli_boundaries.lua
+    "$lua" test/cli_lifecycle.lua
+    "$lua" test/progress_lifecycle.lua
     "$lua" test/doc_payload.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.8.1-1.rockspec
+    "$luarocks" lint luainstaller-1.8.2-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/standalone_install.lua
     "$lua" test/toolchain_native.lua
     "$lua" test/headerless_build.lua
     "$lua" test/native_dependencies.lua
-    if [ "$(uname -s)" = Linux ]; then "$lua" test/no_lua_target.lua; fi
+    if [ "$(uname -s)" = Linux ] && [ -z "${TERMUX_VERSION:-}" ]; then "$lua" test/no_lua_target.lua; fi
     "$lua" test/native_bundle.lua
     "$lua" test/onefile_compile_native.lua
     "$lua" test/native_onefile.lua

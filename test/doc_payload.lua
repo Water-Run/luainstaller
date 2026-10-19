@@ -1,5 +1,5 @@
 --[[
-Byte identity of the LuaRocks doc/ install copies.
+Canonical documentation installation without checked-in copies.
 
 Author:
     WaterRun
@@ -14,21 +14,23 @@ Updated:
 local harness = dofile("test/support/harness.lua")
 harness.install_loader()
 local fs = require("luainstaller.fs")
+local path = require("luainstaller.path")
+local process = require("luainstaller.process")
 
-local copies = {
-    ["doc/LICENSE"] = "LICENSE",
-    ["doc/README.adoc"] = "README.adoc",
-    ["doc/README.zh-CN.adoc"] = "README.zh-CN.adoc",
-    ["doc/THIRD_PARTY_NOTICES.md"] = "THIRD_PARTY_NOTICES.md",
-    ["doc/CHANGELOG.adoc"] = "CHANGELOG.adoc",
-    ["doc/luainstaller.1"] = "luainstaller.1",
-}
-for installed, source in pairs(copies) do
-    local left = fs.readRegularFile(installed)
-    local right = fs.readRegularFile(source)
-    assert(left == right, installed .. " differs from " .. source)
-end
-local rockspec = fs.readRegularFile("luainstaller-" .. require("luainstaller").VERSION .. "-1.rockspec")
-assert(rockspec:find('copy_directories = { "doc", "docs", "LICENSES" }', 1, true),
-    "rockspec does not copy the license and documentation directories")
-print("doc payload copies match")
+local root = assert(fs.makePrivateDirectory("documentation-payload"))
+local called, failure = pcall(function()
+    local installed, diagnostic = process.outputCommand(harness.lua_command(), {
+        "tools/install-rock-docs.lua", path.absolute(root),
+    })
+    assert(installed, diagnostic)
+    for _, name in ipairs({"LICENSE", "README.adoc", "README.zh-CN.adoc",
+        "THIRD_PARTY_NOTICES.md", "CHANGELOG.adoc", "luainstaller.1"}) do
+        local copy = fs.readRegularFile(path.join(root, name))
+        assert(copy == assert(fs.readRegularFile(name)), "installed document differs: " .. name)
+    end
+    assert(fs.pathType(path.join(root, "AGENTS.md")) == "missing")
+    assert(fs.pathType(path.join(root, "dev")) == "missing")
+end)
+assert(fs.removeTree(root))
+assert(called, failure)
+print("canonical documentation payload installed")

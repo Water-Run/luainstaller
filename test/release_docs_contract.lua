@@ -48,7 +48,7 @@ local function expect_not_contains(path, needle)
 end
 
 expect_contains(
-    "luainstaller-1.8.1-1.rockspec",
+    "luainstaller-1.8.2-1.rockspec",
     'issues_url = "https://github.com/Water-Run/luainstaller/issues",'
 )
 expect_not_contains(
@@ -69,7 +69,7 @@ expect_contains("docs/USAGE.adoc", "Use manual discovery with `--include`, or us
 expect_contains("docs/zh-CN/USAGE.adoc", "用手动模式配合 `--include` 列出模块， 或者改用运行时模式。")
 expect_contains("docs/USAGE.adoc", "limit the combined Lua and native dependency files")
 expect_contains("docs/zh-CN/USAGE.adoc", "限制 Lua 和原生依赖文件的合计数量")
-for _, suite in ipairs({"dependency_limits", "source_normalization", "logger_order", "lock_identity"}) do
+for _, suite in ipairs({"dependency_limits", "source_normalization", "logger_order", "lock_identity", "cli_lifecycle", "progress_lifecycle"}) do
     expect_contains("docs/TESTING.adoc", "test/" .. suite .. ".lua")
     expect_contains("docs/zh-CN/TESTING.adoc", "test/" .. suite .. ".lua")
     expect_contains(".github/workflows/ci.yml", "test/" .. suite .. ".lua")
@@ -108,11 +108,11 @@ expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "DLL 依赖未检查"
 expect_contains("docs/zh-CN/PLATFORMS-NATIVE-LIMITS.adoc", "这些告警不会阻止构建")
 expect_contains("docs/zh-CN/RELINKING.adoc", "`lua_min.h`")
 expect_contains("docs/zh-CN/TROUBLESHOOTING.adoc", "troubleshooting-native-dependencies")
-expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.8.1-1.rockspec")
+expect_contains("docs/zh-CN/TESTING.adoc", "luainstaller-1.8.2-1.rockspec")
 expect_contains("docs/TESTING.adoc",
-    "luarocks upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock")
+    "luarocks upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock")
 expect_contains("docs/zh-CN/TESTING.adoc",
-    "luarocks upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock")
+    "luarocks upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock")
 expect_contains("docs/TESTING.adoc", "[#testing-luarocks]")
 expect_contains("docs/zh-CN/TESTING.adoc", "[#testing-luarocks]")
 expect_contains("AGENTS.md", "luarocks upload ROCKSPEC SRC.ROCK")

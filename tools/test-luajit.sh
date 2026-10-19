@@ -51,7 +51,7 @@ set +e
         "$LUAI_TEST_LUA" "test/$suite.lua" < /dev/null
     done < "$work_root/suites.txt"
     "$LUAI_TEST_LUA" test/no_lua_target.lua < /dev/null
-    printf 'PASS luainstaller 1.8.1 LuaJIT %s %s\n' "$version" "$CONFIGURATION"
+    printf 'PASS luainstaller 1.8.2 LuaJIT %s %s\n' "$version" "$CONFIGURATION"
 ) >"$log" 2>&1
 status=$?
 set -e

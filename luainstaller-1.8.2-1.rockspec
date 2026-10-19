@@ -1,0 +1,79 @@
+rockspec_format = "3.0"
+package = "luainstaller"
+version = "1.8.2-1"
+
+source = {
+    url = "git+https://github.com/Water-Run/luainstaller.git",
+    tag = "v1.8.2",
+}
+
+description = {
+    summary = "Package Lua projects into same-environment executables",
+    detailed = [[
+        luainstaller provides tools for analyzing and packaging Lua projects
+        into same-environment executables. The current Lua implementation owns
+        dependency analysis, trace-oriented diagnostics, manifest generation,
+        C launcher generation, onedir bundling, and selectable onefile
+        bundling and optional local MoonScript preprocessing for the verified target profiles. It installs two command
+        names over the same Lua API: compact luai and full-word luainstaller.
+    ]],
+    homepage = "https://github.com/Water-Run/luainstaller",
+    issues_url = "https://github.com/Water-Run/luainstaller/issues",
+    license = "LGPL-3.0-or-later",
+    maintainer = "WaterRun <linzhangrun49@gmail.com>",
+    labels = {
+        "lua",
+        "packaging",
+        "executable",
+        "compiler",
+        "dependency-analysis",
+    },
+}
+
+dependencies = {
+    "lua >= 5.1, < 5.6",
+}
+
+build = {
+    type = "command",
+    install_command = '"$(LUA)" tools/install-rock-docs.lua "$(PREFIX)"',
+    copy_directories = { "docs", "LICENSES" },
+    install = {
+        lua = {
+            ["luainstaller"]          = "src/init.lua",
+            ["luainstaller.fs"]       = "src/fs.lua",
+            ["luainstaller.windows_fs"] = "src/windows_fs.lua",
+            ["luainstaller.windows_host"] = "src/windows_host.lua",
+            ["luainstaller.windows_host_source"] = "src/windows_host_source.lua",
+            ["luainstaller.hash"]     = "src/hash.lua",
+            ["luainstaller.logger"]   = "src/logger.lua",
+            ["luainstaller.lua_abi"]  = "src/lua_abi.lua",
+            ["luainstaller.native_profile"] = "src/native_profile.lua",
+            ["luainstaller.analyzer"] = "src/analyzer.lua",
+            ["luainstaller.compat"]   = "src/compat.lua",
+            ["luainstaller.manifest"] = "src/manifest.lua",
+            ["luainstaller.moon"] = "src/moon.lua",
+            ["luainstaller.path"]     = "src/path.lua",
+            ["luainstaller.platform"] = "src/platform.lua",
+            ["luainstaller.process"]  = "src/process.lua",
+            ["luainstaller.posix_host"] = "src/posix_host.lua",
+            ["luainstaller.posix_host_source"] = "src/posix_host_source.lua",
+            ["luainstaller.toolchain"] = "src/toolchain.lua",
+            ["luainstaller.result"]   = "src/result.lua",
+            ["luainstaller.lock_owner"] = "src/lock_owner.lua",
+            ["luainstaller.distribution_files"] = "src/distribution_files.lua",
+            ["luainstaller.runtime"]  = "src/runtime.lua",
+            ["luainstaller.cgen"]     = "src/cgen.lua",
+            ["luainstaller.launcher"] = "src/launcher.lua",
+            ["luainstaller.bundler"]  = "src/bundler.lua",
+            ["luainstaller.discovery"]  = "src/discovery.lua",
+            ["luainstaller.onefile"]  = "src/onefile.lua",
+            ["luainstaller.cli"]      = "src/cli.lua",
+            ["luainstaller.cli_present"] = "src/cli_present.lua",
+        },
+        bin = {
+            ["luai"] = "src/cli.lua",
+            ["luainstaller"] = "src/cli.lua",
+        },
+    },
+}

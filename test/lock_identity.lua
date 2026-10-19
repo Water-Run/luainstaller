@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-12
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -34,6 +34,26 @@ record.identity = nil
 assert(owner.decode(assert(owner.encode(record))).identity == nil, "legacy owner format changed")
 assert(not owner.decode(encoded:gsub(identity, "bad-identity", 1)), "malformed identity was accepted")
 if platform == "linux" then
+    -- Android kernels can omit CONFIG_PID_NS. ENOENT is distinct from a
+    -- denied namespace query: only the former establishes the shared host scope.
+    local process = require("luainstaller.process")
+    local original_output, original_open = process.output, io.open
+    local function without_namespace(code)
+        process.output = function(command, ...)
+            if command == "LC_ALL=C readlink /proc/self/ns/pid" then return false, "" end
+            return original_output(command, ...)
+        end
+        io.open = function(name, ...)
+            if name == "/proc/self/ns/pid" then return nil, "injected namespace failure", code end
+            return original_open(name, ...)
+        end
+        local fresh = assert(package.preload["luainstaller.lock_owner"])()
+        local identity = fresh.currentIdentity()
+        process.output, io.open = original_output, original_open
+        return identity
+    end
+    assert(without_namespace(2), "a kernel without PID namespaces lost process identity")
+    assert(without_namespace(13) == nil, "a denied namespace query was treated as the host namespace")
     local original_open, closed = io.open, 0
     io.open = function(path, mode)
         if path:sub(1, 6) == "/proc/" then

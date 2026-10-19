@@ -36,7 +36,7 @@ print(require("greeting").message(arg[1] or "missing"))
 local installed, install_output = process.outputCommand("luarocks", {
     "make",
     "--tree", tree,
-    path.absolute("luainstaller-1.8.1-1.rockspec"),
+    path.absolute("luainstaller-1.8.2-1.rockspec"),
 })
 assert(installed, install_output)
 
@@ -62,13 +62,29 @@ end
 sameFile("LICENSES/GPL-3.0-or-later.txt", "LICENSES/GPL-3.0-or-later.txt")
 sameFile("LICENSES/Lua-MIT.txt", "LICENSES/Lua-MIT.txt")
 sameFile("LICENSES/LuaJIT-MIT.txt", "LICENSES/LuaJIT-MIT.txt")
-sameFile("doc/LICENSE", "LICENSE")
-sameFile("doc/README.adoc", "README.adoc")
-sameFile("doc/README.zh-CN.adoc", "README.zh-CN.adoc")
-sameFile("doc/THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md")
-sameFile("doc/CHANGELOG.adoc", "CHANGELOG.adoc")
-sameFile("doc/luainstaller.1", "luainstaller.1")
+sameFile("LICENSE", "LICENSE")
+sameFile("README.adoc", "README.adoc")
+sameFile("README.zh-CN.adoc", "README.zh-CN.adoc")
+sameFile("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md")
+sameFile("CHANGELOG.adoc", "CHANGELOG.adoc")
+sameFile("luainstaller.1", "luainstaller.1")
 sameFile("docs/RELINKING.adoc", "docs/RELINKING.adoc")
+local function checkLinks(relative)
+    local text = assert(fs.readRegularFile(path.join(rock_root, relative)))
+    for target in text:gmatch("xref:([^%[#]+)") do
+        local resolved = path.normalize(path.join(path.dirname(relative), target))
+        assert(fs.pathType(path.join(rock_root, resolved)) == "file",
+            "installed documentation link is missing: " .. relative .. " -> " .. target)
+    end
+end
+checkLinks("README.adoc")
+checkLinks("README.zh-CN.adoc")
+for _, item in ipairs(assert(fs.listTree("docs"))) do
+    if item.type == "file" and item.path:match("%.adoc$") then
+        sameFile("docs/" .. item.path, "docs/" .. item.path)
+        checkLinks("docs/" .. item.path)
+    end
+end
 assert(fs.pathType(path.join(rock_root, "AGENTS.md")) == "missing", "AGENTS.md was installed")
 assert(fs.pathType(path.join(rock_root, "doc/AGENTS.md")) == "missing", "doc/AGENTS.md was installed")
 
@@ -87,7 +103,7 @@ local function installedCommand(command, arguments, environment)
 end
 
 local version_ok, version_output = installedCommand(luai, { "-v" })
-assert(version_ok and version_output == "luai 1.8.1\n", version_output)
+assert(version_ok and version_output == "luai 1.8.2\n", version_output)
 local runtime_ok, runtime_output = installedCommand(luai, {
     "-a", path.join(project, "main.lua"),
     "--discovery-mode", "runtime",

@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local hash = require("luainstaller.hash")
@@ -70,6 +70,13 @@ local function processScope()
         -- owner must not compile a process backend while holding the log lock.
         local ok, namespace = process.output("LC_ALL=C readlink /proc/self/ns/pid")
         namespace = tostring(namespace or ""):match("^(pid:%[%d+%])%s*$")
+        if not ok or not namespace then
+            local opened, handle, _, code = pcall(io.open, "/proc/self/ns/pid", "rb")
+            if opened and handle then pcall(handle.close, handle) end
+            -- Kernels built without PID namespaces have no namespace entry.
+            -- Permission failures remain unknown and cannot authorize recovery.
+            if opened and not handle and code == 2 then namespace, ok = "pid:none", true end
+        end
         if boot and ok and namespace then
             cached_platform, cached_scope = "linux", hash.sha256(boot .. "\0" .. namespace)
         end

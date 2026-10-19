@@ -16,7 +16,7 @@ return [====[
  * Author: WaterRun
  * File: posix_host.c
  * Date: 2026-10-12
- * Updated: 2026-10-13
+ * Updated: 2026-10-19
  * Keep src/posix_host_source.lua synchronized with this file.
  */
 #define _POSIX_C_SOURCE 200809L
@@ -25,6 +25,7 @@ return [====[
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -318,8 +319,90 @@ static int output_parents(const char *value)
     return 0;
 }
 
+static int progress(int argc, char **argv)
+{
+    static const char frames[] = "|/-\\";
+    pid_t owner;
+    struct sigaction action;
+    struct pollfd input;
+    uint64_t next_frame = 0;
+    uint64_t owner_number;
+    unsigned int frame = 0;
+    int output = STDERR_FILENO, result = 0;
+    char line[4200];
+    size_t label_size;
+    if ((argc != 4 && argc != 5) || !number(argv[2], &owner_number)
+        || !owner_number || owner_number > INT_MAX) return 127;
+    owner = (pid_t)owner_number;
+    if (getppid() != owner) return 0;
+    label_size = strlen(argv[3]);
+    if (label_size > 4096) return 127;
+    if (argc == 5) {
+        output = open(argv[4], O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+        if (output < 0) return 1;
+    } else {
+        const char *terminal;
+        struct stat original, opened;
+        if (!isatty(output) || fstat(output, &original)) return 1;
+        terminal = ttyname(output);
+        if (!terminal) return 1;
+        output = open(terminal, O_WRONLY | O_NOCTTY | O_NONBLOCK | O_NOFOLLOW);
+        if (output < 0) return 1;
+        if (fstat(output, &opened) || !S_ISCHR(opened.st_mode)
+            || opened.st_rdev != original.st_rdev) { close(output); return 1; }
+    }
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = signal_received;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGINT, &action, NULL) || sigaction(SIGTERM, &action, NULL)
+        || sigaction(SIGHUP, &action, NULL) || sigaction(SIGQUIT, &action, NULL)) {
+        if (output != STDERR_FILENO) close(output);
+        return 1;
+    }
+    signal(SIGPIPE, SIG_IGN);
+    input.fd = STDIN_FILENO;
+    input.events = POLLIN;
+    while (!interrupted && getppid() == owner) {
+        uint64_t now = milliseconds();
+        int timeout, ready;
+        if (now == UINT64_MAX) { result = 1; break; }
+        if (now >= next_frame) {
+            struct winsize viewport;
+            const char *label = argv[3];
+            int columns = 80, length;
+            if (argc == 4 && ioctl(output, TIOCGWINSZ, &viewport) == 0 && viewport.ws_col)
+                columns = viewport.ws_col;
+            if (label_size + 4 >= (size_t)columns) label = "";
+            length = columns > 4
+                ? snprintf(line, sizeof(line), "\r\033[2K[%c] %s", frames[frame++ % 4], label)
+                : snprintf(line, sizeof(line), "\r\033[2K");
+            if (length < 0 || (size_t)length >= sizeof(line)
+                || !write_all(output, line, (size_t)length)) { result = 1; break; }
+            next_frame = now + 100;
+        }
+        timeout = next_frame > now ? (int)(next_frame - now) : 0;
+        if (timeout > 100) timeout = 100;
+        input.revents = 0;
+        ready = poll(&input, 1, timeout);
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            result = 1; break;
+        }
+        if (input.revents & (POLLHUP | POLLERR | POLLNVAL)) break;
+        if (input.revents & POLLIN) {
+            char data[128];
+            ssize_t count = read(STDIN_FILENO, data, sizeof(data));
+            if (count <= 0) break;
+        }
+    }
+    if (!write_all(output, "\r\033[2K", 5)) result = 1;
+    if (output != STDERR_FILENO && close(output)) result = 1;
+    return result;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 1 && !strcmp(argv[1], "progress")) return progress(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "exec")) return supervise(argc, argv);
     if (argc == 3 && !strcmp(argv[1], "output_parents")) return output_parents(argv[2]);
     if (argc == 3 && !strcmp(argv[1], "file_size")) {

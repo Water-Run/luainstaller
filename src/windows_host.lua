@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local M = {}
@@ -274,6 +274,12 @@ function M.call(operation, ...)
     local module, err = bootstrap()
     if not module then return false, err end
     return module.request(table.concat(data))
+end
+
+-- Fast presentation queries must not bootstrap a compiler for help or version.
+function M.peek(operation, ...)
+    if not loaded then return false, "native Windows host is not loaded" end
+    return M.call(operation, ...)
 end
 
 function M.compiler()

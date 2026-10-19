@@ -7,7 +7,7 @@ File:
     toolchain.lua
 Date:
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local compat = require("luainstaller.compat")
@@ -1039,6 +1039,30 @@ local function appendMsvcReproducibleCompile(arguments, config)
     if config.supports_brepro then arguments[#arguments + 1] = "/Brepro" end
 end
 
+local function freebsdRuntimeImport(config, directory, dependency)
+    -- FreeBSD expands ORIGIN before splitting runpaths on ':' and ';'. A
+    -- dependency containing '/' is expanded as one pathname instead. Link
+    -- against a temporary import object; ship the original runtime unchanged.
+    local symbols, seen = {}, {}
+    for name in LUA_MIN_HEADER:gmatch("(lua[%w_]+)%s*%(") do
+        if not seen[name] then
+            seen[name] = true
+            symbols[#symbols + 1] = "void " .. name .. "(void) {}"
+        end
+    end
+    table.sort(symbols)
+    local source = path.join(directory, "lua-runtime-import.c")
+    local library = path.join(directory, "lua-runtime-import.so")
+    local wrote, err = fs.writeFile(source, table.concat(symbols, "\n") .. "\n")
+    if not wrote then return nil, err end
+    local ok, output = process.outputCommand(config.cc, {
+        "-std=c99", "-shared", "-fPIC", "-Xlinker", "-soname", "-Xlinker", dependency,
+        source, "-o", library,
+    }, config.environment, { timeout_seconds = compileTimeout() })
+    if not ok then return nil, output end
+    return library
+end
+
 local function delayedRuntimeName(config)
     if config.host and config.host.os == "windows" and config.compiler_family == "msvc"
         and config.runtime_path and config.link_mode ~= "static"
@@ -1167,7 +1191,15 @@ function M.compile(config, source_path, output_path, opts)
         if opts.rpath and opts.rpath ~= "" then
             arguments[#arguments + 1] = "-Wl,-rpath," .. opts.rpath
         end
-        for _, value in ipairs(config.link_args or {}) do arguments[#arguments + 1] = value end
+        if opts.runtime_dependency and config.host.os == "freebsd" and config.link_mode == "shared" then
+            local library, err = freebsdRuntimeImport(config,
+                normalizePath(opts.work_dir or path.dirname(output_path)), opts.runtime_dependency)
+            if not library then return false, err end
+            arguments[#arguments + 1] = library
+            appendValues(arguments, config.profile.system_libraries)
+        else
+            for _, value in ipairs(config.link_args or {}) do arguments[#arguments + 1] = value end
+        end
         if config.host and config.host.os == "windows" then
             arguments[#arguments + 1] = "-Wl,--no-insert-timestamp"
         end
@@ -1250,8 +1282,11 @@ function M.compileNativeModule(config, source_path, output_path, opts)
         arguments[#arguments + 1] = source_path
         arguments[#arguments + 1] = "-o"
         arguments[#arguments + 1] = output_path
-        if config.host.os == "windows" then
-            arguments[#arguments + 1] = "-Wl,--no-insert-timestamp"
+        if config.host.os == "windows" or config.host.os == "android" then
+            if config.host.os == "windows" then arguments[#arguments + 1] = "-Wl,--no-insert-timestamp" end
+            -- Bionic resolves a module in its own dependency group. Give the
+            -- module the same Lua dependency as its launcher, without relying
+            -- on the executable's global symbol table.
             for _, value in ipairs(config.link_args or {}) do
                 arguments[#arguments + 1] = value
             end

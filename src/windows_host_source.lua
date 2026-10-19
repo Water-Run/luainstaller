@@ -8,14 +8,15 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-15
+    2026-10-13
 ]]
 
-return [====[/* Native Windows host operations for Lua 5.1--5.5 and LuaJIT 2.1.
+return [====[
+/* Native Windows host operations for Lua 5.1--5.5 and LuaJIT 2.1.
  * Author: WaterRun
  * File: windows_host.c
  * Date: 2026-10-06
- * Updated: 2026-10-15
+ * Updated: 2026-10-19
  * Keep src/windows_host_source.lua synchronized with this file.
  * Uses Windows XP APIs only; no Lua headers or import library are needed.
  */
@@ -879,14 +880,142 @@ static int parse_handle(const wchar_t **cursor, ULONG_PTR *value)
     return any;
 }
 
+#define LUAI_VT_OUTPUT 0x0004
+#define LUAI_PROGRESS_MARKER ((ULONG_PTR)-1)
+#define LUAI_PROGRESS_LABEL 1024
+
+typedef struct {
+    HANDLE output, finished, pause, paused;
+    DWORD original_mode;
+    wchar_t label[LUAI_PROGRESS_LABEL];
+} progress_render;
+
+typedef struct {
+    HANDLE process, finished, pause, paused;
+    DWORD token;
+} progress_owner;
+
+static progress_owner *active_progress;
+static DWORD progress_sequence;
+static HANDLE progress_shutdown, progress_cleaned;
+
+static BOOL WINAPI interrupt_progress(DWORD event)
+{
+    if (event != CTRL_C_EVENT && event != CTRL_BREAK_EVENT && event != CTRL_CLOSE_EVENT
+        && event != CTRL_LOGOFF_EVENT && event != CTRL_SHUTDOWN_EVENT) return FALSE;
+    if (progress_shutdown) SetEvent(progress_shutdown);
+    if (progress_cleaned) WaitForSingleObject(progress_cleaned, 2000);
+    return TRUE;
+}
+
+static DWORD WINAPI render_progress(LPVOID argument_value)
+{
+    static const wchar_t frames[] = L"|/-\\";
+    static const wchar_t clear[] = L"\r\033[2K";
+    progress_render *state = (progress_render *)argument_value;
+    HANDLE waits[2];
+    unsigned int frame = 0;
+    DWORD result = 0, written;
+    waits[0] = state->finished; waits[1] = state->pause;
+    for (;;) {
+        CONSOLE_SCREEN_BUFFER_INFO screen;
+        wchar_t line[LUAI_PROGRESS_LABEL + 16];
+        size_t length = wcslen(state->label), index;
+        DWORD event;
+        int columns = 80;
+        if (WaitForSingleObject(state->finished, 0) != WAIT_TIMEOUT) break;
+        if (GetConsoleScreenBufferInfo(state->output, &screen))
+            columns = screen.srWindow.Right - screen.srWindow.Left + 1;
+        if ((length * 2 + 4) >= (size_t)(columns > 0 ? columns : 1)) length = 0;
+        memcpy(line, clear, 5 * sizeof(wchar_t));
+        if (columns > 4) {
+            line[5] = L'['; line[6] = frames[frame++ % 4]; line[7] = L']'; line[8] = L' ';
+            for (index = 0; index < length; ++index) line[index + 9] = state->label[index];
+            length += 9;
+        } else length = 5;
+        if (!WriteConsoleW(state->output, line, (DWORD)length, &written, NULL)
+            || written != (DWORD)length) { result = 1; break; }
+        event = WaitForMultipleObjects(2, waits, FALSE, 100);
+        if (event == WAIT_OBJECT_0) break;
+        if (event == WAIT_OBJECT_0 + 1) {
+            if (!WriteConsoleW(state->output, clear, 5, &written, NULL)
+                || !SetEvent(state->paused)) { result = 1; break; }
+            WaitForSingleObject(state->finished, INFINITE);
+            break;
+        }
+        if (event != WAIT_TIMEOUT) { result = 1; break; }
+    }
+    if (WaitForSingleObject(state->pause, 0) != WAIT_OBJECT_0)
+        WriteConsoleW(state->output, clear, 5, &written, NULL);
+    return result;
+}
+
+static int progress_watchdog(ULONG_PTR *values, const wchar_t *cursor)
+{
+    progress_render state;
+    HANDLE owner = (HANDLE)values[0], ready = (HANDLE)values[5], thread, waits[3];
+    size_t count = 0;
+    DWORD status = 1, current_mode, joined;
+    memset(&state, 0, sizeof(state));
+    state.output = (HANDLE)values[3]; state.finished = (HANDLE)values[1];
+    state.pause = (HANDLE)values[4]; state.paused = (HANDLE)values[6];
+    if (!values[7] || values[7] > MAXDWORD || WaitForSingleObject(owner, 0) != WAIT_TIMEOUT) return 0;
+    if (!GetConsoleMode(state.output, &state.original_mode)) {
+        if (!AttachConsole((DWORD)values[7]) && GetLastError() != ERROR_ACCESS_DENIED) return 125;
+        if (!GetConsoleMode(state.output, &state.original_mode)) return 125;
+    }
+    while (*cursor == L' ') ++cursor;
+    if (wcslen(cursor) % 4 != 0 || wcslen(cursor) / 4 >= LUAI_PROGRESS_LABEL) return 125;
+    while (*cursor) {
+        unsigned int index, value = 0;
+        if (count + 1 >= LUAI_PROGRESS_LABEL) return 125;
+        for (index = 0; index < 4; ++index) {
+            wchar_t character = *cursor++;
+            if (character >= L'0' && character <= L'9') value = value * 16 + (character - L'0');
+            else if (character >= L'a' && character <= L'f') value = value * 16 + (character - L'a' + 10);
+            else return 125;
+        }
+        if (!value || value < 32 || value == 127) return 125;
+        state.label[count++] = (wchar_t)value;
+    }
+    if (WaitForSingleObject(owner, 0) != WAIT_TIMEOUT) return 0;
+    progress_shutdown = state.finished;
+    progress_cleaned = CreateEventW(NULL, TRUE, FALSE, NULL);
+    /* AttachConsole resets control handlers. Install ours after attaching,
+     * before enabling VT, so Ctrl+Break and console close restore the mode. */
+    if (!progress_cleaned || !SetConsoleCtrlHandler(interrupt_progress, TRUE)) return 125;
+    if (!SetConsoleMode(state.output, state.original_mode | LUAI_VT_OUTPUT)) return 125;
+    thread = CreateThread(NULL, 0, render_progress, &state, 0, NULL);
+    if (!thread) { SetConsoleMode(state.output, state.original_mode); return 125; }
+    if (SetEvent(ready)) {
+        waits[0] = owner; waits[1] = state.finished; waits[2] = thread;
+        WaitForMultipleObjects(3, waits, FALSE, INFINITE);
+    }
+    SetEvent(state.finished);
+    joined = WaitForSingleObject(thread, 1000);
+    if (!(state.original_mode & LUAI_VT_OUTPUT)
+        && GetConsoleMode(state.output, &current_mode)
+        && !SetConsoleMode(state.output, current_mode & ~((DWORD)LUAI_VT_OUTPUT))) status = 125;
+    SetEvent(progress_cleaned);
+    if (joined != WAIT_OBJECT_0) return 125;
+    if (status == 125) { CloseHandle(thread); return 125; }
+    GetExitCodeThread(thread, &status);
+    CloseHandle(thread);
+    return (int)status;
+}
+
 __declspec(dllexport) void CALLBACK luainstaller_host_watchdogW(HWND window, HINSTANCE instance, LPWSTR command, int show)
 {
-    ULONG_PTR values[6];
+    ULONG_PTR values[8];
     const wchar_t *cursor = command;
     HANDLE waits[2];
     unsigned int index;
     (void)window; (void)instance; (void)show;
     for (index = 0; index < 6; ++index) if (!parse_handle(&cursor, &values[index])) ExitProcess(125);
+    if (values[2] == LUAI_PROGRESS_MARKER) {
+        if (!parse_handle(&cursor, &values[6]) || !parse_handle(&cursor, &values[7])) ExitProcess(125);
+        ExitProcess((UINT)progress_watchdog(values, cursor));
+    }
     if (!SetEvent((HANDLE)values[5])) ExitProcess(125);
     CloseHandle((HANDLE)values[5]);
     waits[0] = (HANDLE)values[0]; waits[1] = (HANDLE)values[1];
@@ -945,6 +1074,154 @@ done:
     for (index = 0; index < 5; ++index) if (inherited[index]) CloseHandle(inherited[index]);
     CloseHandle(ready);
     return result;
+}
+
+static void release_progress(progress_owner *state)
+{
+    if (state->process) CloseHandle(state->process);
+    if (state->finished) CloseHandle(state->finished);
+    if (state->pause) CloseHandle(state->pause);
+    if (state->paused) CloseHandle(state->paused);
+    free(state);
+}
+
+static int start_progress(context *ctx)
+{
+    HANDLE current = GetCurrentProcess(), inherited[7] = {0}, ready = NULL, waits[2];
+    progress_owner *state;
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION child;
+    wchar_t system[MAX_PATH + 1], module[32768], command[32768], *label;
+    static const wchar_t digits[] = L"0123456789abcdef";
+    size_t count, offset, index;
+    DWORD length;
+    int size, ok = 0;
+    if (ctx->count != 2 || !(label = argument(ctx, 1))) return fail(ctx, "invalid progress label");
+    count = wcslen(label);
+    if (count >= LUAI_PROGRESS_LABEL) return fail(ctx, "progress label is too long");
+    for (index = 0; index < count; ++index)
+        if (label[index] < 32 || label[index] == 127) return fail(ctx, "invalid progress label");
+    if (active_progress) return fail(ctx, "progress is already active");
+    state = (progress_owner *)calloc(1, sizeof(*state));
+    if (!state) return fail(ctx, "cannot allocate progress state");
+    state->finished = CreateEventW(NULL, TRUE, FALSE, NULL);
+    state->pause = CreateEventW(NULL, TRUE, FALSE, NULL);
+    state->paused = CreateEventW(NULL, TRUE, FALSE, NULL);
+    ready = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!state->finished || !state->pause || !state->paused || !ready) {
+        win_fail(ctx, "create progress events"); goto done;
+    }
+    length = GetSystemDirectoryW(system, MAX_PATH + 1);
+    if (!length || length >= MAX_PATH - 14) { win_fail(ctx, "locate progress host"); goto done; }
+    memcpy(system + length, L"\\rundll32.exe", 14 * sizeof(wchar_t));
+    length = GetModuleFileNameW(own_module, module, sizeof(module) / sizeof(module[0]));
+    if (!length || length >= sizeof(module) / sizeof(module[0])) { win_fail(ctx, "locate native module"); goto done; }
+    if (!DuplicateHandle(current, current, current, &inherited[0], SYNCHRONIZE, TRUE, 0)
+        || !DuplicateHandle(current, state->finished, current, &inherited[1], SYNCHRONIZE | EVENT_MODIFY_STATE, TRUE, 0)
+        || !DuplicateHandle(current, GetStdHandle(STD_ERROR_HANDLE), current, &inherited[2], 0, TRUE, DUPLICATE_SAME_ACCESS)
+        || !DuplicateHandle(current, state->pause, current, &inherited[3], SYNCHRONIZE, TRUE, 0)
+        || !DuplicateHandle(current, ready, current, &inherited[4], EVENT_MODIFY_STATE, TRUE, 0)
+        || !DuplicateHandle(current, state->paused, current, &inherited[5], EVENT_MODIFY_STATE, TRUE, 0)) {
+        win_fail(ctx, "duplicate progress handles"); goto done;
+    }
+    size = _snwprintf(command, sizeof(command) / sizeof(command[0]),
+        L"\"%ls\" \"%ls\",luainstaller_host_watchdog %p %p %p %p %p %p %p %lx ",
+        system, module, (void *)inherited[0], (void *)inherited[1], (void *)LUAI_PROGRESS_MARKER,
+        (void *)inherited[2], (void *)inherited[3], (void *)inherited[4], (void *)inherited[5],
+        (unsigned long)GetCurrentProcessId());
+    if (size < 0 || (size_t)size + count * 4 >= sizeof(command) / sizeof(command[0])) {
+        fail(ctx, "progress command is too long"); goto done;
+    }
+    offset = (size_t)size;
+    for (index = 0; index < count; ++index) {
+        unsigned int value = (unsigned int)label[index];
+        command[offset++] = digits[(value >> 12) & 15]; command[offset++] = digits[(value >> 8) & 15];
+        command[offset++] = digits[(value >> 4) & 15]; command[offset++] = digits[value & 15];
+    }
+    command[offset] = 0;
+    memset(&startup, 0, sizeof(startup)); startup.cb = sizeof(startup);
+    memset(&child, 0, sizeof(child));
+    if (!CreateProcessW(system, command, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &startup, &child)) {
+        win_fail(ctx, "start progress display"); goto done;
+    }
+    CloseHandle(child.hThread); state->process = child.hProcess;
+    waits[0] = ready; waits[1] = state->process;
+    if (WaitForMultipleObjects(2, waits, FALSE, 5000) != WAIT_OBJECT_0) {
+        TerminateProcess(state->process, 125); WaitForSingleObject(state->process, 2000);
+        fail(ctx, "progress display did not initialize"); goto done;
+    }
+    if (++progress_sequence == 0) ++progress_sequence;
+    state->token = progress_sequence;
+    if (!number(ctx, state->token)) {
+        SetEvent(state->finished);
+        if (WaitForSingleObject(state->process, 2000) != WAIT_OBJECT_0) {
+            TerminateProcess(state->process, 125); WaitForSingleObject(state->process, 2000);
+        }
+        goto done;
+    }
+    active_progress = state; ok = 1;
+done:
+    for (index = 0; index < 7; ++index) if (inherited[index]) CloseHandle(inherited[index]);
+    if (ready) CloseHandle(ready);
+    if (active_progress != state) release_progress(state);
+    return ok;
+}
+
+static int control_progress(context *ctx, int stop)
+{
+    DWORD token;
+    HANDLE waits[2];
+    progress_owner *state = active_progress;
+    int ok = 1;
+    if (ctx->count != 2 || !decimal(ctx, 1, &token)) return fail(ctx, "invalid progress token");
+    if (!state || state->token != token) return fail(ctx, "progress token is no longer active");
+    if (!SetEvent(stop ? state->finished : state->pause)) ok = win_fail(ctx, "signal progress display");
+    waits[0] = state->process; waits[1] = state->paused;
+    if (stop) {
+        if (WaitForSingleObject(state->process, 2000) != WAIT_OBJECT_0) {
+            TerminateProcess(state->process, 125); WaitForSingleObject(state->process, 2000);
+            ok = fail(ctx, "progress display did not stop");
+        }
+        active_progress = NULL; release_progress(state);
+    } else if (WaitForMultipleObjects(2, waits, FALSE, 2000) == WAIT_TIMEOUT)
+        ok = fail(ctx, "progress display did not pause");
+    return ok;
+}
+
+static int console_operation(context *ctx, int write)
+{
+    DWORD descriptor, mode, capable, written, length, total = 0;
+    HANDLE output;
+    wchar_t *value;
+    int ok = 1;
+    if (!decimal(ctx, 1, &descriptor) || descriptor > 2 || ctx->count != (write ? 3u : 2u))
+        return fail(ctx, "invalid console request");
+    output = GetStdHandle(descriptor == 0 ? STD_INPUT_HANDLE : descriptor == 1 ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
+    if (!GetConsoleMode(output, &mode)) return write ? fail(ctx, "stream is not a console") : text(ctx, "pipe");
+    if (!write) {
+        CONSOLE_SCREEN_BUFFER_INFO screen;
+        char record[96];
+        int count;
+        capable = descriptor != 0 && ((mode & LUAI_VT_OUTPUT) || SetConsoleMode(output, mode | LUAI_VT_OUTPUT));
+        if (capable && !(mode & LUAI_VT_OUTPUT) && !SetConsoleMode(output, mode))
+            return win_fail(ctx, "restore console mode");
+        length = GetConsoleScreenBufferInfo(output, &screen) ? (DWORD)(screen.srWindow.Right - screen.srWindow.Left + 1) : 80;
+        count = _snprintf(record, sizeof(record), "console:%lu:%lu:%lu", (unsigned long)mode,
+            (unsigned long)length, (unsigned long)capable);
+        return count > 0 && (size_t)count < sizeof(record) && append(ctx, &ctx->result, record, (size_t)count);
+    }
+    value = argument(ctx, 2);
+    if (!value) return 0;
+    length = (DWORD)wcslen(value);
+    capable = !(mode & LUAI_VT_OUTPUT) && wcschr(value, 27) && SetConsoleMode(output, mode | LUAI_VT_OUTPUT);
+    while (total < length) {
+        DWORD chunk = length - total > 8192 ? 8192 : length - total;
+        if (chunk < length - total && value[total + chunk - 1] >= 0xd800 && value[total + chunk - 1] <= 0xdbff) --chunk;
+        if (!WriteConsoleW(output, value + total, chunk, &written, NULL) || !written) { ok = win_fail(ctx, "write console"); break; }
+        total += written;
+    }
+    if (capable && !SetConsoleMode(output, mode)) ok = win_fail(ctx, "restore console mode");
+    return ok;
 }
 
 static int drain(context *ctx, HANDLE pipe, buffer *output, int *closed,
@@ -1131,6 +1408,11 @@ static int dispatch(context *ctx)
     BY_HANDLE_FILE_INFORMATION info;
     ULARGE_INTEGER stamp;
     if (equals(op, "exec")) return execute(ctx);
+    if (equals(op, "console_info")) return console_operation(ctx, 0);
+    if (equals(op, "console_write")) return console_operation(ctx, 1);
+    if (equals(op, "progress_start")) return start_progress(ctx);
+    if (equals(op, "progress_pause")) return control_progress(ctx, 0);
+    if (equals(op, "progress_stop")) return control_progress(ctx, 1);
     if (equals(op, "cwd")) {
         size = GetCurrentDirectoryW(0, NULL);
         path = (wchar_t *)allocate(ctx, ((size_t)size + 1) * sizeof(wchar_t));

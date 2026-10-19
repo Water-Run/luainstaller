@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local launcher = require("luainstaller.launcher")
@@ -2321,7 +2321,9 @@ local function bundleOnedir(opts, lifecycle)
         native_toolchain,
         c_path,
         exe_path,
-        { work_dir = compiler_work_dir, lua_header_dir = build_dir, rpath = profile.loader_rpath }
+        { work_dir = compiler_work_dir, lua_header_dir = build_dir, rpath = profile.loader_rpath,
+          runtime_dependency = profile.target_os == "freebsd" and native_toolchain.link_mode == "shared"
+            and "$ORIGIN/.luai/native/" .. runtime_name or nil }
     )
     if not compile_ok then
         return abandon(makeError("CompilationFailedError", "C launcher compilation failed", {

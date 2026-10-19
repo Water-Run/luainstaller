@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -25,6 +25,8 @@ local toolchain = require("luainstaller.toolchain")
 local native_config, native_config_err = toolchain.resolve()
 assert(native_config, native_config_err and native_config_err.error.message)
 assert(native_config.native_module_verified == true)
+local runtime_search_path = native_config.host.os == "android"
+    and assert(os.getenv("PREFIX")) .. "/lib" or ""
 local native_extension = toolchain.nativeModuleExtension(native_config)
 local native_module = path.join(root, "luai_native_probe." .. native_extension)
 local native_ok, native_output, native_command = toolchain.compileNativeModule(
@@ -98,6 +100,7 @@ local ran, output = process.outputCommand(built.executable, { "native-clean" }, 
     PATH = clean_path,
     LUA_PATH = "",
     LUA_CPATH = "",
+    LD_LIBRARY_PATH = runtime_search_path,
     LUA_INIT = "",
     LUA_INIT_5_1 = "",
     LUA_INIT_5_2 = "",
@@ -118,7 +121,7 @@ assert(rebuilt.ok, rebuilt.error and rebuilt.error.message or "native rebuild fa
 local rebuilt_ok, rebuilt_output = process.outputCommand(
     rebuilt.executable,
     { "native-rebuilt" },
-    { PATH = clean_path, LUA_PATH = "", LUA_CPATH = "" }
+    { PATH = clean_path, LUA_PATH = "", LUA_CPATH = "", LD_LIBRARY_PATH = runtime_search_path }
 )
 assert(rebuilt_ok and rebuilt_output:find(
     "native-probe-ok native-rebuilt", 1, true
@@ -146,7 +149,7 @@ assert(fs.removeFile(native_module))
 local preserved, preserved_output = process.outputCommand(
     rebuilt.executable,
     { "native-preserved" },
-    { PATH = clean_path, LUA_PATH = "", LUA_CPATH = "" }
+    { PATH = clean_path, LUA_PATH = "", LUA_CPATH = "", LD_LIBRARY_PATH = runtime_search_path }
 )
 assert(preserved and preserved_output:find(
     "native-probe-ok native-preserved", 1, true
@@ -168,6 +171,7 @@ assert(fs.writeFile(path.join(hostile, "luai_native_probe.lua"),
 local hostile_environment = {
     LUA_PATH = path.join(hostile, "?.lua"),
     LUA_CPATH = "",
+    LD_LIBRARY_PATH = runtime_search_path,
 }
 for minor = 1, 5 do
     hostile_environment["LUA_PATH_5_" .. minor] = hostile_environment.LUA_PATH
@@ -188,7 +192,9 @@ for _, name in ipairs(names) do
     relocated = destination
     local executable = path.join(relocated, path.basename(built.executable))
     local moved_ok, moved_output, moved_status = process.outputCommand(
-        executable, { "native-relocated" }, { LUA_PATH = "", LUA_CPATH = "" }
+        executable, { "native-relocated" }, {
+            LUA_PATH = "", LUA_CPATH = "", LD_LIBRARY_PATH = runtime_search_path,
+        }
     )
     assert(moved_ok and moved_output:find("native-probe-ok native-relocated", 1, true),
         "native module path was interpreted as a template: " .. tostring(moved_output)

@@ -9,12 +9,13 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-13
+    2026-10-19
 ]]
 
 local M = {}
 local IS_WINDOWS = package.config:sub(1, 1) == "\\"
 local command_counter = 0
+local temporary_directories = {}
 
 local function legacy_windows_script(command, token)
     local identity = tostring({}):gsub("[^%w]", "")
@@ -290,13 +291,16 @@ function M.assert_not_contains(text, needle)
 end
 
 function M.make_temp_dir(name)
-    local template = "/tmp/luainstaller-contract-" .. name .. "-XXXXXX"
-    return M.command_output_trimmed("mktemp -d " .. M.shell_quote(template))
+    local directory = assert(require("luainstaller.fs").makePrivateDirectory("contract-" .. name))
+    temporary_directories[directory] = true
+    return directory
 end
 
 function M.remove_tree(path)
-    if path and path:match("^/tmp/luainstaller%-contract%-") then
-        M.run("rm -rf " .. M.shell_quote(path))
+    if temporary_directories[path] then
+        if IS_WINDOWS then assert(require("luainstaller.fs").removeTree(path))
+        else M.run("rm -rf " .. M.shell_quote(path)) end
+        temporary_directories[path] = nil
     end
 end
 

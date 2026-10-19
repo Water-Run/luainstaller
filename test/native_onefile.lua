@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-13
+    2026-10-19
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -89,6 +89,8 @@ local environment = {
     PATH = clean_path,
     LUA_PATH = "",
     LUA_CPATH = "",
+    LD_LIBRARY_PATH = native_config.host.os == "android"
+        and assert(os.getenv("PREFIX")) .. "/lib" or "",
     LUA_INIT = "",
     LUA_INIT_5_1 = "",
     LUA_INIT_5_2 = "",

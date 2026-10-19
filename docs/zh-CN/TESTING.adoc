@@ -30,6 +30,8 @@ LUA=${LUA:-lua}
 "$LUA" test/cli_split_smoke.lua
 "$LUA" test/cli_surface.lua
 "$LUA" test/cli_boundaries.lua
+"$LUA" test/cli_lifecycle.lua
+"$LUA" test/progress_lifecycle.lua
 "$LUA" test/doc_payload.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
@@ -60,7 +62,7 @@ LUA=${LUA:-lua}
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.8.1-1.rockspec
+luarocks lint luainstaller-1.8.2-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -84,6 +86,12 @@ luarocks lint luainstaller-1.8.1-1.rockspec
 |`test/cli_boundaries.lua`
 |应用参数原样透传、显式值、冲突选项、帮助、完整路径、终端控制字符、
 JSON 精度与日志恢复告警
+
+|`test/cli_lifecycle.lua`
+|调用者设置、异常清理、JSON 错误和输出失败
+
+|`test/progress_lifecycle.lua`
+|原生刷新、父进程死亡和 EOF；真实 Windows 控制台、Unicode 和模式恢复
 
 |`test/doc_payload.lua`
 |文档与许可证安装副本的字节一致性
@@ -311,6 +319,10 @@ Lua 前缀进行构建，因此 Homebrew 不是前置条件。
 HOST_LABEL=<label> sh tools/test-lua-versions.sh
 ----
 
+FreeBSD 需要 `gmake` 和 `pkgconf`。Termux 使用发行版提供的 LuaRocks 3.13.0
+管理器，目标运行时仍由矩阵从固定源码构建；先安装 `clang`、`make`、
+`pkg-config`、`luarocks`、`git` 和 `unzip`。工作目录使用应用的临时目录。
+
 Windows：
 
 CI 的矩阵调度脚本使用 PowerShell，产品和原生 Windows 测试本身不需要它。
@@ -484,9 +496,9 @@ Linux 还在隔离目标文件系统中运行 `test/no_lua_target.lua`。
 继续提供上一版。
 
 . 给确认过的提交打标签。rockspec 的 `source.tag` 就是这个标签。
-. 用该标签发布 GitHub Release，并附上 `luainstaller-1.8.1.tar.gz`、
-  `luainstaller-1.8.1.zip`、`luainstaller-1.8.1-1.rockspec`、
-  `luainstaller-1.8.1-1.src.rock` 和 `SHA256SUMS`。
+. 用该标签发布 GitHub Release，并附上 `luainstaller-1.8.2.tar.gz`、
+  `luainstaller-1.8.2.zip`、`luainstaller-1.8.2-1.rockspec`、
+  `luainstaller-1.8.2-1.src.rock` 和 `SHA256SUMS`。
 . 把这五个文件下载到一个空目录，执行 `sha256sum -c SHA256SUMS`。
 . 上传刚下载的 rockspec 和 `.src.rock`。第二个参数就是 Release 里的文件，
   仓库保存的是这个文件的字节：
@@ -494,7 +506,7 @@ Linux 还在隔离目标文件系统中运行 `test/no_lua_target.lua`。
 +
 [source,bash]
 ----
-luarocks upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock
+luarocks upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock
 ----
 +
 用保存了 API key 的维护者账号执行。key 不要进入仓库，也不要出现在
@@ -507,14 +519,14 @@ luarocks upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock
 [source,bash]
 ----
 lua -e 'package.preload["ltn12"]=function() error("use curl", 0) end' \
-  "$(command -v luarocks)" upload luainstaller-1.8.1-1.rockspec luainstaller-1.8.1-1.src.rock
+  "$(command -v luarocks)" upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock
 ----
 
-. `https://luarocks.org/luainstaller-1.8.1-1.src.rock` 和
-  `https://luarocks.org/luainstaller-1.8.1-1.rockspec` 都能下载，
+. `https://luarocks.org/luainstaller-1.8.2-1.src.rock` 和
+  `https://luarocks.org/luainstaller-1.8.2-1.rockspec` 都能下载，
   并且字节与 GitHub Release 的文件一致。
-. 先向空树做无版本号安装，再覆盖上一版安装。两次都选中 1.8.1。
-  `luai -v` 输出 `luai 1.8.1`，`luainstaller version` 也输出这一版。
+. 先向空树做无版本号安装，再覆盖上一版安装。两次都选中 1.8.2。
+  `luai -v` 输出 `luai 1.8.2`，`luainstaller version` 也输出这一版。
   然后删除空树。
 . 更早的 Git 标签如果已经有 GitHub rock，而 luarocks.org 还没有，
   用同样的步骤上传。
