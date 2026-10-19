@@ -8,14 +8,15 @@ File:
 Date:
     2026-10-12
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
 harness.install_loader()
 local owner = require("luainstaller.lock_owner")
 local pid = assert(owner.currentPid())
-local identity = assert(owner.currentIdentity(), "cannot identify the running process")
+local identity, identity_error = owner.currentIdentity()
+assert(identity, "cannot identify the running process: " .. tostring(identity_error))
 local platform, scope, birth = identity:match("^([%w]+):([0-9a-f]+):([%w]+)$")
 assert(platform and #scope == 64 and birth)
 assert(owner.isAlive(pid, identity) == true, "current process was not recognized")

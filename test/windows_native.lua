@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -75,6 +75,16 @@ else assert(not moved, "a persistent lock was ignored") end
 end
 checkRenameLock("transient", true)
 checkRenameLock("persistent", false)
+local pin_probe = path.join(root, "parent-pin.exe")
+local pin_compiler = assert(require("luainstaller.toolchain").resolveCompiler({}))
+local pin_built, pin_build_output = require("luainstaller.toolchain").compileStandalone(
+    pin_compiler, path.absolute("test/fixtures/windows_parent_pin.c"), pin_probe, {work_dir=root})
+assert(pin_built, pin_build_output)
+local pin_source, pin_target = path.join(root, "pinned-parent"), path.join(root, "moved-parent")
+assert(fs.makeDirectory(pin_source))
+local pinned, pin_output = process.outputCommand(pin_probe, {pin_source, pin_target})
+assert(pinned, pin_output)
+assert(fs.pathType(pin_source) == "directory" and fs.pathType(pin_target) == "missing")
 local flooded, flood_output = process.outputCommand(fixture, { "flood" }, {}, { timeout_seconds = 15 })
 assert(flooded and flood_output == string.rep("a", 64 * 4096) .. string.rep("b", 64 * 4096),
     "simultaneous stdout/stderr capture failed")

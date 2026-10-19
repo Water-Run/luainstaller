@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-14
 Updated:
-    2026-10-13
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -18,6 +18,8 @@ local bundler = require("luainstaller.bundler")
 local fs = require("luainstaller.fs")
 local onefile = require("luainstaller.onefile")
 local path = require("luainstaller.path")
+local process = require("luainstaller.process")
+local toolchain = require("luainstaller.toolchain")
 
 local root = assert(fs.makePrivateDirectory("onefile-compile"))
 local suffix = package.config:sub(1, 1) == "\\" and ".exe" or ""
@@ -39,7 +41,20 @@ local function build()
     bundler.bundleOnedir = original
     return result
 end
-local built = build()
+local extractor_source, extractor_payload
+local original_compile = toolchain.compileStandalone
+if suffix == ".exe" then
+    toolchain.compileStandalone = function(compiler, source, ...)
+        if path.basename(source) == "extractor.c" then
+            extractor_source = assert(fs.readRegularFile(source))
+            extractor_payload = assert(fs.readRegularFile(path.join(path.dirname(source), "payload.inc")))
+        end
+        return original_compile(compiler, source, ...)
+    end
+end
+local called, built = pcall(build)
+toolchain.compileStandalone = original_compile
+assert(called, built)
 local diagnostic = built.error and table.concat({
     tostring(built.error.message or "onefile extractor compile failed"),
     tostring(built.error.command or ""),
@@ -47,6 +62,38 @@ local diagnostic = built.error and table.concat({
 }, "\n") or "onefile extractor compile failed"
 assert(built.ok, diagnostic)
 assert(fs.pathType(out) == "file")
+if suffix == ".exe" then
+    assert(extractor_source and extractor_payload, "extractor source was not captured")
+    local probe_source, probe = path.join(root, "extractor-pin.c"), path.join(root, "extractor-pin.exe")
+    assert(fs.writeFile(path.join(root, "payload.inc"), extractor_payload))
+    assert(fs.writeFile(probe_source, "#define main luai_extractor_entrypoint\n"
+        .. extractor_source .. "\n#undef main\n" .. [[
+int main(int argc, char **argv) {
+    struct luai_pinned_objects pins;
+    BOOL moved;
+    DWORD error;
+    if (argc != 3) return 2;
+    memset(&pins, 0, sizeof(pins));
+    if (luai_open_pinned_directory(argv[1], 0, &pins) != 0) return 3;
+    moved = MoveFileA(argv[1], argv[2]);
+    error = GetLastError();
+    luai_close_pins(&pins);
+    if (moved && !MoveFileA(argv[2], argv[1])) return 4;
+    if (moved) { fputs("an extractor ancestor was moved while reserved\n", stderr); return 5; }
+    if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) return 6;
+    puts("extractor parent reservation blocks replacement");
+    return 0;
+}
+]]))
+    local compiler = assert(toolchain.resolveCompiler({}))
+    local compiled, compiler_output = toolchain.compileStandalone(compiler, probe_source, probe, {work_dir=root})
+    assert(compiled, compiler_output)
+    local reserved, moved = path.join(root, "reserved-parent"), path.join(root, "moved-parent")
+    assert(fs.makeDirectory(reserved))
+    local protected, output = process.outputCommand(probe, {reserved, moved})
+    assert(protected, output)
+    assert(fs.pathType(reserved) == "directory" and fs.pathType(moved) == "missing")
+end
 local first_bytes = assert(fs.readRegularFile(out))
 assert(fs.removeFile(out))
 local rebuilt = build()

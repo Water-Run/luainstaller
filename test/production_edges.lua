@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -2108,6 +2108,7 @@ end)
 
 test("Lua runtime cannot overwrite a native module destination", function()
     if commandOutputTrimmed("uname -s") ~= "Linux" then return end
+    local runtime_os = require("luainstaller.platform").detectHost().os
     local runtime_name, runtime_path = selectedLinuxRuntime()
     assert(runtime_name and runtime_path,
         "cannot identify the selected Lua runtime collision fixture")
@@ -2123,14 +2124,14 @@ test("Lua runtime cannot overwrite a native module destination", function()
         entry = entry,
         mode = "onedir",
         out = out,
-        target_os = "linux",
+        target_os = runtime_os,
         dependencies = dependencies,
     })
     assert(built_manifest.ok, built_manifest.error and built_manifest.error.message)
     local result = require("luainstaller.bundler").bundleOnedir({
         entry = entry,
         out = out,
-        target_os = "linux",
+        target_os = runtime_os,
         dependencies = dependencies,
         manifest = built_manifest.manifest,
     })
@@ -4217,7 +4218,8 @@ assert(result.ok, result.error and (result.error.message .. ": " .. tostring(res
     assert(source:find("defined(__ANDROID__)", 1, true),
         "extractor has no Termux temporary-prefix fallback")
     assert(source:find('#define LUAI_INNER_EXE "\\', 1, true))
-    assert(source:find("CreateProcessA(exe_path, cmd, NULL, NULL, FALSE", 1, true))
+    assert(source:find("luai_spawn(exe_path, cmd, FALSE, CREATE_SUSPENDED", 1, true))
+    assert(source:find("CreateProcessW(application, arguments", 1, true))
     assert(windows_run:find(
         "argc > 0 && argv[0] != NULL ? argv[0] : exe_path",
         1,
@@ -4269,8 +4271,8 @@ assert(result.ok, result.error and (result.error.message .. ": " .. tostring(res
         "Windows extractor does not pin payload parent directories")
     assert(source:find("FILE_FLAG_OPEN_REPARSE_POINT", 1, true),
         "Windows extractor follows reparse points while pinning cache objects")
-    assert(source:find("CreateFileA(path, access, FILE_SHARE_READ,", 1, true),
-        "Windows extractor permits write handles on pinned cache directories")
+    assert(source:find("luai_open_file(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE,", 1, true),
+        "Windows extractor does not reserve directory names during cache operations")
     assert(source:find("luai_close_pins", 1, true),
         "Windows extractor does not retain and close cache pins around execution")
     assert(source:find("luai_directory_entry_is_stable", 1, true),
@@ -4315,7 +4317,7 @@ static void luai_test_swap_parent(const char *parent) {
 }
 
 ]]
-    local insertion = assert(hooked:find("#ifdef _WIN32\nstatic int luai_mkdir_one", 1, true))
+    local insertion = assert(hooked:find("#ifdef _WIN32\nstatic wchar_t *luai_windows_path", 1, true))
     hooked = hooked:sub(1, insertion - 1) .. function_body .. hooked:sub(insertion)
     local fixed_hook_point = "    parent[parent_length] = '\\0';\n"
         .. "    write_result = luai_write_file_at"
@@ -4562,8 +4564,12 @@ assert(require("luainstaller.fs").temporaryRoot() == %q,
         }, " "))
         local clang_cache = root .. "/clang-cache"
         makeDirectory(clang_cache)
-        local leak_detection = commandOutputTrimmed("uname -s") == "Darwin"
+        local sanitizer_host = commandOutputTrimmed("uname -s")
+        local leak_detection = (sanitizer_host == "Darwin" or sanitizer_host == "FreeBSD")
             and "0" or "1"
+        if leak_detection == "0" then
+            print("LeakSanitizer unavailable on this host; address/undefined sanitizers remain enabled")
+        end
         runCommand("ASAN_OPTIONS=detect_leaks=" .. leak_detection
             .. " TMPDIR=" .. shellQuote(clang_cache)
             .. " " .. shellQuote(clang_exe))

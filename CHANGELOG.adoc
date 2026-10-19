@@ -7,7 +7,7 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
-== 1.8.2 - 2026-10-19
+== 1.8.2 - 2026-10-20
 
 === Changes
 
@@ -30,6 +30,14 @@ truth for the exact contents of a published version.
   case-insensitive filesystems.
 * Retry brief Windows file locks during output publication and directory moves
   while checking source identity and preserving existing targets.
+* Keep Windows output and extraction folders reserved against replacement
+  while native file operations are in progress.
+* Run Windows onefile bundles with deeper extraction paths and clean them up
+  through the same long-path-aware file interface.
+* Fix preferred-source export through macOS temporary-directory aliases while
+  continuing to refuse a symlink as the export destination.
+* Identify 32-bit Windows processes through the native registry view for
+  reliable output-lock ownership.
 
 == 1.8.1 - 2026-10-19
 

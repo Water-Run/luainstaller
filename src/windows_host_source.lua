@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-13
+    2026-10-20
 ]]
 
 return [====[
@@ -16,7 +16,7 @@ return [====[
  * Author: WaterRun
  * File: windows_host.c
  * Date: 2026-10-06
- * Updated: 2026-10-19
+ * Updated: 2026-10-20
  * Keep src/windows_host_source.lua synchronized with this file.
  * Uses Windows XP APIs only; no Lua headers or import library are needed.
  */
@@ -372,13 +372,13 @@ static wchar_t *full_path(context *ctx, const wchar_t *value)
     return result;
 }
 
-static wchar_t *file_path(context *ctx, const wchar_t *value)
+static wchar_t *extended_path(context *ctx, wchar_t *full)
 {
-    wchar_t *full = full_path(ctx, value), *extended;
+    wchar_t *extended;
     size_t length;
     if (!full) return NULL;
     length = wcslen(full);
-    if (length < 248 || wcsncmp(full, L"\\\\?\\", 4) == 0) return full;
+    if (wcsncmp(full, L"\\\\?\\", 4) == 0) return full;
     if (length > (size_t)-1 / sizeof(wchar_t) - 9) { fail(ctx, "path is too large"); return NULL; }
     extended = (wchar_t *)allocate(ctx, (length + 9) * sizeof(wchar_t));
     if (!extended) return NULL;
@@ -390,6 +390,13 @@ static wchar_t *file_path(context *ctx, const wchar_t *value)
         memcpy(extended + 4, full, (length + 1) * sizeof(wchar_t));
     }
     return extended;
+}
+
+static wchar_t *file_path(context *ctx, const wchar_t *value)
+{
+    wchar_t *full = full_path(ctx, value);
+    if (!full || wcslen(full) < 248) return full;
+    return extended_path(ctx, full);
 }
 
 static wchar_t *join(context *ctx, const wchar_t *left, const wchar_t *right)
@@ -437,7 +444,8 @@ static directory_pin *pin_directory(context *ctx, const wchar_t *path)
         if (pinned->handle && !_wcsicmp(path, pinned->path)) return pinned;
     }
     if (ctx->directory_count >= 4096) { fail(ctx, "directory pin limit exceeded"); return NULL; }
-    handle = CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    /* Metadata-only opens do not enforce Windows sharing reservations. */
+    handle = CreateFileW(path, FILE_READ_ATTRIBUTES | FILE_TRAVERSE, FILE_SHARE_READ | FILE_SHARE_WRITE,
         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
     if (handle == INVALID_HANDLE_VALUE) { win_fail(ctx, "pin directory ancestor"); return NULL; }
     if (!GetFileInformationByHandle(handle, &info)) {
@@ -678,7 +686,9 @@ static int tree(context *ctx, const wchar_t *root, int remove_all, int recursive
     WIN32_FIND_DATAW found;
     HANDLE search;
     DWORD error;
-    if (!absolute || !safe_attributes(ctx, absolute, 1) || !parents(ctx, absolute, 0)) return 0;
+    absolute = extended_path(ctx, absolute);
+    if (!absolute || !safe_attributes(ctx, absolute, 1) || !parents(ctx, absolute, 0)
+        || !pin_directory(ctx, absolute)) return 0;
     offset = wcslen(absolute);
 #define ADD_ENTRY(p, attr) do { \
     if (count == capacity) { \
@@ -695,7 +705,8 @@ static int tree(context *ctx, const wchar_t *root, int remove_all, int recursive
     for (index = 0; index < count; ++index) {
         if (index && !recursive) continue;
         if (!(entries[index].attributes & FILE_ATTRIBUTE_DIRECTORY) || (entries[index].attributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
-        if (!safe_attributes(ctx, entries[index].path, 1) || !parents(ctx, entries[index].path, 0)) return 0;
+        if (!safe_attributes(ctx, entries[index].path, 1) || !parents(ctx, entries[index].path, 0)
+            || !pin_directory(ctx, entries[index].path)) return 0;
         pattern = join(ctx, entries[index].path, L"*");
         if (!pattern) return 0;
         search = FindFirstFileW(pattern, &found);
@@ -1480,7 +1491,7 @@ static int dispatch(context *ctx)
         char birth[17];
         if (!decimal(ctx, 1, &value) || !value) return fail(ctx, "invalid process id");
         if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0,
-            KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) return fail(ctx, "cannot read host identity");
+            KEY_QUERY_VALUE | KEY_WOW64_64KEY, &key) != ERROR_SUCCESS) return fail(ctx, "cannot read host identity");
         size = RegQueryValueExW(key, L"MachineGuid", NULL, &kind, (BYTE *)machine, &bytes);
         RegCloseKey(key);
         if (size != ERROR_SUCCESS || kind != REG_SZ || bytes < sizeof(wchar_t)

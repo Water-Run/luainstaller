@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -291,6 +291,7 @@ local EXTRACTOR_TEMPLATE = [=[
 #include <process.h>
 #include <sys/stat.h>
 #include <windows.h>
+#include <wchar.h>
 #include <aclapi.h>
 #include <sddl.h>
 #if defined(_MSC_VER) && _MSC_VER < 1900
@@ -310,10 +311,126 @@ local EXTRACTOR_TEMPLATE = [=[
 #endif
 
 #ifdef _WIN32
+static wchar_t *luai_windows_path(const char *path) {
+    int length = MultiByteToWideChar(CP_ACP, 0, path, -1, NULL, 0);
+    wchar_t *result, *body;
+    size_t index;
+    DWORD error;
+    if (length <= 0) return NULL;
+    if (length > 32759) { SetLastError(ERROR_FILENAME_EXCED_RANGE); return NULL; }
+    result = (wchar_t *)malloc(((size_t)length + 8) * sizeof(wchar_t));
+    if (!result) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
+    body = result + 8;
+    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, body, length)) {
+        error = GetLastError(); free(result); SetLastError(error); return NULL;
+    }
+    for (index = 0; body[index]; ++index) if (body[index] == L'/') body[index] = L'\\';
+    if (length >= 5 && wcsncmp(body, L"\\\\?\\", 4) == 0) {
+        memmove(result, body, (size_t)length * sizeof(wchar_t));
+    } else if (length >= 3 && body[0] == L'\\' && body[1] == L'\\') {
+        memcpy(result, L"\\\\?\\UNC\\", 8 * sizeof(wchar_t));
+        memmove(result + 8, body + 2, ((size_t)length - 2) * sizeof(wchar_t));
+    } else if (length >= 4 && body[1] == L':' && body[2] == L'\\') {
+        memcpy(result, L"\\\\?\\", 4 * sizeof(wchar_t));
+        memmove(result + 4, body, (size_t)length * sizeof(wchar_t));
+    } else {
+        memmove(result, body, (size_t)length * sizeof(wchar_t));
+    }
+    return result;
+}
+
+static HANDLE luai_open_file(const char *path, DWORD access, DWORD sharing,
+                              SECURITY_ATTRIBUTES *security, DWORD disposition,
+                              DWORD flags, HANDLE template_file) {
+    wchar_t *wide = luai_windows_path(path);
+    HANDLE result;
+    DWORD error;
+    if (!wide) return INVALID_HANDLE_VALUE;
+    result = CreateFileW(wide, access, sharing, security, disposition, flags, template_file);
+    error = GetLastError(); free(wide); SetLastError(error);
+    return result;
+}
+
+static DWORD luai_file_attributes(const char *path) {
+    wchar_t *wide = luai_windows_path(path);
+    DWORD result, error;
+    if (!wide) return INVALID_FILE_ATTRIBUTES;
+    result = GetFileAttributesW(wide);
+    error = GetLastError(); free(wide); SetLastError(error);
+    return result;
+}
+
+static BOOL luai_create_directory(const char *path) {
+    wchar_t *wide = luai_windows_path(path);
+    BOOL result;
+    DWORD error;
+    if (!wide) return FALSE;
+    result = CreateDirectoryW(wide, NULL);
+    error = GetLastError(); free(wide); SetLastError(error);
+    return result;
+}
+
+static BOOL luai_delete_file(const char *path) {
+    wchar_t *wide = luai_windows_path(path);
+    BOOL result;
+    DWORD error;
+    if (!wide) return FALSE;
+    result = DeleteFileW(wide);
+    error = GetLastError(); free(wide); SetLastError(error);
+    return result;
+}
+
+static BOOL luai_remove_directory(const char *path) {
+    wchar_t *wide = luai_windows_path(path);
+    BOOL result;
+    DWORD error;
+    if (!wide) return FALSE;
+    result = RemoveDirectoryW(wide);
+    error = GetLastError(); free(wide); SetLastError(error);
+    return result;
+}
+
+static BOOL luai_move_file(const char *source, const char *destination, DWORD flags) {
+    wchar_t *from = luai_windows_path(source), *to;
+    BOOL result;
+    DWORD error;
+    if (!from) return FALSE;
+    to = luai_windows_path(destination);
+    if (!to) { error = GetLastError(); free(from); SetLastError(error); return FALSE; }
+    result = MoveFileExW(from, to, flags);
+    error = GetLastError(); free(from); free(to); SetLastError(error);
+    return result;
+}
+
+static BOOL luai_spawn(const char *image, const char *command, BOOL inherit, DWORD flags,
+                       STARTUPINFOW *startup, PROCESS_INFORMATION *process) {
+    wchar_t *application = luai_windows_path(image), *arguments;
+    int length;
+    BOOL result;
+    DWORD error;
+    if (!application) return FALSE;
+    length = MultiByteToWideChar(CP_ACP, 0, command, -1, NULL, 0);
+    if (length <= 0 || length > 32767) {
+        error = length > 32767 ? ERROR_FILENAME_EXCED_RANGE : GetLastError();
+        free(application); SetLastError(error); return FALSE;
+    }
+    arguments = (wchar_t *)malloc((size_t)length * sizeof(wchar_t));
+    if (!arguments) { free(application); SetLastError(ERROR_NOT_ENOUGH_MEMORY); return FALSE; }
+    if (!MultiByteToWideChar(CP_ACP, 0, command, -1, arguments, length)) {
+        error = GetLastError(); free(application); free(arguments); SetLastError(error); return FALSE;
+    }
+    result = CreateProcessW(application, arguments, NULL, NULL, inherit, flags,
+                            NULL, NULL, startup, process);
+    error = GetLastError(); free(application); free(arguments); SetLastError(error);
+    return result;
+}
+
 static int luai_mkdir_one(const char *path) {
-    if (_mkdir(path) == 0) return 0;
-    if (errno == EEXIST) {
-        DWORD attrs = GetFileAttributesA(path);
+    DWORD error;
+    if (luai_create_directory(path)) return 0;
+    error = GetLastError();
+    if (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS) {
+        DWORD attrs = luai_file_attributes(path);
         if (attrs != INVALID_FILE_ATTRIBUTES &&
             (attrs & FILE_ATTRIBUTE_DIRECTORY) &&
             !(attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
@@ -422,9 +539,9 @@ static int luai_open_pinned_directory(const char *path, int make_private,
                                       struct luai_pinned_objects *pins) {
     HANDLE handle;
     BY_HANDLE_FILE_INFORMATION info;
-    DWORD access = FILE_READ_ATTRIBUTES;
+    DWORD access = FILE_READ_ATTRIBUTES | FILE_TRAVERSE;
     if (make_private) access |= READ_CONTROL | WRITE_DAC | WRITE_OWNER;
-    handle = CreateFileA(path, access, FILE_SHARE_READ,
+    handle = luai_open_file(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE,
                          NULL, OPEN_EXISTING,
                          FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
                          NULL);
@@ -447,7 +564,7 @@ static int luai_ensure_private_dir(const char *path) {
     if (luai_mkdir_one(path) != 0) return -1;
 #ifdef _WIN32
     {
-        DWORD attrs = GetFileAttributesA(path);
+        DWORD attrs = luai_file_attributes(path);
         if (attrs == INVALID_FILE_ATTRIBUTES ||
             !(attrs & FILE_ATTRIBUTE_DIRECTORY) ||
             (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return -1;
@@ -567,7 +684,7 @@ static int luai_pin_relative_parents(const char *bundle_dir, const char *relativ
 
 #ifdef _WIN32
 static HANDLE luai_open_regular_file(const char *path, DWORD access, DWORD sharing) {
-    HANDLE handle = CreateFileA(path, access, sharing, NULL, OPEN_EXISTING,
+    HANDLE handle = luai_open_file(path, access, sharing, NULL, OPEN_EXISTING,
                                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
                                 NULL);
     BY_HANDLE_FILE_INFORMATION info;
@@ -626,16 +743,16 @@ static int luai_pin_matching_file(const char *path, const unsigned char *expecte
 }
 
 static int luai_remove_unsafe_existing(const char *path) {
-    DWORD attrs = GetFileAttributesA(path);
+    DWORD attrs = luai_file_attributes(path);
     if (attrs == INVALID_FILE_ATTRIBUTES) {
         DWORD status = GetLastError();
         return status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND ? 0 : -1;
     }
     if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
         if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
-            return RemoveDirectoryA(path) ? 0 : -1;
+            return luai_remove_directory(path) ? 0 : -1;
         }
-        return DeleteFileA(path) ? 0 : -1;
+        return luai_delete_file(path) ? 0 : -1;
     }
     if ((attrs & FILE_ATTRIBUTE_DIRECTORY) || (attrs & FILE_ATTRIBUTE_DEVICE)) return -1;
     return 0;
@@ -1003,7 +1120,7 @@ static int luai_write_file(struct luai_pinned_objects *pins, const char *bundle_
         name_length = snprintf(temporary, sizeof(temporary), "%s\\.luai-extract-%lu-%u.tmp", parent,
                                (unsigned long)_getpid(), attempt);
         if (name_length < 0 || (size_t)name_length >= sizeof(temporary)) return -1;
-        file = CreateFileA(
+        file = luai_open_file(
             temporary,
             GENERIC_READ | GENERIC_WRITE | FILE_READ_ATTRIBUTES
                 | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
@@ -1023,20 +1140,20 @@ static int luai_write_file(struct luai_pinned_objects *pins, const char *bundle_
         DWORD wrote = 0;
         if (!WriteFile(file, data + offset, wanted, &wrote, NULL) || wrote != wanted) {
             CloseHandle(file);
-            DeleteFileA(temporary);
+            luai_delete_file(temporary);
             return -1;
         }
         offset += wrote;
     }
     if (!FlushFileBuffers(file) || luai_harden_private_handle(file) != 0) {
         CloseHandle(file);
-        DeleteFileA(temporary);
+        luai_delete_file(temporary);
         return -1;
     }
-    if (!MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!luai_move_file(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         CloseHandle(file);
         matches = luai_pin_matching_file(path, data, size, pins);
-        DeleteFileA(temporary);
+        luai_delete_file(temporary);
         return matches == 1 ? 0 : -1;
     }
     if (!CloseHandle(file)) return -1;
@@ -1098,6 +1215,7 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
     int temp_root_fd;
     int cache_fd;
     int payload_fd;
+    struct stat material_info = {0};
 #endif
 #ifdef _WIN32
     if (snprintf(cache_name, sizeof(cache_name), "luainstaller-onefile") < 0) return -1;
@@ -1111,13 +1229,11 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
         if (!length || length >= sizeof(temp_root)) return -1;
 #else
         int length;
-        if (luai_material_root[0] == '/') {
-            length = snprintf(temp_root, sizeof(temp_root), "%s", luai_material_root);
-        } else {
-            char current[4096];
-            if (!getcwd(current, sizeof(current))) return -1;
-            length = snprintf(temp_root, sizeof(temp_root), "%s/%s", current, luai_material_root);
-        }
+        char resolved[4096];
+        if (lstat(luai_material_root, &material_info) != 0
+            || !S_ISDIR(material_info.st_mode) || S_ISLNK(material_info.st_mode)
+            || realpath(luai_material_root, resolved) == NULL) return -1;
+        length = snprintf(temp_root, sizeof(temp_root), "%s", resolved);
         if (length < 0 || (size_t)length >= sizeof(temp_root)) return -1;
 #endif
     } else if (luai_temp_root(temp_root, sizeof(temp_root)) != 0) return -1;
@@ -1127,12 +1243,19 @@ static int luai_extract_all(char *bundle_dir, size_t bundle_dir_size
     if (luai_pin_absolute_chain(temp_root, pins) != 0) return -1;
     if (luai_ensure_private_dir(base) != 0
         || luai_open_pinned_directory(base, 1, pins) != 0) return -1;
-    if (luai_material_root && !CreateDirectoryA(bundle_dir, NULL)) return -1;
+    if (luai_material_root && !luai_create_directory(bundle_dir)) return -1;
     if (luai_ensure_private_dir(bundle_dir) != 0
         || luai_open_pinned_directory(bundle_dir, 1, pins) != 0) return -1;
 #else
     temp_root_fd = luai_open_absolute_dir(temp_root);
     if (temp_root_fd < 0) return -1;
+    if (luai_material_root) {
+        struct stat opened;
+        if (fstat(temp_root_fd, &opened) != 0
+            || opened.st_dev != material_info.st_dev || opened.st_ino != material_info.st_ino) {
+            close(temp_root_fd); return -1;
+        }
+    }
     cache_fd = luai_open_private_dir_at(temp_root_fd, cache_name);
     if (close(temp_root_fd) != 0) {
         if (cache_fd >= 0) close(cache_fd);
@@ -1271,7 +1394,7 @@ static int luai_start_legacy_watchdog(HANDLE job) {
     HANDLE process = GetCurrentProcess();
     HANDLE parent_copy = NULL;
     HANDLE job_copy = NULL;
-    STARTUPINFOA si;
+    STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     DWORD self_length;
     size_t command_length;
@@ -1301,8 +1424,7 @@ static int luai_start_legacy_watchdog(HANDLE job) {
     ZeroMemory(&si, sizeof(si));
     ZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si);
-    if (!CreateProcessA(self_path, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
-                        NULL, NULL, &si, &pi)) goto cleanup;
+    if (!luai_spawn(self_path, command, TRUE, CREATE_NO_WINDOW, &si, &pi)) goto cleanup;
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     result = 0;
@@ -1315,7 +1437,7 @@ cleanup:
 
 static int luai_run_inner(const char *exe_path, int argc, char **argv) {
     char cmd[32768] = "";
-    STARTUPINFOA si;
+    STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_info;
     HANDLE job = NULL;
@@ -1361,8 +1483,7 @@ static int luai_run_inner(const char *exe_path, int argc, char **argv) {
             return 1;
         }
     }
-    if (!CreateProcessA(exe_path, cmd, NULL, NULL, FALSE, CREATE_SUSPENDED,
-                        NULL, NULL, &si, &pi)) {
+    if (!luai_spawn(exe_path, cmd, FALSE, CREATE_SUSPENDED, &si, &pi)) {
         fprintf(stderr, "luainstaller-onefile: cannot start inner launcher\n");
         CloseHandle(job);
         return 1;
