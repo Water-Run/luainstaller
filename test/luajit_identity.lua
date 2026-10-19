@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-15
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -62,10 +62,20 @@ if is_jit then
     if pinned then
         assert(require("luainstaller").VERSION == "1.8.2")
         assert(jit.version == "LuaJIT " .. pinned, "matrix runtime does not match the pinned source")
-        assert(jit.arch == "x64", "LuaJIT matrix requires native x86_64 execution")
+        local platform = require("luainstaller.platform")
+        local runtime_arch = platform.normalizeArch(jit.arch)
+        assert(runtime_arch == platform.detectHost().arch,
+            "LuaJIT runtime architecture does not match the native host")
+        local expected_arch = os.getenv("LUAI_EXPECT_HOST_ARCH")
+        if expected_arch and expected_arch ~= "" then
+            assert(runtime_arch == platform.normalizeArch(expected_arch),
+                "LuaJIT matrix architecture mismatch: expected " .. expected_arch
+                    .. ", got " .. runtime_arch)
+        end
         local configuration = os.getenv("LUAI_JIT_CONFIGURATION")
         assert(info.lua52compat == (configuration == "lua52compat"))
-        assert(info.gc64 == (configuration ~= "nogc64"))
+        local wide_gc = runtime_arch == "x86_64" or runtime_arch == "arm64"
+        assert(info.gc64 == (wide_gc and configuration ~= "nogc64"))
     end
     local mismatch = {}
     for key, value in pairs(info) do mismatch[key] = value end

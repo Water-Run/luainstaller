@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -842,13 +842,14 @@ print("platform profiles ok")
 end
 
 local function check_macos_profile_host_and_toolchain()
-    local script = SOURCE_LOADER .. [[
+    local root = make_temp_dir("macos-profile")
+    local script = SOURCE_LOADER .. string.format([[
 local bundler = require("luainstaller.bundler")
 local result = bundler.bundleOnedir({
     entry = "test/runtime_bundle/main.lua",
-    out = "/tmp/luainstaller-macos-profile-smoke",
+    out = %q,
     target_os = "macos",
-    lua_prefix = "/tmp/luainstaller-missing-lua-prefix",
+    lua_prefix = %q,
     dependencies = { scripts = {}, libraries = {} },
     trace = {},
     manifest = {
@@ -866,18 +867,23 @@ else
     assert(result.error.type == "UnsupportedPlatformError")
 end
 print("macos profile host gate ok")
-]]
-    assert_contains(run(lua_eval(script)), "macos profile host gate ok")
+]], root .. "/out", root .. "/missing-lua-prefix")
+    local checked, failure = pcall(function()
+        assert_contains(run(lua_eval(script)), "macos profile host gate ok")
+    end)
+    remove_tree(root)
+    assert(checked, failure)
 end
 
 local function check_windows_profile_reaches_toolchain()
-    local script = SOURCE_LOADER .. [[
+    local root = make_temp_dir("windows-profile")
+    local script = SOURCE_LOADER .. string.format([[
 local bundler = require("luainstaller.bundler")
 local result = bundler.bundleOnedir({
     entry = "test/runtime_bundle/main.lua",
-    out = "/tmp/luainstaller-windows-profile-smoke",
+    out = %q,
     target_os = "windows",
-    lua_prefix = "/tmp/luainstaller-missing-windows-lua-prefix",
+    lua_prefix = %q,
     dependencies = { scripts = {}, libraries = {} },
     trace = {},
     manifest = {
@@ -895,8 +901,12 @@ else
     assert(result.error.type == "UnsupportedPlatformError")
 end
 print("windows profile toolchain ok")
-]]
-    assert_contains(run(lua_eval(script)), "windows profile toolchain ok")
+]], root .. "/out", root .. "/missing-lua-prefix")
+    local checked, failure = pcall(function()
+        assert_contains(run(lua_eval(script)), "windows profile toolchain ok")
+    end)
+    remove_tree(root)
+    assert(checked, failure)
 end
 
 local function check_remote_onefile_script_coverage()

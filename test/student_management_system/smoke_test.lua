@@ -11,13 +11,15 @@ File:
 Date:
     2026-06-14
 Updated:
-    2026-07-18
+    2026-10-20
 ]]
 local ROOT = "test/student_management_system"
 local harness = dofile("test/support/harness.lua")
-local DATA = os.tmpname() .. ".json"
-local EXPORT = os.tmpname() .. ".csv"
-local IMPORT = os.tmpname() .. ".import.csv"
+harness.install_loader()
+local scratch = harness.make_temp_dir("student-smoke")
+local DATA = scratch .. "/data.json"
+local EXPORT = scratch .. "/export.csv"
+local IMPORT = scratch .. "/import.csv"
 
 local function run(arguments)
     local command_arguments = {
@@ -46,7 +48,7 @@ end
 local function check_windows_replace_semantics()
     package.path = ROOT .. "/?.lua;" .. package.path
     local storage = require("storage")
-    local path = os.tmpname() .. ".windows-replace.json"
+    local path = scratch .. "/windows-replace.json"
     write_file(path, '{"version":1,"next_id":1,"students":[]}\n')
 
     local original_rename = os.rename
@@ -111,30 +113,34 @@ local function check_windows_replace_semantics()
     end
 end
 
-os.remove(DATA)
-os.remove(EXPORT)
-os.remove(IMPORT)
+local checked, failure = pcall(function()
+    os.remove(DATA)
+    os.remove(EXPORT)
+    os.remove(IMPORT)
 
-check_windows_replace_semantics()
+    check_windows_replace_semantics()
 
-assert_contains(run({ "seed" }), "Seeded 8 students")
-assert_contains(run({ "list", "--sort", "average" }), "Ada Lovelace")
-assert_contains(run({ "search", "--name", "ada" }), "Ada Lovelace")
-assert_contains(run({ "report" }), "Class Summary")
-assert_contains(run({
-    "add", "--name", "Ivy Chen", "--gender", "F", "--class", "CS2",
-    "--birth", "2004", "--phone", "5550109", "--email", "ivy@example.test",
-    "--grades", "lua=96,python=91,math=93,english=88",
-}), "Added student")
-assert_contains(run({ "rank", "--course", "lua" }), "Lua Ranking")
-assert_contains(run({ "export", "--out", EXPORT }), "Exported")
+    assert_contains(run({ "seed" }), "Seeded 8 students")
+    assert_contains(run({ "list", "--sort", "average" }), "Ada Lovelace")
+    assert_contains(run({ "search", "--name", "ada" }), "Ada Lovelace")
+    assert_contains(run({ "report" }), "Class Summary")
+    assert_contains(run({
+        "add", "--name", "Ivy Chen", "--gender", "F", "--class", "CS2",
+        "--birth", "2004", "--phone", "5550109", "--email", "ivy@example.test",
+        "--grades", "lua=96,python=91,math=93,english=88",
+    }), "Added student")
+    assert_contains(run({ "rank", "--course", "lua" }), "Lua Ranking")
+    assert_contains(run({ "export", "--out", EXPORT }), "Exported")
 
-write_file(IMPORT, "name,gender,class,birth_year,phone,email,lua,python,math,english\nKai Zhang,M,CS3,2003,5550110,kai@example.test,77,81,86,79\n")
-assert_contains(run({ "import", "--file", IMPORT }), "Imported 1 students")
-assert_contains(run({ "stats" }), "Total students: 10")
+    write_file(IMPORT, "name,gender,class,birth_year,phone,email,lua,python,math,english\nKai Zhang,M,CS3,2003,5550110,kai@example.test,77,81,86,79\n")
+    assert_contains(run({ "import", "--file", IMPORT }), "Imported 1 students")
+    assert_contains(run({ "stats" }), "Total students: 10")
 
-os.remove(DATA)
-os.remove(EXPORT)
-os.remove(IMPORT)
+    os.remove(DATA)
+    os.remove(EXPORT)
+    os.remove(IMPORT)
+end)
+harness.remove_tree(scratch)
+assert(checked, failure)
 
 print("student_management_system smoke test passed")

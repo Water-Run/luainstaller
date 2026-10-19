@@ -27,6 +27,7 @@ jobs:
       - name: Build pinned LuaJIT and exercise artifacts
         env:
           LUAI_JIT_CONFIGURATION: ${{ matrix.configuration }}
+          LUAI_EXPECT_HOST_ARCH: x86_64
         run: sh tools/test-luajit.sh
       - name: Upload complete evidence
         if: always()
@@ -48,6 +49,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build pinned LuaJIT and exercise artifacts
+        env:
+          LUAI_EXPECT_HOST_ARCH: x86_64
         shell: powershell
         run: |
           $evidence = Join-Path $env:TEMP 'luainstaller-luajit-evidence'
