@@ -540,8 +540,8 @@ test("Windows process primitives document cmd.exe quoting hazards", function()
     assert(process_source:find("Win32 process backend", 1, true),
         "process layer does not document the native Win32 data path")
     local native_source = readFile("src/host/windows_host.c")
-    assert(native_source:find("kill_descendants(child.dwProcessId", 1, true),
-        "Windows timeout fallback does not terminate child trees on legacy hosts")
+    assert(native_source:find("kill_descendants(child.hProcess, child.dwProcessId", 1, true),
+        "Windows timeout fallback does not retain the child identity on legacy hosts")
     for _, capture_contract in ipairs({
         "CreateProcessW", "PeekNamedPipe", "hStdOutput", "hStdError",
     }) do
