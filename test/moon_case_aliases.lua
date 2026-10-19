@@ -1,5 +1,5 @@
 --[[
-Case aliases identify one Windows source without hiding distinct files.
+Case aliases identify one source without hiding distinct files.
 
 Author:
     WaterRun
@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-13
 Updated:
-    2026-10-14
+    2026-10-19
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -29,7 +29,7 @@ assert(fs.writeFile(included, 'return "included-case-alias"\n'))
 local read, kind, digest, same_file = fs.readRegularFile, fs.pathType, hash.sha256File, fs.sameFile
 local windows = package.config:sub(1, 1) == "\\"
 local called, failure = pcall(function()
-    if windows then
+    if windows or fs.pathType(alias) == "file" then
         local analyzed = api.analyze({entry=alias, include={include_alias}, discovery_mode="manual"})
         assert(analyzed.ok and #analyzed.dependencies.scripts == 1,
             analyzed.error and (analyzed.error.type .. ": " .. analyzed.error.message))
@@ -88,4 +88,4 @@ end)
 fs.readRegularFile, fs.pathType, hash.sha256File, fs.sameFile = read, kind, digest, same_file
 assert(fs.removeTree(root))
 assert(called, failure)
-print("MoonScript case aliases ok: native Windows or explicit backend model")
+print("MoonScript case aliases ok: native case-insensitive filesystem or explicit backend model")

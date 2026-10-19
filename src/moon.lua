@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-13
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local fs = require("luainstaller.fs")
@@ -103,7 +103,7 @@ function M.prepare(opts)
         prepared_paths={}, folded_mapping={}}
     function context.preparedPath(filename)
         filename = path.absolute(filename)
-        return context.prepared_paths[WINDOWS and filename:lower() or filename] or filename
+        return context.prepared_paths[context.case_insensitive and filename:lower() or filename] or filename
     end
     function context.cleanup()
         return fs.removeTree(workspace)
@@ -125,6 +125,18 @@ function M.prepare(opts)
     local called, value = xpcall(function()
         assert(fs.makeDirectory(lua_root))
         assert(fs.makeDirectory(compiler_root))
+        context.case_insensitive = WINDOWS
+        if not context.case_insensitive then
+            local probe = path.join(lua_root, "case-probe")
+            local wrote, write_error = fs.writeFile(probe, "")
+            if not wrote then return failure("FilesystemError", "Cannot inspect workspace case handling",
+                {path=probe, cause=write_error}) end
+            context.case_insensitive = fs.pathType(path.join(lua_root, "CASE-PROBE")) == "file"
+            local removed, remove_error = fs.removeFile(probe)
+            if not removed then return failure("FilesystemError", "Cannot remove workspace case probe",
+                {path=probe, cause=remove_error}) end
+        end
+
         assert(fs.makeDirectory(path.join(workspace, "inputs")))
         local items, tree_error = fs.listTree(source_root)
         if not items then return failure("FilesystemError", "Cannot scan MoonScript project", {cause=tree_error}) end
@@ -133,14 +145,14 @@ function M.prepare(opts)
         local explicit_inputs, deferred = {}, {}
         for _, filename in ipairs(opts.include) do
             local original = path.absolute(filename)
-            explicit_inputs[WINDOWS and original:lower() or original] = true
+            explicit_inputs[context.case_insensitive and original:lower() or original] = true
         end
         local runtime = opts.depscan ~= false and opts.discovery_mode == "runtime"
         local manual = opts.depscan == false or opts.discovery_mode == "manual"
         local function add(original, relative, external)
             original = path.absolute(original)
             if seen_original[original] then return end
-            if WINDOWS and folded_originals[original:lower()] then
+            if context.case_insensitive and folded_originals[original:lower()] then
                 local previous = folded_originals[original:lower()]
                 local same, identity_error = fs.sameFile(previous, original)
                 if same == nil then
@@ -151,17 +163,17 @@ function M.prepare(opts)
             end
             local destination_name = isMoon(original) and relative:gsub("%.[mM][oO][oO][nN]$", ".lua") or relative
             local destination = path.join(external and path.join(workspace, "external") or lua_root, destination_name)
-            local key = WINDOWS and destination:lower() or destination
+            local key = context.case_insensitive and destination:lower() or destination
             local is_deferred = isMoon(original) and original ~= original_entry and not runtime
                 and excluded(original, opts.exclude)
-                and not explicit_inputs[WINDOWS and original:lower() or original]
+                and not explicit_inputs[context.case_insensitive and original:lower() or original]
             if not is_deferred and destinations[key] then
                 error(failure("MoonScriptCollisionError", "MoonScript and Lua inputs would overwrite the same compiled file",
                     {source_path=original, conflicting_path=destinations[key]}), 0)
             end
             if not is_deferred then destinations[key] = original end
             seen_original[original] = true
-            if WINDOWS then folded_originals[original:lower()] = folded_originals[original:lower()] or original end
+            if context.case_insensitive then folded_originals[original:lower()] = folded_originals[original:lower()] or original end
             local candidate = {original=original, prepared=destination, relative=relative,
                 deferred=is_deferred}
             candidates[#candidates + 1] = candidate
@@ -179,7 +191,7 @@ function M.prepare(opts)
                 or item.path:find("/.luai/", 1, true) or item.path:match("^%.luai/")
                 or path.isWithin(original, workspace)
                 or (opts.out and path.isWithin(original, path.absolute(opts.out)))
-                or (manual and not explicit_inputs[WINDOWS and original:lower() or original])
+                or (manual and not explicit_inputs[context.case_insensitive and original:lower() or original])
             if not skipped and original ~= original_entry and item.type == "file"
                 and (lower:match("%.lua$") or lower:match("%.moon$") or lower:match("%.so[%.%d]*$")
                     or lower:match("%.dll$") or lower:match("%.dylib$")) then
@@ -242,11 +254,15 @@ function M.prepare(opts)
                 return result.resourceLimit("preprocessed-bytes", opts.max_bundle_bytes, original_entry, total)
             end
             assert(fs.makeDirectory(path.dirname(candidate.prepared)))
+            if fs.pathType(candidate.prepared) ~= "missing" then
+                return failure("MoonScriptCollisionError", "Compiled inputs resolve to the same file",
+                    {source_path=candidate.original, conflicting_path=candidate.prepared})
+            end
             assert(fs.writeFile(candidate.prepared, content))
             context.records[#context.records + 1] = candidate
             context.mapping[candidate.prepared] = candidate.original
-            context.prepared_paths[WINDOWS and candidate.prepared:lower() or candidate.prepared] = candidate.prepared
-            if WINDOWS then context.folded_mapping[candidate.prepared:lower()] = candidate.original end
+            context.prepared_paths[context.case_insensitive and candidate.prepared:lower() or candidate.prepared] = candidate.prepared
+            if context.case_insensitive then context.folded_mapping[candidate.prepared:lower()] = candidate.original end
             context.originals[candidate.original] = candidate.original_hash
             return {ok=true}
         end
@@ -279,7 +295,7 @@ function M.prepare(opts)
                     for _, request in ipairs(requires) do
                         for _, candidate in ipairs(resolver:buildCandidates(request.name, filename)) do
                             local resolved = path.absolute(candidate.path)
-                            local key = WINDOWS and resolved:lower() or resolved
+                            local key = context.case_insensitive and resolved:lower() or resolved
                             if deferred[key] and fs.pathType(resolved) ~= "file" then
                                 if deferred[key].conflicting_path then
                                     return failure("MoonScriptCollisionError", "Excluded MoonScript inputs have the same compiled file",
@@ -311,7 +327,7 @@ function M.prepare(opts)
             original = original_aliases[original] or original
             local mapped
             for prepared, source in pairs(context.mapping) do if source == original then mapped = prepared end end
-            if WINDOWS and mapped and requested ~= original then
+            if context.case_insensitive and mapped and requested ~= original then
                 local relative = path.relativeWithin(requested, source_root)
                 local alias = relative and path.join(lua_root, relative)
                     or path.join(path.dirname(mapped), path.basename(requested))
@@ -346,15 +362,15 @@ end
 function M.remap(value, context, seen)
     if type(value) == "string" then
         if context.mapping[value] then return context.mapping[value] end
-        local searched = WINDOWS and value:lower() or value
-        if WINDOWS and context.folded_mapping and context.folded_mapping[searched] then
+        local searched = context.case_insensitive and value:lower() or value
+        if context.case_insensitive and context.folded_mapping and context.folded_mapping[searched] then
             return context.folded_mapping[searched]
         end
         for prepared, original in pairs(context.mapping) do
-            local start = searched:find(WINDOWS and prepared:lower() or prepared, 1, true)
+            local start = searched:find(context.case_insensitive and prepared:lower() or prepared, 1, true)
             if start then
                 value = value:sub(1, start - 1) .. original .. value:sub(start + #prepared)
-                searched = WINDOWS and value:lower() or value
+                searched = context.case_insensitive and value:lower() or value
             end
         end
         return value

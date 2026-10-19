@@ -69,7 +69,7 @@ expect_contains("docs/USAGE.adoc", "Use manual discovery with `--include`, or us
 expect_contains("docs/zh-CN/USAGE.adoc", "用手动模式配合 `--include` 列出模块， 或者改用运行时模式。")
 expect_contains("docs/USAGE.adoc", "limit the combined Lua and native dependency files")
 expect_contains("docs/zh-CN/USAGE.adoc", "限制 Lua 和原生依赖文件的合计数量")
-for _, suite in ipairs({"dependency_limits", "source_normalization", "logger_order", "lock_identity", "cli_lifecycle", "progress_lifecycle"}) do
+for _, suite in ipairs({"dependency_limits", "source_normalization", "logger_order", "lock_identity", "cli_lifecycle", "progress_lifecycle", "publish_noreplace"}) do
     expect_contains("docs/TESTING.adoc", "test/" .. suite .. ".lua")
     expect_contains("docs/zh-CN/TESTING.adoc", "test/" .. suite .. ".lua")
     expect_contains(".github/workflows/ci.yml", "test/" .. suite .. ".lua")

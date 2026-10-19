@@ -22,6 +22,12 @@ truth for the exact contents of a published version.
   on kernels built without PID namespaces.
 * Keep shared-Lua bundles runnable after relocation into FreeBSD paths
   containing colons or semicolons.
+* Publish onefile artifacts atomically on Android app storage that refuses hard
+  links, while preserving files created by another process.
+* Allow extracted onefile programs to start inside the Android app sandbox.
+* Keep generated launchers compatible with FreeBSD feature declarations.
+* Keep MoonScript source aliases and relinking material consistent on
+  case-insensitive filesystems.
 
 == 1.8.1 - 2026-10-19
 

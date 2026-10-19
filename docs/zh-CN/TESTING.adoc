@@ -32,6 +32,7 @@ LUA=${LUA:-lua}
 "$LUA" test/cli_boundaries.lua
 "$LUA" test/cli_lifecycle.lua
 "$LUA" test/progress_lifecycle.lua
+"$LUA" test/publish_noreplace.lua
 "$LUA" test/doc_payload.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
@@ -92,6 +93,9 @@ JSON 精度与日志恢复告警
 
 |`test/progress_lifecycle.lua`
 |原生刷新、父进程死亡和 EOF；真实 Windows 控制台、Unicode 和模式恢复
+
+|`test/publish_noreplace.lua`
+|原子发布、源文件校验和并发出现的输出保护
 
 |`test/doc_payload.lua`
 |文档与许可证安装副本的字节一致性

@@ -4,6 +4,7 @@ cli_surface
 cli_boundaries
 cli_lifecycle
 progress_lifecycle
+publish_noreplace
 doc_payload
 luajit_syntax
 toolchain_native

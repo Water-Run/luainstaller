@@ -398,7 +398,7 @@ function Run-Version([hashtable]$Spec, [hashtable]$Msvc, [string]$LuaRocks) {
         }
     }
     foreach ($test in @('lua_abi.lua','version_contract.lua','cli_split_smoke.lua','cli_surface.lua',
-        'cli_boundaries.lua','cli_lifecycle.lua','progress_lifecycle.lua','doc_payload.lua','release_docs_contract.lua',
+        'cli_boundaries.lua','cli_lifecycle.lua','progress_lifecycle.lua','publish_noreplace.lua','doc_payload.lua','release_docs_contract.lua',
         'windows_native.lua','toolchain_native.lua','headerless_build.lua','native_dependencies.lua',
         'luarocks_install.lua','standalone_install.lua','native_bundle.lua','onefile_compile_native.lua','native_onefile.lua',
         'onefile_lifecycle.lua','output_transaction.lua','lock_identity.lua',

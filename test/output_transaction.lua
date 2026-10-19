@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-12
 Updated:
-    2026-10-12
+    2026-10-19
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -162,8 +162,10 @@ local called, failure = xpcall(function()
     assert(fs.writeFile(entry, "print('old-generation')\n"))
     local initial = api.bundle({entry=entry, out=out})
     assert(initial.ok, initial.error and initial.error.message)
-    local survived = runDriver({driver, "after-backup", entry, out})
-    assert(not survived)
+    local survived, fault_output, fault_status = runDriver({driver, "after-backup", entry, out})
+    assert(not survived and fault_output:find("fault-injected:after-backup", 1, true),
+        "fault driver status=" .. tostring(fault_status and fault_status.code)
+            .. ": " .. tostring(fault_output))
     local failed = api.bundle({entry=entry .. ".missing", out=out})
     assert(not failed.ok and failed.error.type == "ScriptNotFoundError")
     local ran, output = process.outputCommand(initial.executable, {}, {LUA_PATH="", LUA_CPATH=""})

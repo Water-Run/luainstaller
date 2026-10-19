@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-13
+    2026-10-19
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -3958,6 +3958,7 @@ test("target launcher enforces the selected Lua ABI", function()
     writeFile(c_path, generated)
     runCommand(table.concat({
         "cc -std=c99 -Wall -Wextra -Werror -pedantic -fsyntax-only",
+        "-D_POSIX_C_SOURCE=200809",
         "-I" .. shellQuote(selected_include),
         shellQuote(c_path),
     }, " "))
@@ -5230,11 +5231,8 @@ test("remote scripts are pinned and non-destructive", function()
             and portable_runner:find("FreeBSD", 1, true),
         "portable-host runner omits Termux or FreeBSD classification")
     local onefile_source = readFile("src/onefile.lua")
-    assert(onefile_source:find(
-        'profile.target_os == "windows" and fs.rename or fs.hardLink',
-        1,
-        true
-    ), "Windows onefile publication does not use the XP-compatible move adapter")
+    assert(onefile_source:find('fs.publishFile', 1, true),
+        "onefile publication does not use the no-replace filesystem adapter")
     assert(not onefile_source:find("fs.move", 1, true),
         "Windows onefile publication calls a nonexistent filesystem adapter")
     assert(ci_sample_deps:find("--deps-mode=none", 1, true),

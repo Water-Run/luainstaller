@@ -5,6 +5,9 @@
  * Updated: 2026-10-19
  * Keep src/posix_host_source.lua synchronized with this file.
  */
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#endif
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 700
 #include <sys/types.h>
@@ -23,6 +26,12 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#ifdef SYS_renameat2
+extern long syscall(long number, ...);
+#endif
+#endif
 
 static volatile sig_atomic_t interrupted;
 
@@ -386,8 +395,26 @@ static int progress(int argc, char **argv)
     return result;
 }
 
+static int publish_file(const char *source, const char *destination)
+{
+    struct stat info;
+    if (lstat(source, &info) || !S_ISREG(info.st_mode)) {
+        fputs("publication source is not a regular file\n", stderr); return 1;
+    }
+#if defined(__linux__) && defined(SYS_renameat2)
+    /* Android app storage can refuse hard links. RENAME_NOREPLACE supplies the
+     * same atomic guarantee and doesn't overwrite an output created in a race. */
+    if (syscall(SYS_renameat2, AT_FDCWD, source, AT_FDCWD, destination, 1u) == 0) return 0;
+    if (errno == EEXIST) { fputs("destination already exists\n", stderr); return 1; }
+#endif
+    if (link(source, destination) == 0) return 0;
+    fprintf(stderr, "atomic file publication failed: %s\n", strerror(errno));
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc == 4 && !strcmp(argv[1], "publish_file")) return publish_file(argv[2], argv[3]);
     if (argc > 1 && !strcmp(argv[1], "progress")) return progress(argc, argv);
     if (argc > 1 && !strcmp(argv[1], "exec")) return supervise(argc, argv);
     if (argc == 3 && !strcmp(argv[1], "output_parents")) return output_parents(argv[2]);

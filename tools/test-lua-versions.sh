@@ -659,6 +659,7 @@ run_version() {
     "$lua" test/cli_boundaries.lua
     "$lua" test/cli_lifecycle.lua
     "$lua" test/progress_lifecycle.lua
+    "$lua" test/publish_noreplace.lua
     "$lua" test/doc_payload.lua
     "$lua" test/contract_docs.lua
     "$luarocks" lint luainstaller-1.8.2-1.rockspec

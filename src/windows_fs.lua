@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-13
+    2026-10-19
 ]]
 
 local host = require("luainstaller.windows_host")
@@ -158,6 +158,12 @@ end
 function M.hardLink(source, destination)
     if not valid(source) or not valid(destination) then return nil, "source or destination path is invalid" end
     return operation("link", source, destination)
+end
+
+function M.publishFile(source, destination)
+    if not valid(source) or not valid(destination) then return nil, "source or destination path is invalid" end
+    if M.pathType(source) ~= "file" then return nil, "source is not a safe regular file" end
+    return M.rename(source, destination)
 end
 
 function M.isExecutable(value)

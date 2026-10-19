@@ -34,6 +34,7 @@ LUA=${LUA:-lua}
 "$LUA" test/cli_boundaries.lua
 "$LUA" test/cli_lifecycle.lua
 "$LUA" test/progress_lifecycle.lua
+"$LUA" test/publish_noreplace.lua
 "$LUA" test/doc_payload.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
@@ -95,6 +96,9 @@ complete paths, terminal controls, JSON precision and recovered-log warnings
 
 |`test/progress_lifecycle.lua`
 |Native refresh, owner death and EOF; real Windows consoles, Unicode and mode restoration
+
+|`test/publish_noreplace.lua`
+|Atomic file publication, source validation and concurrent output preservation
 
 |`test/doc_payload.lua`
 |Canonical documentation and license installation layout

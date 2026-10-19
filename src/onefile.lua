@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-15
+    2026-10-19
 ]]
 
 local bundler = require("luainstaller.bundler")
@@ -731,8 +731,14 @@ static int luai_directory_entry_is_stable(int fd) {
 static int luai_open_absolute_dir(const char *path) {
     const char *cursor;
     int current_fd;
+    int parent_access = O_RDONLY;
+#if defined(__ANDROID__)
+    /* App sandboxes may search platform ancestors without reading them.
+       O_PATH still pins each directory for fstat and no-follow openat. */
+    parent_access = O_PATH;
+#endif
     if (!path || path[0] != '/') return -1;
-    current_fd = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    current_fd = open("/", parent_access | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if (current_fd < 0 || !luai_directory_entry_is_stable(current_fd)) {
         if (current_fd >= 0) close(current_fd);
         return -1;
@@ -760,7 +766,7 @@ static int luai_open_absolute_dir(const char *path) {
             return -1;
         }
         next_fd = openat(current_fd, component,
-                         O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                         parent_access | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         if (next_fd < 0 || fstat(next_fd, &st) != 0 || !S_ISDIR(st.st_mode)
             || !luai_directory_entry_is_stable(next_fd)) {
             if (next_fd >= 0) close(next_fd);
@@ -1800,17 +1806,14 @@ local function bundleOnefile(opts, lifecycle)
         end
     end
     if not err then
-        -- MoveFile provides same-volume, no-replace publication on Windows.
-        -- POSIX link(2) retains the same
-        -- no-replace publication guarantee without rename-overwrite races.
+        -- Don't replace an output created by another process during the build.
         if opts.before_publish then
             local verified = opts.before_publish()
             if not verified.ok then err = verified end
         end
     end
     if not err then
-        local publish = profile.target_os == "windows" and fs.rename or fs.hardLink
-        local committed, publish_output = publish(staged_exe, out_path)
+        local committed, publish_output = fs.publishFile(staged_exe, out_path)
         if not committed then
             if pathExists(out_path) or isSymlink(out_path) then
                 err = makeError("InvalidOutputError", "Onefile output appeared while the bundle was being built", {

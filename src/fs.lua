@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-12
+    2026-10-19
 ]]
 
 if package.config:sub(1, 1) == "\\" then
@@ -295,6 +295,29 @@ function M.hardLink(source, destination)
     local ok, output = process.outputCommand("ln", { source, destination })
     if not ok then return nil, output end
     return true
+end
+
+-- Staging is private to the caller; successful publication may move its file.
+function M.publishFile(source, destination)
+    if not validPath(source) or not validPath(destination) then
+        return nil, "source or destination path is invalid"
+    end
+    if M.pathType(source) ~= "file" then return nil, "source is not a safe regular file" end
+    if M.pathType(destination) ~= "missing" then return nil, "destination already exists" end
+    local ok, output = process.nativeOperation("publish_file", {source, destination})
+    if not ok then return nil, output end
+    return true
+end
+
+function M.sameFile(first, second)
+    if M.pathType(first) ~= "file" or M.pathType(second) ~= "file" then
+        return nil, "file identity requires two regular files"
+    end
+    local ok, output, status = process.output("test " .. process.quote(first)
+        .. " -ef " .. process.quote(second))
+    if ok then return true end
+    if status and status.code == 1 then return false end
+    return nil, output ~= "" and output or "cannot compare file identity"
 end
 
 function M.isExecutable(path)

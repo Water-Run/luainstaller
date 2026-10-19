@@ -91,6 +91,7 @@ jobs:
           lua test/cli_boundaries.lua
           lua test/cli_lifecycle.lua
           lua test/progress_lifecycle.lua
+          lua test/publish_noreplace.lua
           lua test/doc_payload.lua
           lua test/contract_docs.lua
           lua test/standalone_install.lua
@@ -172,7 +173,7 @@ jobs:
           VERSION_FILTER='${{ matrix.lua }}' \
             LUAI_MATRIX_EDGE_COVERAGE_MODE=available HOST_LABEL=ci \
             sh tools/test-lua-versions.sh
-        timeout-minutes: 180
+        timeout-minutes: 240
 
       - name: Upload POSIX evidence
         if: always()
@@ -251,7 +252,7 @@ jobs:
 
       - name: Run the pinned Lua version with MSVC
         shell: powershell
-        timeout-minutes: 180
+        timeout-minutes: 240
         env:
           LUA_VERSION: ${{ matrix.lua }}
         run: |
