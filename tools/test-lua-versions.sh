@@ -589,6 +589,7 @@ run_version() {
     "$lua" test/lua_abi.lua
     "$lua" test/version_contract.lua
     "$lua" test/cli_split_smoke.lua
+    "$lua" test/cli_surface.lua
     "$lua" test/contract_docs.lua
     "$luarocks" lint luainstaller-1.8.0-1.rockspec
     "$lua" test/luarocks_install.lua

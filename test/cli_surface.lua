@@ -391,8 +391,13 @@ assert(backup_err:find("using recovered log copy", 1, true), backup_err)
 assert(present.displayWidth("中文") == 4)
 assert(present.displayWidth("ab") == 2)
 assert(present.displayWidth("\1") == 4)
+assert(present.displayWidth(string.char(0xF0, 0x9F, 0x99, 0x82)) == 2)
+assert(present.displayWidth("a" .. string.char(0xCC, 0x81)) == 1)
+assert(present.displayWidth(string.char(0xE4, 0x41)) == 2)
 assert(present.visible("\1") == "\\x01")
 assert(present.fit("中文中文中文", 5) == "中文…")
+assert(present.streamIsTTY(1, true) == false)
+assert(present.streamIsTTY(2, true) == false)
 assert(present.colorLevel(function(name)
     return name == "COLORTERM" and "truecolor" or ""
 end, true) == "truecolor")
@@ -412,9 +417,13 @@ assert(present.wantColor({ color = "auto", progress = "auto", format = "text" },
 local sink_dir = assert(require("luainstaller.fs").makePrivateDirectory("redraw-frames"))
 local sink = sink_dir .. "/frames"
 local stop = present.startRedraw("编译", sink)
-os.execute("sleep 0.45")
+local frames = ""
+local deadline = os.time() + 3
+repeat
+    os.execute("sleep 0.2")
+    frames = require("luainstaller.fs").readRegularFile(sink) or ""
+until frames:find("编译", 1, true) or os.time() >= deadline
 stop()
-local frames = require("luainstaller.fs").readRegularFile(sink) or ""
 assert(frames:find("编译", 1, true), frames)
 assert(frames:find("[", 1, true), frames)
 

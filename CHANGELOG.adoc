@@ -7,6 +7,9 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+* Wide-character layout uses the same display widths on Lua 5.1, Lua 5.2,
+  and LuaJIT as on later Lua versions.
+
 == 1.8.0 - 2026-10-19
 
 === Major changes

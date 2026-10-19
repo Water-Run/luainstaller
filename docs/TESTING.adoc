@@ -30,6 +30,7 @@ LUA=${LUA:-lua}
 "$LUA" test/lua_abi.lua
 "$LUA" test/version_contract.lua
 "$LUA" test/cli_split_smoke.lua
+"$LUA" test/cli_surface.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
 "$LUA" test/headerless_build.lua
@@ -77,6 +78,9 @@ source parsing
 
 |`test/cli_split_smoke.lua`
 |`luai` versus `luainstaller` grammar split
+
+|`test/cli_surface.lua`
+|JSON results, color and progress policy, log reads, and display width
 
 |`test/contract_docs.lua`
 |Public documentation contracts

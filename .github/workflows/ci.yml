@@ -87,6 +87,7 @@ jobs:
           lua test/lua_abi.lua
           lua test/version_contract.lua
           lua test/cli_split_smoke.lua
+          lua test/cli_surface.lua
           lua test/contract_docs.lua
           lua test/standalone_install.lua
           lua test/headerless_build.lua

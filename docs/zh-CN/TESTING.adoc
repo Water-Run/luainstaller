@@ -28,6 +28,7 @@ LUA=${LUA:-lua}
 "$LUA" test/lua_abi.lua
 "$LUA" test/version_contract.lua
 "$LUA" test/cli_split_smoke.lua
+"$LUA" test/cli_surface.lua
 "$LUA" test/contract_docs.lua
 "$LUA" test/standalone_install.lua
 "$LUA" test/headerless_build.lua
@@ -74,6 +75,9 @@ luarocks lint luainstaller-1.8.0-1.rockspec
 
 |`test/cli_split_smoke.lua`
 |`luai` 与 `luainstaller` 的语法划分
+
+|`test/cli_surface.lua`
+|JSON 结果、色彩与进度策略、日志读取，以及显示宽度
 
 |`test/contract_docs.lua`
 |公开文档契约

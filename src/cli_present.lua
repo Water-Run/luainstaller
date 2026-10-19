@@ -165,14 +165,33 @@ local function codepointWidth(codepoint)
     return 1
 end
 
+-- Lua 5.1, Lua 5.2, and LuaJIT have no utf8 library. Invalid sequences stay one byte.
 local function nextCodepoint(text, index)
-    if utf8 and utf8.codepoint and utf8.offset then
-        local ok, codepoint = pcall(utf8.codepoint, text, index, index)
-        if ok and codepoint then
-            return codepoint, utf8.offset(text, 2, index) or (#text + 1)
-        end
+    local lead = text:byte(index)
+    if not lead or lead < 0x80 then return lead or 0, index + 1 end
+    local length, value, minimum
+    if lead <= 0xDF then
+        if lead < 0xC2 then return lead, index + 1 end
+        length, value, minimum = 2, lead % 32, 0x80
+    elseif lead <= 0xEF then
+        length, value, minimum = 3, lead % 16, 0x800
+    elseif lead <= 0xF4 then
+        length, value, minimum = 4, lead % 8, 0x10000
+    else
+        return lead, index + 1
     end
-    return text:byte(index), index + 1
+    for offset = 1, length - 1 do
+        local byte = text:byte(index + offset)
+        if not byte or byte < 0x80 or byte > 0xBF then
+            return lead, index + 1
+        end
+        value = value * 64 + (byte % 64)
+    end
+    if value < minimum or value > 0x10FFFF
+        or (value >= 0xD800 and value <= 0xDFFF) then
+        return lead, index + 1
+    end
+    return value, index + length
 end
 
 function M.displayWidth(text)
@@ -269,7 +288,13 @@ function M.startRedraw(label, sink_path)
     end
 end
 
-function M.streamIsTTY(fd)
+function M.streamIsTTY(fd, windows)
+    if windows == nil then windows = package.config:sub(1, 1) == "\\" end
+    -- cmd.exe has no `[`, and a failed probe would print onto the console.
+    if windows then return false end
+    if type(fd) ~= "number" or fd < 0 or fd > 9 or fd ~= math.floor(fd) then
+        return false
+    end
     local called, first = pcall(os.execute, "[ -t " .. tostring(fd) .. " ]")
     return called and M.commandSucceeded(first)
 end

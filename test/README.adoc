@@ -10,6 +10,10 @@ HTTP startup, clean environments, and onefile extraction.
 `cli_split_smoke.lua`::
 Checks the two CLI grammars and their error output.
 
+`cli_surface.lua`::
+Checks JSON output, color and progress policy, log reads, and display width.
+It needs a POSIX shell.
+
 `contract_docs.lua`::
 Turns documented behavior into executable contracts. It covers discovery,
 manual include/exclude precedence, option validation, output ownership,
