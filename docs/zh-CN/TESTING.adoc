@@ -20,6 +20,8 @@ toc::[]
 [#testing-local]
 == 本地测试
 
+POSIX 集成测试还需要 Bash。在 FreeBSD 上使用 `pkg install bash` 安装。
+
 在仓库根目录下，使用受测的官方解释器：
 
 [source,bash]

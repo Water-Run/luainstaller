@@ -8,12 +8,13 @@ File:
 Date:
     2026-07-18
 Updated:
-    2026-10-15
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
 harness.install_loader()
 
+local compat = require("luainstaller.compat")
 local fs = require("luainstaller.fs")
 local hash = require("luainstaller.hash")
 local path = require("luainstaller.path")
@@ -22,6 +23,7 @@ local process = require("luainstaller.process")
 local toolchain = require("luainstaller.toolchain")
 
 local root = assert(fs.makePrivateDirectory("distribution-licenses"))
+local relink_cache
 local suffix = package.config:sub(1, 1) == "\\" and ".exe" or ""
 local canonical = {
     [".luai/licenses/LuaJIT-MIT.txt"] = "LICENSES/LuaJIT-MIT.txt",
@@ -35,6 +37,7 @@ local canonical = {
 }
 
 local function cleanup()
+    if relink_cache and fs.pathType(relink_cache) == "directory" then fs.removeTree(relink_cache) end
     if fs.pathType(root) == "directory" then fs.removeTree(root) end
 end
 
@@ -89,7 +92,8 @@ local function assertDistribution(bundle_root, expect_extractor)
 end
 
 local function assertManifest(bundle_root)
-    local manifest = assert(loadfile(path.join(bundle_root, ".luai/manifest.lua")))()
+    local manifest = assert(compat.loadText(read(bundle_root, ".luai/manifest.lua"),
+        "@" .. path.join(bundle_root, ".luai/manifest.lua")))()
     assert(#manifest.distribution_files == 7,
         "manifest distribution material count changed")
     local seen = {}
@@ -138,6 +142,15 @@ dofile(%q)
         local generated, output = process.outputCommand(harness.lua_command(), { probe })
         assert(generated and output == vector[2] .. "\n", output)
     end
+    local relative_ok, relative_output = process.outputCommand(harness.lua_command(), {
+        generator, ".", "payload-relative.inc",
+    }, {}, {working_directory=fixture})
+    assert(relative_ok and relative_output
+        == "973d136b3310181a31c9325d5a1271e63c853263d09ac640ed7d4a1f4c1c7d04\n",
+        "working-directory payload regeneration failed: " .. tostring(relative_output))
+    assert(fs.readFile(path.join(fixture, "payload-relative.inc"))
+        == fs.readFile(path.join(fixture, "payload.inc")),
+        "relative payload regeneration changed the output")
     local manifest_path = path.join(fixture, ".luai/build/payload-files.lua")
     local marker_path = path.join(fixture, "untrusted-manifest-ran")
     local executable_manifest = string.format(
@@ -232,16 +245,13 @@ dofile(%q)
             == read(onedir, ".luai/build/launcher.c"),
         "onefile and onedir launcher sources differ")
 
-    local build_dir = path.join(extracted_root, ".luai/build")
-    local regenerated_include = path.join(build_dir, "payload.inc")
-    local generated, generator_output = process.outputCommand(
-        harness.lua_command(),
-        {
-            path.join(build_dir, "generate-onefile-payload.lua"),
-            extracted_root,
-            regenerated_include,
-        }
-    )
+    local relinking_root = path.join(root, "relinking-input")
+    local moved, move_error = fs.rename(extracted_root, relinking_root)
+    assert(moved, move_error)
+    local build_dir = path.join(relinking_root, ".luai/build")
+    local generated, generator_output = process.outputCommand(harness.lua_command(), {
+        ".luai/build/generate-onefile-payload.lua", ".", ".luai/build/payload.inc",
+    }, {}, {working_directory=relinking_root})
     assert(generated, generator_output)
     local regenerated_id = generator_output:match("([0-9a-f]+)")
     assert(regenerated_id and #regenerated_id == 64,
@@ -258,8 +268,7 @@ dofile(%q)
     )
     assert(compiled, tostring(compile_command) .. "\n" .. tostring(compile_output))
     if profile.target_os ~= "windows" then assert(fs.setExecutable(relinked)) end
-    local relink_cache = path.join(root, "relinked-cache")
-    assert(fs.makeDirectory(relink_cache))
+    relink_cache = assert(fs.makePrivateDirectory("license-relink"))
     local relink_ran, relink_output = process.outputCommand(relinked, {}, {
         PATH = clean_path,
         TMPDIR = relink_cache,
@@ -273,6 +282,8 @@ dofile(%q)
     assert(relink_ran, relink_output)
     assertContains(relink_output, "distribution license fixture", "relinked onefile")
 
+    local restored, restore_error = fs.rename(relinking_root, extracted_root)
+    assert(restored, restore_error)
     local lua_license = path.join(extracted_root, ".luai/licenses/Lua-MIT.txt")
     local expected_lua_license = assert(fs.readRegularFile("LICENSES/Lua-MIT.txt"))
     assert(fs.writeFile(lua_license, string.rep("X", #expected_lua_license)))

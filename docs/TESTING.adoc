@@ -22,6 +22,8 @@ toc::[]
 [#testing-local]
 == Local
 
+POSIX integration tests also need Bash. On FreeBSD, install it with `pkg install bash`.
+
 From the repository root, with the official interpreter under test:
 
 [source,bash]

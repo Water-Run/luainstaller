@@ -252,6 +252,11 @@ To clear the unpacked copies (after closing all running copies):
 rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 ----
 
+On Windows, `unable to get ModuleFileName` usually means the selected Lua
+runtime's path limit was exceeded. Choose a shorter private directory for
+`TEMP` and `TMP`, then run the bundle again. Use a short working directory
+when running external relinking tools.
+
 [#troubleshooting-errors]
 == Error types
 

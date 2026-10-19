@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-10-19
+    2026-10-20
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -126,6 +126,7 @@ local function check_resource_contracts()
         assert_contains(troubleshooting, "[#troubleshooting-limits]")
         assert_contains(troubleshooting, "--only-server=https://luarocks.org")
         assert_contains(troubleshooting, "check_certificates true")
+        assert_contains(troubleshooting, "unable to get ModuleFileName")
     end
     local root = make_temp_dir("documented-resource-limit")
     local entry = root .. "/main.lua"
@@ -700,6 +701,8 @@ local function check_documentation_contract()
     assert_contains(platform_limits, "weren't checked")
     assert_contains(platform_limits, "These warnings don't stop the build")
 
+    assert_contains(read_file("docs/TESTING.adoc"), "pkg install bash")
+    assert_contains(read_file("docs/zh-CN/TESTING.adoc"), "pkg install bash")
     local troubleshooting = read_file("docs/TROUBLESHOOTING.adoc")
     assert_contains(troubleshooting, "LuaSyntaxError")
     assert_contains(troubleshooting, "SourceChangedError")

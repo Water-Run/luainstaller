@@ -4571,7 +4571,8 @@ assert(require("luainstaller.fs").temporaryRoot() == %q,
         local clang_cache = root .. "/clang-cache"
         makeDirectory(clang_cache)
         local sanitizer_host = commandOutputTrimmed("uname -s")
-        local leak_detection = (sanitizer_host == "Darwin" or sanitizer_host == "FreeBSD")
+        local leak_detection = (sanitizer_host == "Darwin" or sanitizer_host == "FreeBSD"
+            or os.getenv("TERMUX_VERSION"))
             and "0" or "1"
         if leak_detection == "0" then
             print("LeakSanitizer unavailable on this host; address/undefined sanitizers remain enabled")

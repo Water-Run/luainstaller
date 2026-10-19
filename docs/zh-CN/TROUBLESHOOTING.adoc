@@ -232,6 +232,10 @@ Windows 的 DLL 导入 `.lib` 不是静态 Lua 库。请在 Lua 前缀下安装�
 rm -rf "${TMPDIR:-/tmp}/luainstaller-onefile-$(id -u)"
 ----
 
+在 Windows 上，`unable to get ModuleFileName` 通常表示所选 Lua 运行时的路径
+长度超限。把 `TEMP` 和 `TMP` 设为较短的私有目录，再次运行产物。
+使用外部工具重链接时，也请选择较短的工作目录。
+
 [#troubleshooting-errors]
 == 错误类型
 

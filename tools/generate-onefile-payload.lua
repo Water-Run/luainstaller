@@ -13,7 +13,7 @@ File:
 Date:
     2026-10-06
 Updated:
-    2026-10-12
+    2026-10-20
 ]]
 
 local root = assert(arg and arg[1], "extracted bundle root is required")
@@ -32,7 +32,8 @@ local function normalize(value)
             parts[#parts + 1] = part
         end
     end
-    return prefix .. table.concat(parts, "/")
+    local normalized = prefix .. table.concat(parts, "/")
+    return normalized ~= "" and normalized or "."
 end
 
 local function safeRelative(value)

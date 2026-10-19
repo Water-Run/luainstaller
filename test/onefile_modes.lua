@@ -8,7 +8,7 @@ File:
 Date:
     2026-10-12
 Updated:
-    2026-10-15
+    2026-10-20
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -69,10 +69,13 @@ local called, failure = pcall(function()
             assert(not unsafe_export, "material export followed a linked destination")
             assert(#assert(fs.listTree(target)) == 0, "refused export wrote through a linked destination")
             assert(fs.removeFile(link))
+            local relink_materials = path.join(root, "relinking-input")
+            local relocated, relocation_error = fs.rename(exported, relink_materials)
+            assert(relocated, relocation_error)
+            exported = relink_materials
             local regenerated, regeneration_output = process.outputCommand(harness.lua_command(), {
-                path.join(exported, ".luai/build/generate-onefile-payload.lua"), exported,
-                path.join(exported, ".luai/build/payload.inc"),
-            }, {}, {timeout_seconds=120})
+                ".luai/build/generate-onefile-payload.lua", ".", ".luai/build/payload.inc",
+            }, {}, {timeout_seconds=120, working_directory=exported})
             assert(regenerated, regeneration_output)
             local static, static_error = toolchain.resolve({require_static=true})
             assert(static, static_error and static_error.error.message)
