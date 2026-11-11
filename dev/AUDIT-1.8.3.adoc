@@ -428,3 +428,26 @@ b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b。
 
 本轮部分早期本地 gate 日志名被复查复用；结构化旧结果、独立失败回归和 CI 原始失败
 日志保留，后续本地复查已改为先生成唯一备份名。最终验收以最新提交的完整记录为准。
+
+
+=== 独占 mkdir 的实际并发竞态
+
+候选 cac84b5 的独立 LuaJIT 五作业和 Linux x86 原生作业均通过，但 Linux 本地和
+Lua 5.3 作业仍在并发日志中失败，不能作为发布提交。捕获监督独立性回归仍有效；
+实际锁释放故障需要单独定位，没有调大超时、减少 60 写入或将旧提交通过结果拼作门禁。
+
+隔离诊断分支 audit/183-logger-v7ikm7h，run 43081304410 / job 130734271330，
+在相同 GitHub Linux 环境启动完整 60 个工作进程，57 个失败；逐调用证据表明多个进程
+同时从 mkdir 得到成功，随后 owner 串位、chmod 找不到文件、rmdir 目录非空。
+这不是 rmdir 资源耗尽。运行器使用 uutils coreutils 0.10.0；上游 issue 13970 和
+0.10.0 源码确认非递归 mkdir 的 EEXIST 竞态会假成功，但 -v 的创建输出只在实际
+创建成功时产生。参考 https://github.com/uutils/coreutils/issues/13970 和
+https://github.com/uutils/coreutils/blob/0.10.0/src/uu/mkdir/src/mkdir.rs 。
+
+新增 exclusive_directory.lua 同时模拟 fs.createDirectory 与冷日志获取锁时，其他创建者
+赢得目录、mkdir 零退出却没有创建输出。两项在修复前均失败。修复后，通用独占目录、
+私有目录和日志锁同时要求成功退出与非空创建输出；日志继续直接使用 shell 内建检查，
+无需编译后端。回归确认未写入对方目录、保留对方文件，锁等待和过期预算不变。
+隔离的 GitHub Linux 并发复查 run 43082315955 / job 130737805370 已成功：
+三轮各 60 个进程，零失败，逐轮校验 60、120、180 条唯一消息全部保留。
+这证明相同 uutils 环境的故障已修复；它不替代最终提交的完整原生矩阵。

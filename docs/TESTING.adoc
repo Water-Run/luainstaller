@@ -120,6 +120,9 @@ empty runtime PATH
 |`test/logger_filesystem.lua` (POSIX, also run by production edges)
 |Log transactions retain existing entries when optional output capture is unavailable
 
+|`test/exclusive_directory.lua` (POSIX, also run by production edges)
+|Directory claims and logging reject a false-success system mkdir without touching another creator's files
+
 |`test/production_edges.lua`
 |Boundary and safety-related behavior, static and shared Lua fallback,
 optional FreeBSD cross-compilation, executable Termux fallback probes,

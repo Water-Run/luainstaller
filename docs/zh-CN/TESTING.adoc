@@ -116,6 +116,9 @@ JSON 精度与日志恢复告警
 |`test/logger_filesystem.lua`（POSIX，生产边界套件也会调用）
 |可选输出捕获不可用时，日志事务仍保留既有记录
 
+|`test/exclusive_directory.lua`（POSIX，生产边界套件也会调用）
+|目录独占创建和日志写入拒绝 mkdir 的假成功，不改动其他创建者的文件
+
 |`test/production_edges.lua`
 |边界情况与安全相关行为、静态与共享 Lua 回退、可选的 FreeBSD 交叉
 编译、可执行文件的 Termux 回退探针，以及面向 XP 目标的 x86 与

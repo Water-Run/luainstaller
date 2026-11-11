@@ -4608,6 +4608,11 @@ test("logger file transactions survive unavailable capture supervision", functio
     runCommand(luaCommand .. " test/logger_filesystem.lua")
 end)
 
+test("exclusive directory claims reject a false-success mkdir", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    runCommand(luaCommand .. " test/exclusive_directory.lua")
+end)
+
 test("logger retains concurrent writers", function()
     if package.config:sub(1, 1) ~= "/" then
         return

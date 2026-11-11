@@ -126,7 +126,10 @@ local function createDirectory(path)
     if IS_WINDOWS then
         return fs.createDirectory(path) == true
     end
-    return execute("mkdir -m 700 " .. process.shellQuote(path) .. " 2>/dev/null")
+    -- Require the creation receipt as well as the exit status: affected uutils
+    -- versions can exit zero when another process wins the mkdir race.
+    return execute("created=$(mkdir -m 700 -v " .. process.shellQuote(path)
+        .. " 2>/dev/null) && test -n \"$created\"")
 end
 
 local function removeDirectory(path)

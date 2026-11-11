@@ -13,7 +13,7 @@ File:
 Date:
     2026-06-27
 Updated:
-    2026-11-11
+    2026-11-12
 ]]
 
 dofile("test/release_docs_contract.lua")
@@ -610,6 +610,7 @@ local function check_documentation_contract()
 
     local testing = read_file("docs/TESTING.adoc")
     assert_contains(testing, "test/production_edges.lua")
+    assert_contains(testing, "test/exclusive_directory.lua")
     assert_contains(testing, "tools/test-lua-versions.ps1")
     assert_contains(testing, "Windows with MSVC and the Windows SDK")
     assert_contains(testing, "`windows-2022`")

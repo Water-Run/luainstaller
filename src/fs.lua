@@ -8,7 +8,7 @@ File:
 Date:
     2026-07-11
 Updated:
-    2026-10-19
+    2026-11-12
 ]]
 
 if package.config:sub(1, 1) == "\\" then
@@ -196,8 +196,11 @@ end
 function M.createDirectory(path)
     if not validPath(path) then return nil, "directory path is invalid" end
     if M.pathType(path) ~= "missing" then return nil, "directory already exists" end
-    local ok, output = process.output("mkdir -m 700 " .. process.quote(path))
+    -- Some mkdir implementations report success after losing an EEXIST race.
+    -- Verbose output is emitted only by the process that actually creates it.
+    local ok, output = process.output("mkdir -m 700 -v " .. process.quote(path))
     if not ok then return nil, output end
+    if not output or output == "" then return nil, "directory was not created" end
     return true
 end
 
@@ -247,7 +250,7 @@ function M.makePrivateDirectory(label, parent)
         }, "-")
         local separator = parent:match("[/\\]$") and "" or package.config:sub(1, 1)
         local candidate = parent .. separator .. "luainstaller-" .. label .. "-" .. suffix
-        local ok = process.output("mkdir -m 700 " .. process.quote(candidate))
+        local ok = M.createDirectory(candidate)
         if ok then return candidate end
     end
     return nil, "cannot create a unique private directory"
