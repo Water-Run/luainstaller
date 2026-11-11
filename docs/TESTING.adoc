@@ -117,6 +117,9 @@ complete paths, terminal controls, JSON precision and recovered-log warnings
 use, repeat-install refusal, onedir and onefile, and execution with an
 empty runtime PATH
 
+|`test/logger_filesystem.lua` (POSIX, also run by production edges)
+|Log transactions retain existing entries when optional output capture is unavailable
+
 |`test/production_edges.lua`
 |Boundary and safety-related behavior, static and shared Lua fallback,
 optional FreeBSD cross-compilation, executable Termux fallback probes,

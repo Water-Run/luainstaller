@@ -135,11 +135,11 @@ function Stage-Source([string]$Name, [string]$Uri, [string]$Expected, [string]$M
             if (-not $downloaded) {
                 $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
                 if ($null -eq $curl) { throw $requestError }
-                & $curl --fail --location --silent --show-error --retry 2 `
+                & $curl --fail --location --silent --show-error --retry 2 --retry-all-errors `
                     --connect-timeout 20 --max-time 120 --output $part $Uri
                 if ($LASTEXITCODE -ne 0 -and -not [string]::IsNullOrEmpty($MirrorUri)) {
                     Write-Host "Source fallback: $Name via $MirrorUri"
-                    & $curl --fail --location --silent --show-error --retry 2 `
+                    & $curl --fail --location --silent --show-error --retry 2 --retry-all-errors `
                         --connect-timeout 20 --max-time 120 --output $part $MirrorUri
                 }
                 if ($LASTEXITCODE -ne 0) { throw "Download failed for $Name (curl exit $LASTEXITCODE)" }
@@ -461,9 +461,14 @@ $SelectedVersions = if ($VersionFilter.Count -eq 0) {
 }
 if (@($SelectedVersions).Count -eq 0) { throw 'VersionFilter selected no pinned Lua version' }
 foreach ($spec in $SelectedVersions) {
-    $mirror = if ($spec.Version -eq '5.2.4') {
-        'https://distfiles.macports.org/lua/lua-5.2.4.tar.gz'
-    } else { '' }
+    $mirror = switch ($spec.Version) {
+        '5.1.5' { 'https://distfiles.macports.org/lua/lua-5.1.5.tar.gz' }
+        '5.2.4' { 'https://distfiles.macports.org/lua/lua-5.2.4.tar.gz' }
+        '5.3.6' { 'https://distfiles.macports.org/lua/lua-5.3.6.tar.gz' }
+        '5.4.9' { 'https://deb.debian.org/debian/pool/main/l/lua5.4/lua5.4_5.4.9.orig.tar.gz' }
+        '5.5.1' { 'https://deb.debian.org/debian/pool/main/l/lua5.5/lua5.5_5.5.1.orig.tar.gz' }
+        default { '' }
+    }
     Stage-Source "lua-$($spec.Version).tar.gz" `
         "https://www.lua.org/ftp/lua-$($spec.Version).tar.gz" $spec.Sha256 $mirror
 }

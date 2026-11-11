@@ -269,7 +269,11 @@ stage_source "$SQLITE_ZIP" \
     "https://dev-www.libreoffice.org/src/$SQLITE_ZIP" "$SQLITE_SHA256"
 printf '%s\n' "$VERSIONS" | while IFS=: read -r version expected; do
     mirror=
-    if [ "$version" = 5.2.4 ]; then mirror=https://distfiles.macports.org/lua/lua-5.2.4.tar.gz; fi
+    case "$version" in
+        5.1.5|5.2.4|5.3.6) mirror=https://distfiles.macports.org/lua/lua-$version.tar.gz ;;
+        5.4.9) mirror=https://deb.debian.org/debian/pool/main/l/lua5.4/lua5.4_5.4.9.orig.tar.gz ;;
+        5.5.1) mirror=https://deb.debian.org/debian/pool/main/l/lua5.5/lua5.5_5.5.1.orig.tar.gz ;;
+    esac
     stage_source "lua-$version.tar.gz" "https://www.lua.org/ftp/lua-$version.tar.gz" "$expected" "$mirror"
 done
 

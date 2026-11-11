@@ -24,9 +24,13 @@ luai_ci_claim_root "$WORK" lua-build-work
 ARCHIVE_PART=$ARCHIVE.part.$$
 rm -f "$ARCHIVE_PART"
 trap 'rm -f "$ARCHIVE_PART"' EXIT HUP INT TERM
-curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+if ! curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
     --connect-timeout 30 --max-time 240 \
-    "https://www.lua.org/ftp/lua-$VERSION.tar.gz" -o "$ARCHIVE_PART"
+    "https://www.lua.org/ftp/lua-$VERSION.tar.gz" -o "$ARCHIVE_PART"; then
+    curl -fsSL --retry 2 --retry-delay 2 --retry-all-errors \
+        --connect-timeout 20 --max-time 240 \
+        https://deb.debian.org/debian/pool/main/l/lua5.4/lua5.4_5.4.9.orig.tar.gz -o "$ARCHIVE_PART"
+fi
 if command -v sha256sum >/dev/null 2>&1; then
     printf '%s  %s\n' "$SHA256" "$ARCHIVE_PART" | sha256sum -c - >/dev/null
 else

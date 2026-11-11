@@ -8,7 +8,7 @@ File:
 Date:
     2026-02-22
 Updated:
-    2026-10-15
+    2026-11-12
 ]]
 
 local fs = require("luainstaller.fs")
@@ -548,13 +548,14 @@ end
 local function withLock(callback)
     local lock_path, token, release_token, owner_content = acquireLock()
     if not lock_path then
-        return false
+        return false, "Cannot acquire log lock"
     end
     local packed = compat.pack(pcall(callback, token))
     local released = removeOwnedLock(lock_path, token, release_token, owner_content)
-    if not packed[1] or not released then
-        return false
+    if not packed[1] then
+        return false, type(packed[2]) == "string" and packed[2] or "Log transaction failed"
     end
+    if not released then return false, "Cannot release log lock" end
     return compat.unpack(packed, 2, packed.n)
 end
 
@@ -693,14 +694,23 @@ local function logFileState(path)
             or "unsafe"
     else
         local quoted = process.shellQuote(path)
-        local ok, output = process.output(table.concat({
-            "if test -L " .. quoted .. "; then printf unsafe",
-            "elif test -f " .. quoted .. "; then printf regular",
-            "elif test -e " .. quoted .. "; then printf unsafe",
-            "else printf missing",
+        -- These fixed shell builtins need only an exit status. A capture
+        -- supervisor adds processes while the log lock is held and can fail
+        -- under contention even though the filesystem operations still work.
+        local called, status, reason, code = pcall(os.execute, table.concat({
+            "if test -L " .. quoted .. "; then exit 2",
+            "elif test -f " .. quoted .. "; then exit 0",
+            "elif test -e " .. quoted .. "; then exit 2",
+            "else exit 3",
             "fi",
         }, "; "))
-        kind = ok and output:match("^(%a+)") or "unsafe"
+        kind = "unsafe"
+        if called then
+            -- Lua 5.1 returns a POSIX wait status; newer Lua separates the code.
+            if status == true or status == 0 then kind = "regular"
+            elseif (type(status) == "number" and status == 3 * 256)
+                or (reason == "exit" and code == 3) then kind = "missing" end
+        end
     end
     if kind ~= "regular" then
         return { kind = kind }
@@ -806,7 +816,8 @@ local function saveToFile(logs, token)
     local backup = logFileState(path .. ".bak")
     if not publishTemporary(path, temporary, primary, backup) then
         removeFile(temporary)
-        return false
+        return false, "Cannot publish log file (primary=" .. primary.kind
+            .. ", backup=" .. backup.kind .. ")"
     end
     return true
 end

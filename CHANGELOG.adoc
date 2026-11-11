@@ -13,6 +13,7 @@ truth for the exact contents of a published version.
 
 * Preserve application arguments in the entry script's `...`, both during
   runtime discovery and in directory and single-file programs.
+* Keep concurrent log writers from failing during basic file checks.
 * Report missing benchmark cases and unexpected outcomes as failures, enforce
   command deadlines, and keep summary and command logs after workspace cleanup.
 * Accept comma-separated benchmark scale lists and reject invalid sizes.

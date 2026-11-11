@@ -4603,6 +4603,11 @@ print("cold logging needs no compiler")
     removeTree(root)
 end)
 
+test("logger file transactions survive unavailable capture supervision", function()
+    if package.config:sub(1, 1) ~= "/" then return end
+    runCommand(luaCommand .. " test/logger_filesystem.lua")
+end)
+
 test("logger retains concurrent writers", function()
     if package.config:sub(1, 1) ~= "/" then
         return
