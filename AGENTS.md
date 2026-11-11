@@ -46,10 +46,13 @@ User docs (`README.adoc`, `docs/*.adoc` except `IMPLEMENTATION` and
 
 # Release notes
 
-- Write for users. Feature releases use `Major changes` and `Minor changes`;
-  patch releases use `Changes`. Add `Notes` only for useful upgrade, usage or
-  compatibility information. Use concise bullet points and keep the existing
-  English release-note language.
+- Write for users and keep the existing English release-note language.
+- Every GitHub release uses `Overview` and `Details`, for both feature and patch
+  versions. The overview is one sentence naming the main update; put major new
+  capabilities, such as support for a new runtime, first.
+- Details are concrete bullet points describing features and fixes, with command
+  names, affected modes and useful usage or compatibility requirements where
+  relevant. Keep those requirements with their related change.
 - Describe what changed for the user. Omit development diaries, audit progress,
   CI results, commit hashes, file counts, publishing procedures and future plans.
 - Check changes against the release tag; do not attribute later features to an

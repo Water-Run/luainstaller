@@ -27,6 +27,7 @@ stay outside tracked files.
 [cols="1,3",options="header"]
 |===
 |Document |Scope
+|xref:AUDIT-RELEASE-NOTES.adoc[Release-note rewrite] |Version-specific summaries, detailed changes and public-page verification
 |xref:AUDIT-1.8.x.adoc[1.8.0–1.8.2 audit] |CLI fixes, platform regressions and follow-up investigations
 |xref:AUDIT-1.7.2.adoc[Earlier LuaRocks audit] |Installation findings folded into 1.8.0
 |xref:AUDIT-1.7.1.adoc[1.7.1 audit] |Findings, fixes and release verification

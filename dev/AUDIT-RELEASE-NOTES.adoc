@@ -1,0 +1,70 @@
+= GitHub Release 文档重写审计
+:sectanchors:
+
+== 结果
+
+2026-11-12：已按用户要求重写全部 14 个现有公开 Release 的正文，
+统一为 `Overview` 和 `Details`。概述用一句话说明核心更新，详细说明按功能、
+修复和相应使用条件逐条列出，沿用英文。后续写作规则同步到根目录 AGENTS.md。
+
+1.7.0 概述明确以新增 LuaJIT 2.1 支持为主线；详细说明列出运行时选择、
+三种产物模式、显式 FFI 库、内置模块、静态库要求、构建配置匹配和 JIT 开关。
+1.5.0 的构建依赖简化、1.6.0 的免解包单文件与 MoonScript、1.8.0 的命令行呈现
+也分别放到对应版本的概述中。
+
+== 版本依据
+
+逐版对照对应标签的源码、指南、变更记录与相邻标签差异。
+1.6.1 和 1.7.0 标签内的 changelog 尚未设同名版本标题，因此同时以实际差异及
+1.7.0 的 docs/LUAJIT.adoc 核实功能归属；没有把旧 Unreleased 条目直接当成该版新增功能。
+
+[cols="1,3",options="header"]
+|===
+|Release |核对的标签提交
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.3.0[v1.3.0]
+|`97192d100077b31b61dc8f94427e14df1c68a9eb`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.4.0[v1.4.0]
+|`b463df7150c7d81b1e0e1a4a03dc3d49fbbafdb2`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.5.0[v1.5.0]
+|`a289a1bed6c6dcf8ad4f11a1d9e28f2f2989adbf`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.5.1[v1.5.1]
+|`b5f34efaf0247e210ad8903dae589577105a37f8`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.5.2[v1.5.2]
+|`dc6aa03f806e179860bd58fd1420cb0a8a2458db`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.5.3[v1.5.3]
+|`f8c7f89da88585de3de71954501da4c7de42ed11`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.6.0[v1.6.0]
+|`39dcc93536630adf0e4cf92863bca7d22bc21398`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.6.1[v1.6.1]
+|`b50901d14c4c4e97786356050b5053064599cf21`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.7.0[v1.7.0]
+|`1b6b8a87258684f3edff22ea7837e54704e40aae`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.7.1[v1.7.1]
+|`ccb1a611c99c59a9fffb5202a535c204c7d8f833`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.8.0[v1.8.0]
+|`19b00faeed64fc3cb0a026b201fde1794aa1def3`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.8.1[v1.8.1]
+|`c169dc81dd8be6982900e7b50faef0abf00411f1`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.8.2[v1.8.2]
+|`0329b092ac54fa2b8c99732c207670e509ab3382`
+|https://github.com/Water-Run/luainstaller/releases/tag/v1.8.3[v1.8.3]
+|`d30c38a017c586820d913be1e7e73eeae0a6a955`
+|===
+
+盘点时 v1.0.0、v1.1.0、v1.1.1 只有 Git 标签，没有对应的公开 Release 页面；
+本轮处理范围为上述 14 个已有 Release。
+
+== 校验与留档
+
+* 逐页检查两节结构、单句概述和具体条目，LuaJIT 新增支持归属 1.7.0。
+* 版本指南链接指向相应发布标签，链接的仓库文件实际存在。
+* 使用仅含 body 的请求更新正文，逐页回读，并最终再次读取全部 Release。
+* 14 份公开正文与审核稿完全相同。标题、标签、发布状态与时间、附件 ID、
+  文件名、大小和 SHA-256 digest 均与改写前快照相同。
+* 根目录写作约定改为所有版本统一采用 Overview / Details；用户指南和版本产物
+  沿用各自现有发布内容。
+
+改写前快照、标签差异、14 份完整正文和公开回读结果保存在
+`/tmp/luainstaller-release-notes-z4jrvde9`，定位指针为
+`/tmp/luainstaller-release-notes-current`。主要文件是 before.json、drafts.json、
+tag-evidence.json、after.json 和 state.json；原始记录不加入仓库。
