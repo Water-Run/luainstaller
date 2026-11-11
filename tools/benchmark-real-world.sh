@@ -6,7 +6,9 @@ PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 LUAI_BIN=${LUAI_BIN:-}
 LUA_BIN=${LUA_BIN:-lua}
 LUAROCKS_BIN=${LUAROCKS_BIN:-luarocks}
-WORK_ROOT=${WORK_ROOT:-/tmp/luainstaller-benchmark}
+TEMP_ROOT=${TMPDIR:-/tmp}
+TEMP_ROOT=${TEMP_ROOT%/}
+WORK_ROOT=${WORK_ROOT:-$TEMP_ROOT/luainstaller-benchmark}
 FAKE_SCALES=${FAKE_SCALES:-"100 1000 10000"}
 KEEP_WORKSPACE=${KEEP_WORKSPACE:-0}
 SKIP_EXTERNAL=${SKIP_EXTERNAL:-0}
@@ -104,11 +106,11 @@ positive_integer --neovim-max-deps "$NEOVIM_MAX_DEPS" 1000000
 positive_integer --neovim-timeout "$NEOVIM_TIMEOUT" 86400
 positive_integer LUAI_CMD_TIMEOUT "$COMMAND_TIMEOUT" 86400
 case "$WORK_ROOT" in
-    /tmp/luainstaller-*) ;;
+    /tmp/luainstaller-*|"$TEMP_ROOT"/luainstaller-*) ;;
     *) echo "unsafe work root: $WORK_ROOT" >&2; exit 2 ;;
 esac
 WORK_ROOT=$(mktemp -d "${WORK_ROOT}-XXXXXX")
-RESULTS_DIR=$(mktemp -d /tmp/luainstaller-benchmark-results-XXXXXX)
+RESULTS_DIR=$(mktemp -d "$TEMP_ROOT/luainstaller-benchmark-results-XXXXXX")
 LOG_DIR="$RESULTS_DIR/logs"
 SUMMARY="$RESULTS_DIR/summary.txt"
 ROCK_ROOT="$WORK_ROOT/rocks"
@@ -136,7 +138,7 @@ if [ -z "$LUAI_BIN" ]; then
 fi
 
 require_cmds() {
-    for c in bash git gcc make awk tar; do
+    for c in bash git awk tar; do
         if ! command -v "$c" >/dev/null 2>&1; then
             echo "missing command: $c" >&2
             exit 1
@@ -146,7 +148,7 @@ require_cmds() {
 
 safe_path() {
     case "$1" in
-        /tmp/luainstaller-*) return 0 ;;
+        /tmp/luainstaller-*|"$TEMP_ROOT"/luainstaller-*) return 0 ;;
         *) echo "unsafe work root: $1" >&2; exit 2 ;;
     esac
 }
@@ -232,7 +234,7 @@ run_case() {
             launcher_dir=
         fi
 
-        empty_path=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+        empty_path=$(mktemp -d "$TEMP_ROOT/luainstaller-empty-path-XXXXXX")
         local CASE_TIMEOUT=6
         if [ -n "$launcher_dir" ]; then
             run_cmd "$name dir-exec" "$LOG_DIR/$name-dir-exec.log" 0 \
@@ -342,6 +344,7 @@ EOF
 }
 
 log "luainstaller benchmark start"
+log "summary file: $SUMMARY"
 log "luai: $LUAI_BIN"
 log "lua : $LUA_BIN"
 log "luarocks: $LUAROCKS_BIN"
@@ -522,5 +525,4 @@ else
     log "failed: ${failures[*]}"
     benchmark_status=1
 fi
-log "summary file: $SUMMARY"
 exit "$benchmark_status"

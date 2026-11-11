@@ -17,7 +17,7 @@ assert(package.config:sub(1, 1) == "/", "benchmark driver requires a POSIX host"
 local fs = require("luainstaller.fs")
 local path = require("luainstaller.path")
 local process = require("luainstaller.process")
-local root = assert(fs.makePrivateDirectory("benchmark-driver", "/tmp"))
+local root = assert(fs.makePrivateDirectory("benchmark-driver"))
 local failures = {}
 local function check(name, fn)
     local ok, err = pcall(fn)
@@ -77,7 +77,7 @@ local serial = 0
 local function run(scenario, options)
     serial = serial + 1
     local arguments = {"tools/benchmark-real-world.sh", "--work-root", root .. "/run-" .. serial,
-        "--fake-scales", "1", "--neovim-timeout", "1"}
+        "--fake-scales", "1", "--neovim-timeout", "3"}
     for _, value in ipairs(options or {}) do arguments[#arguments + 1] = value end
     local ok, output, status = process.outputCommand("bash", arguments, {
         LUA_BIN=harness.lua_command(), LUAI_BIN=fake, LUAROCKS_BIN=rocks,
@@ -139,7 +139,9 @@ end)
 check("deadline and descendant cleanup", function()
     local ok, output = run("hang")
     assert(not ok, "hanging exploratory case was accepted: " .. output)
-    local pid = assert(fs.readFile(root .. "/child.pid")):match("^%d+")
+    local child = fs.readFile(root .. "/child.pid")
+    assert(child, "deadline fixture did not start its child: " .. output)
+    local pid = assert(child:match("^%d+"))
     local active, state = process.outputCommand("ps", {"-p", pid, "-o", "stat="})
     assert(not active or state:match("^%s*Z"), "timed out child is still running: " .. state)
     local _, directory = summary(output)

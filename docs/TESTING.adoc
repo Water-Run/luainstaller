@@ -485,6 +485,7 @@ Useful options:
 * `--keep-workspace` to preserve fixtures and logs
 * `--neovim-timeout 30` to cap each neovim command
 
+The driver uses `TMPDIR` when set, or `/tmp`.
 Default behavior cleans the build workspace after completion. Summary and
 command logs remain in a separate private results directory, including on failure
 or interruption. The driver prints its location:

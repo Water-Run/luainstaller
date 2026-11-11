@@ -449,6 +449,7 @@ bash tools/benchmark-real-world.sh
 * `--keep-workspace` 保留夹具和日志
 * `--neovim-timeout 30` 限制每条 neovim 命令的时间上限
 
+驱动使用 `TMPDIR`，未设置时使用 `/tmp`。
 默认在完成后清理构建工作区。摘要和命令日志保留在独立的私有结果目录中，失败或
 中断时也保留。驱动会打印其位置：
 
