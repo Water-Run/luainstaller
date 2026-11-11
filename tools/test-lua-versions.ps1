@@ -105,7 +105,7 @@ function Test-ExactLuaRelease([string]$Lua, [string]$Version) {
         [StringComparison]::Ordinal)
 }
 
-function Stage-Source([string]$Name, [string]$Uri, [string]$Expected) {
+function Stage-Source([string]$Name, [string]$Uri, [string]$Expected, [string]$MirrorUri = '') {
     $destination = Join-Path $SourceCache $Name
     $item = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
     if ($null -ne $item -and ((-not ($item -is [IO.FileInfo])) -or
@@ -137,6 +137,11 @@ function Stage-Source([string]$Name, [string]$Uri, [string]$Expected) {
                 if ($null -eq $curl) { throw $requestError }
                 & $curl --fail --location --silent --show-error --retry 2 `
                     --connect-timeout 20 --max-time 120 --output $part $Uri
+                if ($LASTEXITCODE -ne 0 -and -not [string]::IsNullOrEmpty($MirrorUri)) {
+                    Write-Host "Source fallback: $Name via $MirrorUri"
+                    & $curl --fail --location --silent --show-error --retry 2 `
+                        --connect-timeout 20 --max-time 120 --output $part $MirrorUri
+                }
                 if ($LASTEXITCODE -ne 0) { throw "Download failed for $Name (curl exit $LASTEXITCODE)" }
             }
             if ((Get-FileHash -LiteralPath $part -Algorithm SHA256).Hash -ne $Expected) {
@@ -456,8 +461,11 @@ $SelectedVersions = if ($VersionFilter.Count -eq 0) {
 }
 if (@($SelectedVersions).Count -eq 0) { throw 'VersionFilter selected no pinned Lua version' }
 foreach ($spec in $SelectedVersions) {
+    $mirror = if ($spec.Version -eq '5.2.4') {
+        'https://distfiles.macports.org/lua/lua-5.2.4.tar.gz'
+    } else { '' }
     Stage-Source "lua-$($spec.Version).tar.gz" `
-        "https://www.lua.org/ftp/lua-$($spec.Version).tar.gz" $spec.Sha256
+        "https://www.lua.org/ftp/lua-$($spec.Version).tar.gz" $spec.Sha256 $mirror
 }
 $luaRocksRoot = Join-Path $WorkRoot "luarocks-$LuaRocksVersion-windows-64"
 $luaRocksMarker = Join-Path $luaRocksRoot '.luainstaller-matrix-cache'

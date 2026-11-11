@@ -8,7 +8,7 @@ File:
 Date:
     2026-11-11
 Updated:
-    2026-11-11
+    2026-11-12
 ]]
 
 local harness = dofile("test/support/harness.lua")
@@ -88,10 +88,12 @@ require('choice')
     assert(#analyzed.dependencies.scripts == 1 and analyzed.dependencies.scripts[1] == module,
         "runtime discovery lost the module selected through entry varargs")
     for _, program in ipairs({"luai", "luainstaller"}) do
-        local cli_ok, cli_output = harness.invoke_cli(program, program == "luai"
-            and {"-a", trace, "-d", "runtime", "--", "choice", "", "--literal"}
-            or {"analyze", trace, "-d", "runtime", "--", "choice", "", "--literal"})
-        assert(cli_ok == 0, cli_output)
+        local cli_ok, cli_output, cli_error = harness.invoke_cli(program, program == "luai"
+            and {"-a", trace, "-d", "runtime", "--lua", harness.lua_command(),
+                "--", "choice", "", "--literal"}
+            or {"analyze", trace, "-d", "runtime", "--lua", harness.lua_command(),
+                "--", "choice", "", "--literal"})
+        assert(cli_ok == 0, cli_output .. cli_error)
     end
     assert(fs.removeFile(entry))
     assert(fs.removeFile(module))

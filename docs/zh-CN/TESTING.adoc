@@ -62,6 +62,7 @@ LUA=${LUA:-lua}
 "$LUA" test/entry_arguments.lua
 # POSIX benchmark driver
 "$LUA" test/benchmark_driver.lua
+"$LUA" test/source_download.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
@@ -186,6 +187,9 @@ x86_64 生成 C 代码和 PE 审计
 |`test/entry_arguments.lua`
 |对照直接运行的 Lua，检查入口可变参数与 `arg`、运行时发现、模块加载参数、状态恢复
 及三种产物路径
+
+|`test/source_download.lua`（POSIX）
+|下载源回退保持固定源码哈希，并清理失败的临时材料
 
 |`test/benchmark_driver.lua`（POSIX）
 |完整基准驱动的依赖失败、无效规模、预期错误、主动跳过、证据保留，以及没有 GNU timeout

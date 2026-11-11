@@ -64,6 +64,7 @@ LUA=${LUA:-lua}
 "$LUA" test/entry_arguments.lua
 # POSIX benchmark driver
 "$LUA" test/benchmark_driver.lua
+"$LUA" test/source_download.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
@@ -198,6 +199,9 @@ excluded inputs, exact limits, public API errors and both CLIs
 |`test/entry_arguments.lua`
 |Entry varargs and `arg`, runtime discovery, loader parameters, state restoration
 and all three artifact paths compared with direct Lua execution
+
+|`test/source_download.lua` (POSIX)
+|Transport fallback retains pinned source hashes and removes failed partial downloads
 
 |`test/benchmark_driver.lua` (POSIX)
 |Complete benchmark runs with dependency failures, invalid sizes, expected errors,

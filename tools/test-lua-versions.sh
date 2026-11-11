@@ -189,6 +189,7 @@ stage_source() {
     name=$1
     url=$2
     expected=$3
+    mirror=${4:-}
     destination=$SOURCE_CACHE/$name
     if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -f "$destination" ]; }; then
         echo "unsafe source-cache entry: $destination" >&2
@@ -205,8 +206,14 @@ stage_source() {
         part=$destination.part.$$
         rm -f "$part"
         trap 'rm -f "$part"' EXIT HUP INT TERM
-        curl -fL --retry 5 --retry-delay 2 --retry-all-errors \
-            --connect-timeout 20 --max-time 240 -o "$part" "$url"
+        if ! curl -fL --retry 5 --retry-delay 2 --retry-all-errors \
+            --connect-timeout 20 --max-time 240 -o "$part" "$url"; then
+            [ -n "$mirror" ] || return 1
+            rm -f "$part"
+            printf 'source fallback: %s\n' "$mirror"
+            curl -fL --retry 2 --retry-delay 2 --retry-all-errors \
+                --connect-timeout 20 --max-time 240 -o "$part" "$mirror"
+        fi
         verify_sha256 "$expected" "$part"
         mv "$part" "$destination"
         trap - EXIT HUP INT TERM
@@ -261,7 +268,9 @@ stage_source "$LSQLITE3_SOURCE" "$LSQLITE3_URL" "$LSQLITE3_SHA256"
 stage_source "$SQLITE_ZIP" \
     "https://dev-www.libreoffice.org/src/$SQLITE_ZIP" "$SQLITE_SHA256"
 printf '%s\n' "$VERSIONS" | while IFS=: read -r version expected; do
-    stage_source "lua-$version.tar.gz" "https://www.lua.org/ftp/lua-$version.tar.gz" "$expected"
+    mirror=
+    if [ "$version" = 5.2.4 ]; then mirror=https://distfiles.macports.org/lua/lua-5.2.4.tar.gz; fi
+    stage_source "lua-$version.tar.gz" "https://www.lua.org/ftp/lua-$version.tar.gz" "$expected" "$mirror"
 done
 
 build_lua() {
@@ -698,6 +707,7 @@ run_version() {
     "$lua" test/source_normalization.lua
     "$lua" test/entry_arguments.lua
     "$lua" test/benchmark_driver.lua
+    "$lua" test/source_download.lua
     "$lua" test/output_parents.lua
     "$lua" test/build_cleanup.lua
     "$lua" test/distribution_licenses.lua

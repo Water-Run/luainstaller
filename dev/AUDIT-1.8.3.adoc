@@ -380,3 +380,28 @@ Windows Stage-Source 增加三次有界请求及 curl 回退，成功后仍核�
 curl 回退、哈希不符和最终失败；在 Windows 五 ABI 作业下载前执行。
 本机没有 PowerShell，未将该夹具记作本机通过，须以原生 Windows CI 结果验收。
 对进行中 workflow 的单 job 重试被 GitHub 以 403 拒绝，未重复启动；后续只跟踪最新提交。
+
+=== 2026-11-12：原生门禁收敛
+
+`c9dbd782d55d91b27b1a4f0a0af4b0f3850cfcc1` 的 Windows 5.1、5.3、5.4、5.5 和
+runtime-only 作业成功；固定 LuaJIT 五个原生作业全部成功，已下载五份证据并逐一确认最终 PASS。
+本机固定 Lua 5.4 的 41 个套件均取得通过结果；smoke 首次受未绑定的系统 LuaRocks 5.5
+影响，按 CI 相同方式绑定 5.4 后复跑通过，原失败和 ABI 选择证据均保留。
+
+官方 CI 第一次完整退出后，针对八个获取依赖失败的作业发起一次重试。重试中的 x86
+已实际通过编译、无 Lua 隔离、事务和进程边界，却在新增入口回归的模拟 CLI 上失败。
+夹具重建 arg 时没有解释器负索引，PATH 也未指向被测解释器；本地在同样的错配 PATH 下
+独立复现 ToolchainError，显式 --lua 后成功。正式回归现为两个 CLI 指定被测解释器，
+同时在失败时保留 stderr。产品的解释器匹配保护保持原行为。
+
+Lua 5.2.4 的 Windows 和 POSIX 重试都在获取原始 archive 时再次超时，未进入编译。
+Debian 副本 SHA-256 为 86fb7e23cbbddfcd92684e5f8017ff41c9112251d1656dbece415a97fad171c0，
+与固定输入不同，未采用。MacPorts 与 BLFS 缓存均实际下载并匹配原来的
+b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b。
+两个官方驱动只为此 archive 增加 MacPorts 传输回退，哈希和编译配方不变；不接受重打包材料。
+新增 POSIX 下载反例在修改前失败、修改后通过；Windows 夹具补充镜像及镜像哈希拒绝场景。
+
+上述字节一致的 MacPorts archive 已在本机实际编译成官方 Lua 5.2.4，
+`entry_arguments.lua` 的 API、两个 CLI、运行时发现和三种产物均通过。
+错配 PATH 下的固定 Lua 5.4 回归也已通过。此补充不替代最终提交的原生 CI。
+前一个提交的通过结果保留为诊断证据；修正后的候选仍需重新满足同一提交门禁。

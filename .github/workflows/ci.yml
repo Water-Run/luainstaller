@@ -118,6 +118,7 @@ jobs:
           lua test/source_normalization.lua
           lua test/entry_arguments.lua
           lua test/benchmark_driver.lua
+          lua test/source_download.lua
           lua test/output_parents.lua
           lua test/build_cleanup.lua
 
