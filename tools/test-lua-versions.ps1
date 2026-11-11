@@ -120,7 +120,25 @@ function Stage-Source([string]$Name, [string]$Uri, [string]$Expected) {
         $part = "$destination.part.$PID"
         if (Test-Path -LiteralPath $part) { Remove-Item -LiteralPath $part -Force }
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $part
+            $downloaded = $false
+            $requestError = $null
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $part -TimeoutSec 60
+                    $downloaded = $true
+                    break
+                } catch {
+                    $requestError = $_
+                    if ($attempt -lt 3) { Start-Sleep -Seconds $attempt }
+                }
+            }
+            if (-not $downloaded) {
+                $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+                if ($null -eq $curl) { throw $requestError }
+                & $curl --fail --location --silent --show-error --retry 2 `
+                    --connect-timeout 20 --max-time 120 --output $part $Uri
+                if ($LASTEXITCODE -ne 0) { throw "Download failed for $Name (curl exit $LASTEXITCODE)" }
+            }
             if ((Get-FileHash -LiteralPath $part -Algorithm SHA256).Hash -ne $Expected) {
                 throw "SHA-256 mismatch for $Name"
             }

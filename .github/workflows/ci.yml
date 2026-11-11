@@ -44,9 +44,11 @@ jobs:
 
       - name: Install build prerequisites
         run: |
+          command -v cc
+          command -v make
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential bubblewrap ca-certificates curl liblua5.4-dev lua5.4 \
+            bubblewrap ca-certificates curl liblua5.4-dev lua5.4 \
             luarocks unzip zlib1g-dev
 
       - name: Build pinned shared Lua 5.4.9
@@ -165,8 +167,10 @@ jobs:
 
       - name: Install matrix prerequisites
         run: |
+          command -v cc
+          command -v make
           sudo apt-get update
-          sudo apt-get install -y build-essential bubblewrap pkg-config libreadline-dev \
+          sudo apt-get install -y bubblewrap pkg-config libreadline-dev \
             unzip curl ca-certificates clang luajit gcc-mingw-w64-x86-64 \
             gcc-mingw-w64-i686
 
@@ -195,9 +199,11 @@ jobs:
       - name: Install 32-bit toolchain
         run: |
           sudo dpkg --add-architecture i386
+          command -v cc
+          command -v make
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential bubblewrap gcc-multilib libc6-dev-i386 ca-certificates curl \
+            bubblewrap gcc-multilib libc6-dev-i386 ca-certificates curl \
             file pkg-config
 
       - name: Build and exercise native 32-bit artifacts
@@ -251,6 +257,10 @@ jobs:
           - "5.5.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check pinned download recovery
+        shell: powershell
+        run: powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/windows_download.ps1
 
       - name: Run the pinned Lua version with MSVC
         shell: powershell

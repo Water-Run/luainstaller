@@ -367,3 +367,16 @@ Windows 下载无法连接，Linux LuaJIT 的 apt 源 DNS 解析失败，原日�
 专用 TMPDIR 的整脚本回归初次未进入后代夹具，保留原失败日志；复跑通过。
 夹具命令预算从 1 秒设为 3 秒以容纳启动波动，被测子进程仍忽略 TERM 并运行 30 秒，
 不通过增加预算把未受控进程算作成功。
+
+=== 门禁基础设施跟进
+
+新候选的 Linux LuaJIT 三个作业也在安装 build-essential 元包时遇到 DNS 失败；
+apt 明确列出它是唯一待装包，cc/make 与其实际依赖已在 runner 中。
+Ubuntu 作业移除冗余元包请求并显式检查 cc/make，随后仍实际编译 Lua 和所有原生产物；
+缺少工具或头文件仍会失败。未跳过任何必需测试。
+
+Windows Stage-Source 增加三次有界请求及 curl 回退，成功后仍核对固定 SHA-256，
+失败仍清理私有 partial 文件。新增无网络 PowerShell 夹具覆盖瞬时失败、已校验缓存、
+curl 回退、哈希不符和最终失败；在 Windows 五 ABI 作业下载前执行。
+本机没有 PowerShell，未将该夹具记作本机通过，须以原生 Windows CI 结果验收。
+对进行中 workflow 的单 job 重试被 GitHub 以 403 拒绝，未重复启动；后续只跟踪最新提交。

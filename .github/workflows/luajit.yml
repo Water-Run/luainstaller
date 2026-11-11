@@ -22,8 +22,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install native prerequisites
         run: |
+          command -v cc
+          command -v make
           sudo apt-get update
-          sudo apt-get install -y build-essential bubblewrap ca-certificates curl pkg-config
+          sudo apt-get install -y bubblewrap ca-certificates curl pkg-config
       - name: Build pinned LuaJIT and exercise artifacts
         env:
           LUAI_JIT_CONFIGURATION: ${{ matrix.configuration }}
