@@ -6,17 +6,15 @@ their history remains in Git. User guides are in xref:../README.adoc#documentati
 
 == Current work
 
-The release order is 1.8.3 quality fixes, then 1.9.0 runtime optimization.
-Sol is implementing the confirmed 1.8.3 plan. Entry-argument and benchmark-driver
-fixes are under verification; the required release gates and publication remain
-pending. The 1.9.0 optimization work stays queued.
+Version 1.8.3 is published and verified. Its qualified tag is the baseline for
+1.9.0 runtime optimization, which remains queued. The completed 1.8.3 plan has
+been removed; its findings, fixes and release evidence remain in the audit.
 
 [cols="1,3",options="header"]
 |===
 |Document |Purpose
 |xref:PLAN.adoc[Roadmap] |Release order and shared delivery gates
-|xref:PLAN-1.8.3.adoc[1.8.3 implementation plan] |Review handoffs, prioritized fixes and acceptance
-|xref:AUDIT-1.8.3.adoc[1.8.3 audit record] |Reproduced findings, coverage gaps and implementation handoff
+|xref:AUDIT-1.8.3.adoc[1.8.3 audit record] |Findings, fixes, verification limits and release evidence
 |xref:PLAN-1.9.0.adoc[1.9.0 draft — queued] |o1/o2/o3 research after 1.8.3 acceptance and publication
 |===
 

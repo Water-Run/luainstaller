@@ -2,7 +2,14 @@
 :toc:
 :sectanchors:
 
-== 状态与范围
+== 最终状态
+
+2026-11-12：1.8.3 已完成修复、原生门禁、GitHub 与 LuaRocks 发布和安装验收。
+发布标签 `v1.8.3` 指向 `d30c38a017c586820d913be1e7e73eeae0a6a955`。
+1.9.0 以此提交为基线，仍排队，尚未开始优化实验或实现。
+完整发布证据见文末“最终验收与发布”；以下按阶段保留原始观察及当时的限制。
+
+== 初始状态与范围
 
 2026-10-26 的准备记录以 `v1.8.2` 为基线，记载初始 `main` 工作区干净。
 2026-11-11 本轮核对：`HEAD` 与 `v1.8.2^{commit}` 均为
@@ -11,11 +18,11 @@
 已修改，`PLAN-1.8.3.adoc`、本文件未跟踪。本轮沿用这些草案，没有重置既有改动。
 
 用户指定 Sol 首审与计划 → Terra 复查核实 → Astra 快速检查与最终确认 → Sol 实现。
-Sol 首审、Terra 复查与 Astra 最终确认已完成，等待切回 Sol 实现；完整顺序和停止条件见
-xref:PLAN-1.8.3.adoc#review-handoff[模型交接]。后续按最终确认的计划修复与验收，
+交接时 Sol 首审、Terra 复查与 Astra 最终确认已完成，等待切回 Sol 实现；完整顺序和停止条件见
+https://github.com/Water-Run/luainstaller/blob/v1.8.3/dev/PLAN-1.8.3.adoc#review-handoff[模型交接记录]。后续按最终确认的计划修复与验收，
 再进入 xref:PLAN-1.9.0.adoc[1.9.0]。
 
-本记录区分代码观察、已复现缺陷和未核实项。尚未完成全面质量审计、
+本记录区分代码观察、已复现缺陷和未核实项。交接时尚未完成全面质量审计、
 1.8.3 原生平台矩阵或发布验证，也尚无本轮产品修复。
 
 [#initial-observations]
@@ -451,3 +458,95 @@ https://github.com/uutils/coreutils/blob/0.10.0/src/uu/mkdir/src/mkdir.rs 。
 隔离的 GitHub Linux 并发复查 run 43082315955 / job 130737805370 已成功：
 三轮各 60 个进程，零失败，逐轮校验 60、120、180 条唯一消息全部保留。
 这证明相同 uutils 环境的故障已修复；它不替代最终提交的完整原生矩阵。
+
+
+== 最终验收与发布
+
+=== 问题结论
+
+[cols="1,4",options="header"]
+|===
+|范围 |最终结论
+|Q183-01
+|旧实体 Windows 的历史最终日志仍未补齐，保留为补充证据缺口；本轮原生
+Windows/MSVC 五 ABI 的事务、锁、进程和产物门禁均通过，未新复现历史所疑的产品缺陷。
+不把旧宿主缺日志记为通过，也不将其改成额外发布前置。
+|Q183-02
+|宿主 C、启动器与分发材料的规范副本对照无漂移；入口共同缺陷按 Q183-06 修复。
+源码移除、别名、原生/FFI、静态/共享、状态恢复与实际产物由适用原生套件复验。
+|Q183-03a/b/c
+|必需覆盖缺失及意外结果返回失败；受管命令与后代有实际时限；动态 require
+负例校验退出与原因，探索性结果明确标记不完整。无 GNU timeout 时仍有监督边界。
+|Q183-04
+|摘要与逐命令日志默认独立保留，TMPDIR 生效；成功、失败和中断路径均有回归。
+现有计时不作为 1.9.0 的运行优化收益证据。
+|Q183-05
+|修正文档中的平台与源码来源描述，去除 x86 重复锁回归，相关文档契约通过。
+|Q183-06
+|解释器参数传入 discovery 和两份 runtime 的入口 chunk；五 ABI、LuaJIT、两种 CLI
+及三种实际产物回归通过，保留错误恢复和多返回值语义。
+|Q183-07
+|逗号与空白压力规模列表均实际展开，空值、零、负数和无效值被拒绝。
+|实施中确认的缺陷
+|日志文件检查不再依赖可选捕获监督；独占目录、私有目录及日志锁要求 mkdir 的
+真实创建输出，防止 uutils 假成功。故障注入修复前失败，修复后通过；相同 GitHub
+环境三轮各 60 写入零失败、180 条唯一记录完整，原有超时和安全边界未放宽。
+|===
+
+=== 合格提交与测试证据
+
+发布提交是 `d30c38a017c586820d913be1e7e73eeae0a6a955`，不是前序候选通过结果的拼接：
+
+* https://github.com/Water-Run/luainstaller/actions/runs/43083094791[官方 CI]：
+  本地套件、runtime-only、Linux x86、Linux 五 ABI、Windows/MSVC 五 ABI，共 13 作业成功。
+* https://github.com/Water-Run/luainstaller/actions/runs/43083095232[独立 LuaJIT CI]：
+  固定 LuaJIT 2.1.1791988261，Linux 三配置、Windows/MSVC 两配置，共五作业成功。
+* 18 份最终作业日志与 15 份完整附件日志已下载，逐一核对提交和最终 PASS。
+  POSIX 五 ABI 全部满足严格前置；Lua 5.1 有 132 项生产边界，5.2–5.5 各 133 项。
+  唯一计数差异是 Lua 5.1 没有 goto 语法，故未注册 goto 标签词法测试，不是必需覆盖跳过。
+* 本机固定共享 Lua 5.4.9 的 44 个套件全部通过，包含 133 项生产边界、完整 smoke、
+  无 Lua 目标环境及新下载、日志、独占目录回归。官方 5.1/5.2 和本机 LuaJIT 的相关
+  最小回归另有通过记录；本机解释器不替代固定原生矩阵。
+* 五个官方源 archive 的备用源逐个下载并匹配原有固定哈希；未接受重打包副本。
+  本轮未新增 ARM64、macOS、FreeBSD、Termux 或旧 Windows 实体机验收，平台声明未扩大。
+
+原始日志、结构化结果、安装记录和发布文件保存在
+`/tmp/luainstaller-183-implementation-v7ikm7h_`；稳定指针为
+`/tmp/luainstaller-183-implementation-current`。完整证据索引是
+`qualified-ci-evidence/verification.json`、`local-receipt-results.json` 和 `state.json`。
+它们不加入仓库；原始历史日志未删除。
+
+=== 发布渠道与字节核对
+
+https://github.com/Water-Run/luainstaller/releases/tag/v1.8.3[GitHub release] 的五个附件
+均来自合格标签。tar/zip 的文件表与标签一致；源码 rock 中 232 个追踪文件逐字节一致，
+LuaRocks 打包器仅省去 `.gitignore`。rockspec 内的 source.tag 为 v1.8.3。
+
+新目录重新下载全部五个附件，`sha256sum -c SHA256SUMS` 四项全部 OK；
+GitHub 资产 digest 也与本地最终文件一致。文件 SHA-256：
+
+[cols="1,2",options="header"]
+|===
+|文件 |SHA-256
+|`luainstaller-1.8.3.tar.gz`
+|`336b1518c8087350db9293533dc538edd8d5cc71a3ad4023dc0816646823df85`
+|`luainstaller-1.8.3.zip`
+|`7a8f88dc13c59036fb88bfd7a5d740d4ec8eb03eb6c50bef4e6fd71537a2b39b`
+|`luainstaller-1.8.3-1.rockspec`
+|`159c041fab646c5ff7f119c884a1ef1e7e5c6602bb45f1d9d446baa762bf0e5d`
+|`luainstaller-1.8.3-1.src.rock`
+|`6d890e2a3817c9af62725796af023723aa665269166c086d4dba326e03e4705e`
+|===
+
+随后以新下载的 rockspec 和 src.rock 执行普通 LuaRocks 上传，退出 0，未发生 EOF，
+无需 curl 上传回退，也没有使用 --verbose。
+https://luarocks.org/modules/waterrun/luainstaller[LuaRocks 页面] 已发布 1.8.3-1；
+两个公开文件重新下载后与 GitHub 文件逐字节相同。历史 GitHub source rock 的索引缺口为空。
+
+空树与预先核实为 1.8.2 的安装树分别使用独立的新缓存，均执行不带版本号的
+`luarocks install luainstaller`。两者均选中 1.8.3-1，`luai -v` 为 `luai 1.8.3`，
+`luainstaller version` 首行标识 `luainstaller 1.8.3`，同时输出正常版权、运行时与宿主信息。
+两棵私有测试安装树均已移除，结果保存在 `release-validation/versionless-results.json`。
+
+已完成的 PLAN-1.8.3 从当前树移除，历史在发布标签中保留；开发索引、路线图与
+1.9.0 草案的精确基线同步到此标签。1.9.0 的优化实验与实现仍待另行启动。
