@@ -19,6 +19,7 @@ resource_bounds
 dependency_limits
 logger_order
 source_normalization
+entry_arguments
 process_bounds
 process_working_directory
 onefile_modes

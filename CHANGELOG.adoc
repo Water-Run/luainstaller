@@ -7,6 +7,16 @@ truth for the exact contents of a published version.
 
 == Unreleased
 
+== 1.8.3 - 2026-11-11
+
+=== Changes
+
+* Preserve application arguments in the entry script's `...`, both during
+  runtime discovery and in directory and single-file programs.
+* Report missing benchmark cases and unexpected outcomes as failures, enforce
+  command deadlines, and keep summary and command logs after workspace cleanup.
+* Accept comma-separated benchmark scale lists and reject invalid sizes.
+
 == 1.8.2 - 2026-10-20
 
 === Changes

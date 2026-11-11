@@ -59,13 +59,16 @@ LUA=${LUA:-lua}
 "$LUA" test/dependency_limits.lua
 "$LUA" test/logger_order.lua
 "$LUA" test/source_normalization.lua
+"$LUA" test/entry_arguments.lua
+# POSIX benchmark driver
+"$LUA" test/benchmark_driver.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.8.2-1.rockspec
+luarocks lint luainstaller-1.8.3-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -179,6 +182,14 @@ x86_64 生成 C 代码和 PE 审计
 
 |`test/dependency_limits.lua`
 |发现、显式输入、原生模块与 FFI 的合并计数；重复输入、排除项、恰好达到上限、公共 API 错误与两种 CLI
+
+|`test/entry_arguments.lua`
+|对照直接运行的 Lua，检查入口可变参数与 `arg`、运行时发现、模块加载参数、状态恢复
+及三种产物路径
+
+|`test/benchmark_driver.lua`（POSIX）
+|完整基准驱动的依赖失败、无效规模、预期错误、主动跳过、证据保留，以及没有 GNU timeout
+时的进程时限
 
 |`test/source_normalization.lua`
 |混合换行的 shebang 在分析、运行时发现、两份运行时实现及三种产物模式中保留代码和行号
@@ -414,6 +425,11 @@ LUAI_TEST_LUA=lua sh tools/test-portable-host.sh    # Termux
 bash tools/benchmark-real-world.sh
 ----
 
+驱动使用当前检出目录与 `LUA_BIN`（默认 `lua`）；设置 `LUAI_BIN` 为可执行文件路径
+可改测已安装的命令。缺少必需依赖或结果不符会使运行失败。主动跳过和需要应用宿主
+的 Neovim 探索结果会标为覆盖不完整。命令使用原生进程监督，没有 GNU timeout 时
+也有时限；`LUAI_CMD_TIMEOUT` 设置通用命令预算，默认 600 秒。
+
 该矩阵覆盖：
 
 * 基线（hello world）
@@ -429,15 +445,16 @@ bash tools/benchmark-real-world.sh
 
 * `--skip-external` 跳过 GitHub 网络项目（`luacheck`、`neovim`）
 * `--skip-native` 跳过原生模块安装及相关用例
-* `--fake-scales "100 1000 10000"` 调整压力集
+* `--fake-scales "100,1000,10000"` 调整压力集（每项 1–1000000）
 * `--keep-workspace` 保留夹具和日志
 * `--neovim-timeout 30` 限制每条 neovim 命令的时间上限
 
-默认行为会在完成后清理 `/tmp/luainstaller-*` 工作区。摘要和日志写入：
+默认在完成后清理构建工作区。摘要和命令日志保留在独立的私有结果目录中，失败或
+中断时也保留。驱动会打印其位置：
 
 [source,bash]
 ----
-/tmp/luainstaller-benchmark-*/results/summary.txt
+/tmp/luainstaller-benchmark-results-*/summary.txt
 ----
 
 [#testing-luajit]
@@ -504,9 +521,9 @@ Windows 还在所选 LuaJIT 运行时下运行 `test/windows_native.lua`。
 继续提供上一版。
 
 . 给确认过的提交打标签。rockspec 的 `source.tag` 就是这个标签。
-. 用该标签发布 GitHub Release，并附上 `luainstaller-1.8.2.tar.gz`、
-  `luainstaller-1.8.2.zip`、`luainstaller-1.8.2-1.rockspec`、
-  `luainstaller-1.8.2-1.src.rock` 和 `SHA256SUMS`。
+. 用该标签发布 GitHub Release，并附上 `luainstaller-1.8.3.tar.gz`、
+  `luainstaller-1.8.3.zip`、`luainstaller-1.8.3-1.rockspec`、
+  `luainstaller-1.8.3-1.src.rock` 和 `SHA256SUMS`。
 . 把这五个文件下载到一个空目录，执行 `sha256sum -c SHA256SUMS`。
 . 上传刚下载的 rockspec 和 `.src.rock`。第二个参数就是 Release 里的文件，
   仓库保存的是这个文件的字节：
@@ -514,7 +531,7 @@ Windows 还在所选 LuaJIT 运行时下运行 `test/windows_native.lua`。
 +
 [source,bash]
 ----
-luarocks upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock
+luarocks upload luainstaller-1.8.3-1.rockspec luainstaller-1.8.3-1.src.rock
 ----
 +
 用保存了 API key 的维护者账号执行。key 不要进入仓库，也不要出现在
@@ -527,14 +544,14 @@ luarocks upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock
 [source,bash]
 ----
 lua -e 'package.preload["ltn12"]=function() error("use curl", 0) end' \
-  "$(command -v luarocks)" upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock
+  "$(command -v luarocks)" upload luainstaller-1.8.3-1.rockspec luainstaller-1.8.3-1.src.rock
 ----
 
-. `https://luarocks.org/luainstaller-1.8.2-1.src.rock` 和
-  `https://luarocks.org/luainstaller-1.8.2-1.rockspec` 都能下载，
+. `https://luarocks.org/luainstaller-1.8.3-1.src.rock` 和
+  `https://luarocks.org/luainstaller-1.8.3-1.rockspec` 都能下载，
   并且字节与 GitHub Release 的文件一致。
-. 先向空树做无版本号安装，再覆盖上一版安装。两次都选中 1.8.2。
-  `luai -v` 输出 `luai 1.8.2`，`luainstaller version` 也输出这一版。
+. 先向空树做无版本号安装，再覆盖上一版安装。两次都选中 1.8.3。
+  `luai -v` 输出 `luai 1.8.3`，`luainstaller version` 也输出这一版。
   然后删除空树。
 . 更早的 Git 标签如果已经有 GitHub rock，而 luarocks.org 还没有，
   用同样的步骤上传。

@@ -3,9 +3,13 @@ Real-world project compile commands
 
 `Real World` means compiling the real projects tracked by the benchmark flow.
 
-Run all cases in one command (script-managed temp workspace):
+Run all cases from this checkout (script-managed temp workspace):
 
-KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 bash tools/benchmark-real-world.sh
+NEOVIM_TIMEOUT=30 bash tools/benchmark-real-world.sh
+
+The driver preserves summary and command logs in the private results directory
+printed on exit. Use --keep-workspace to retain build fixtures as well. Explicit
+skips and host-dependent exploratory results are marked incomplete.
 
 1) Checkout real projects
 -------------------------
@@ -82,7 +86,7 @@ LUA_PATH="$LUACHECK_PATH;$LUA_PATH" \
 
 # Neovim runtime/lua subtree
 # Use the suite to generate wrapper and run (same suite path pattern):
-KEEP_WORKSPACE=1 NEOVIM_TIMEOUT=30 bash tools/benchmark-real-world.sh
+NEOVIM_TIMEOUT=30 bash tools/benchmark-real-world.sh
 
 3) Script-generated stress cases
 -------------------------------

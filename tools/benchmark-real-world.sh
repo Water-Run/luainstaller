@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
-LUAI_BIN=${LUAI_BIN:-luai}
+LUAI_BIN=${LUAI_BIN:-}
 LUA_BIN=${LUA_BIN:-lua}
 LUAROCKS_BIN=${LUAROCKS_BIN:-luarocks}
 WORK_ROOT=${WORK_ROOT:-/tmp/luainstaller-benchmark}
@@ -20,7 +20,9 @@ RESULTS_DIR="$WORK_ROOT/results"
 LOG_DIR="$RESULTS_DIR/logs"
 SUMMARY="$RESULTS_DIR/summary.txt"
 NEOVIM_TIMEOUT=${NEOVIM_TIMEOUT:-30}
+COMMAND_TIMEOUT=${LUAI_CMD_TIMEOUT:-600}
 failures=()
+incomplete=()
 
 show_help() {
     cat <<EOF
@@ -84,14 +86,39 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+positive_integer() {
+    [[ "$2" =~ ^[0-9]+$ ]] && [ "${#2}" -le 8 ] && [ "$2" -gt 0 ] && [ "$2" -le "$3" ] || {
+        echo "$1 must be an integer between 1 and $3" >&2
+        exit 2
+    }
+}
+
+compact_scales=${FAKE_SCALES//[[:space:]]/}
+case "$compact_scales" in
+    ''|,*|*,|*,,*) echo 'invalid --fake-scales list' >&2; exit 2 ;;
+esac
+read -r -a scales <<< "${FAKE_SCALES//[[:space:],]/ }"
+for n in "${scales[@]}"; do positive_integer --fake-scales "$n" 1000000; done
+positive_integer --max-deps "$DEFAULT_MAX_DEPS" 1000000
+positive_integer --neovim-max-deps "$NEOVIM_MAX_DEPS" 1000000
+positive_integer --neovim-timeout "$NEOVIM_TIMEOUT" 86400
+positive_integer LUAI_CMD_TIMEOUT "$COMMAND_TIMEOUT" 86400
+case "$WORK_ROOT" in
+    /tmp/luainstaller-*) ;;
+    *) echo "unsafe work root: $WORK_ROOT" >&2; exit 2 ;;
+esac
 WORK_ROOT=$(mktemp -d "${WORK_ROOT}-XXXXXX")
-LOG_DIR="$WORK_ROOT/results/logs"
-SUMMARY="$WORK_ROOT/results/summary.txt"
+RESULTS_DIR=$(mktemp -d /tmp/luainstaller-benchmark-results-XXXXXX)
+LOG_DIR="$RESULTS_DIR/logs"
+SUMMARY="$RESULTS_DIR/summary.txt"
 ROCK_ROOT="$WORK_ROOT/rocks"
 
 mkdir -p "$LOG_DIR"
 
 cleanup() {
+    local status=$?
+    printf "driver exit=%s\n" "$status" >> "$SUMMARY"
+    echo "summary file: $SUMMARY"
     if [ "$KEEP_WORKSPACE" -eq 1 ]; then
         echo "workspace kept: $WORK_ROOT"
     else
@@ -99,6 +126,14 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' HUP TERM
+
+if [ -z "$LUAI_BIN" ]; then
+    LUAI_BIN="$WORK_ROOT/luai-source"
+    printf '#!/usr/bin/env bash\nexec %q %q "$@"\n' "$LUA_BIN" "$PROJECT_ROOT/bin/luai.lua" > "$LUAI_BIN"
+    chmod +x "$LUAI_BIN"
+fi
 
 require_cmds() {
     for c in bash git gcc make awk tar; do
@@ -127,29 +162,31 @@ run_cmd() {
     local label=$1
     local logfile=$2
     local expect_fail=$3
-    local cmd_timeout=${LUAI_CMD_TIMEOUT:-0}
+    local cmd_timeout=${CASE_TIMEOUT:-$COMMAND_TIMEOUT}
     local start
     local code
     shift 3
     start=$SECONDS
     set +e
-    if [ "$cmd_timeout" -gt 0 ] && command -v timeout >/dev/null 2>&1; then
-        timeout "$cmd_timeout" "$@" >"$logfile" 2>&1
-    else
-        "$@" >"$logfile" 2>&1
-    fi
+    "$LUA_BIN" "$PROJECT_ROOT/tools/benchmark-command.lua" "$cmd_timeout" "$@" >"$logfile" 2>&1
     code=$?
     set -e
     local elapsed_ms=$(( (SECONDS - start) * 1000 ))
-    if [ "$code" -eq 0 ]; then
-        log "[OK] $label in ${elapsed_ms}ms"
-    else
-        if [ "$expect_fail" -eq 1 ]; then
-            log "[EXPECT_FAIL] $label in ${elapsed_ms}ms (exit=$code)"
+    if [ "$expect_fail" -eq 1 ]; then
+        if [ "$code" -eq 1 ] && grep -q '^error: DynamicRequireError:' "$logfile"; then
+            log "[EXPECT_FAIL] $label in ${elapsed_ms}ms (DynamicRequireError)"
         else
-            log "[FAIL] $label in ${elapsed_ms}ms (exit=$code)"
+            log "[FAIL] $label expected DynamicRequireError (exit=$code)"
             failures+=("$label")
         fi
+    elif [ "$expect_fail" -eq 2 ] && [ "$code" -eq 1 ] && grep -q '^error: DiscoveryError:' "$logfile"; then
+        log "[EXPLORATORY] $label could not run outside its application host"
+        incomplete+=("$label")
+    elif [ "$code" -eq 0 ]; then
+        log "[OK] $label in ${elapsed_ms}ms"
+    else
+        log "[FAIL] $label in ${elapsed_ms}ms (exit=$code)"
+        failures+=("$label")
     fi
     return "$code"
 }
@@ -164,7 +201,7 @@ run_case() {
     local lua_cpath=$7
     local expect_fail=${8:-0}
     local runtime_exec=${9:-0}
-    local cmd_timeout=${10:-0}
+    local CASE_TIMEOUT=${10:-$COMMAND_TIMEOUT}
 
     mkdir -p "$out"
     log "### $name"
@@ -173,16 +210,13 @@ run_case() {
     local env_prefix=()
     [ -n "$lua_path" ] && env_prefix+=(LUA_PATH="${lua_path};;")
     [ -n "$lua_cpath" ] && env_prefix+=(LUA_CPATH="${lua_cpath};;")
-    if [ "$cmd_timeout" -gt 0 ]; then
-        env_prefix+=(LUAI_CMD_TIMEOUT="$cmd_timeout")
-    fi
 
-    run_cmd "$name analyze" "$out/analyze.log" "$expect_fail" \
+    run_cmd "$name analyze" "$LOG_DIR/$name-analyze.log" "$expect_fail" \
         env "${env_prefix[@]}" "$LUAI_BIN" -a "$entry" -d "$discovery" --max-deps "$max_deps" || true
 
-    run_cmd "$name bundle(dir)" "$out/bundle-dir.log" "$expect_fail" \
+    run_cmd "$name bundle(dir)" "$LOG_DIR/$name-bundle-dir.log" "$expect_fail" \
         env "${env_prefix[@]}" "$LUAI_BIN" -b --dir "$entry" -d "$discovery" -o "$out/dir" --max-deps "$max_deps" || true
-    run_cmd "$name bundle(file)" "$out/bundle-onefile.log" "$expect_fail" \
+    run_cmd "$name bundle(file)" "$LOG_DIR/$name-bundle-onefile.log" "$expect_fail" \
         env "${env_prefix[@]}" "$LUAI_BIN" -b --file "$entry" -d "$discovery" -o "$out/onefile" --max-deps "$max_deps" || true
 
     if [ "$runtime_exec" -eq 1 ]; then
@@ -199,39 +233,17 @@ run_case() {
         fi
 
         empty_path=$(mktemp -d /tmp/luainstaller-empty-path-XXXXXX)
+        local CASE_TIMEOUT=6
         if [ -n "$launcher_dir" ]; then
-            if command -v timeout >/dev/null 2>&1; then
-                if timeout 6 env -i PATH="$empty_path" "$launcher_dir" >/dev/null 2>&1; then
-                    log "$name dir-exec ok"
-                else
-                    log "[FAIL] $name dir-exec (timeout/exit mismatch)"
-                    failures+=("$name dir-exec")
-                fi
-            elif env -i PATH="$empty_path" "$launcher_dir" >/dev/null 2>&1; then
-                log "$name dir-exec ok"
-            else
-                log "[FAIL] $name dir-exec"
-                failures+=("$name dir-exec")
-            fi
+            run_cmd "$name dir-exec" "$LOG_DIR/$name-dir-exec.log" 0 \
+                env -i PATH="$empty_path" "$launcher_dir" || true
         else
             log "[FAIL] $name dir executable not found"
             failures+=("$name dir executable")
         fi
-
         if [ -x "$out/onefile" ]; then
-            if command -v timeout >/dev/null 2>&1; then
-                if timeout 6 env -i PATH="$empty_path" "$out/onefile" >/dev/null 2>&1; then
-                    log "$name onefile exec ok"
-                else
-                    log "[FAIL] $name onefile exec (timeout/exit mismatch)"
-                    failures+=("$name onefile exec")
-                fi
-            elif env -i PATH="$empty_path" "$out/onefile" >/dev/null 2>&1; then
-                log "$name onefile exec ok"
-            else
-                log "[FAIL] $name onefile exec"
-                failures+=("$name onefile exec")
-            fi
+            run_cmd "$name onefile-exec" "$LOG_DIR/$name-onefile-exec.log" 0 \
+                env -i PATH="$empty_path" "$out/onefile" || true
         else
             log "[FAIL] $name onefile binary missing"
             failures+=("$name onefile binary")
@@ -248,19 +260,14 @@ git_clone_or_fail() {
     local clone_log
     clone_log="$LOG_DIR/git-clone-${dir##*/}.log"
     rm -rf "$dir"
-    if command -v timeout >/dev/null 2>&1; then
-        if ! timeout 120 git clone --depth 1 --filter=blob:none "$url" "$dir" >"$clone_log" 2>&1; then
-            if ! timeout 120 git clone --depth 1 "$url" "$dir" >"$clone_log" 2>&1; then
-                log "skip: git clone failed $url"
-                return 1
-            fi
-        fi
-    else
-        if ! git clone --depth 1 --filter=blob:none "$url" "$dir" >"$clone_log" 2>&1; then
-            if ! git clone --depth 1 "$url" "$dir" >"$clone_log" 2>&1; then
-                log "skip: git clone failed $url"
-                return 1
-            fi
+    local CASE_TIMEOUT=120
+    if ! "$LUA_BIN" "$PROJECT_ROOT/tools/benchmark-command.lua" "$CASE_TIMEOUT" \
+        git clone --depth 1 --filter=blob:none "$url" "$dir" >"$clone_log" 2>&1; then
+        if ! "$LUA_BIN" "$PROJECT_ROOT/tools/benchmark-command.lua" "$CASE_TIMEOUT" \
+            git clone --depth 1 "$url" "$dir" >>"$clone_log" 2>&1; then
+            log "[FAIL] git clone failed $url"
+            failures+=("git clone $url")
+            return 1
         fi
     fi
     return 0
@@ -340,6 +347,8 @@ log "lua : $LUA_BIN"
 log "luarocks: $LUAROCKS_BIN"
 log "lua ABI: $SCRIPT_LUA_ABI"
 log "workspace: $WORK_ROOT"
+log "lua command: $(command -v "$LUA_BIN")"
+run_cmd "luai version" "$LOG_DIR/luai-version.log" 0 "$LUAI_BIN" -v || true
 
 # A. baseline hello world
 run_case "hello_world" "$PROJECT_ROOT/test/single_file/01_hello_luainstaller.lua" \
@@ -391,7 +400,8 @@ if [ "$SKIP_NATIVE" -eq 0 ]; then
     cpath="${ROCK_ROOT}/lib/lua/$SCRIPT_LUA_ABI/?.so"
     lua_path="${ROCK_ROOT}/share/lua/$SCRIPT_LUA_ABI/?.lua;${ROCK_ROOT}/share/lua/$SCRIPT_LUA_ABI/?/init.lua"
 
-    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
+    if "$LUA_BIN" "$PROJECT_ROOT/tools/benchmark-command.lua" "$COMMAND_TIMEOUT" \
+        "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
         install lua-cjson 2.1.0.10-1 \
         >"$LOG_DIR/luarocks-install-lua-cjson.log" 2>&1; then
         cjson_ready=1
@@ -402,10 +412,12 @@ EOF
         run_case "lua-cjson" "$WORK_ROOT/cjson-main.lua" \
             "$WORK_ROOT/case-lua-cjson" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 1
     else
-        log "skip: lua-cjson install failed"
+        log "[FAIL] lua-cjson install failed"
+        failures+=("lua-cjson install")
     fi
 
-    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
+    if "$LUA_BIN" "$PROJECT_ROOT/tools/benchmark-command.lua" "$COMMAND_TIMEOUT" \
+        "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
         install luasocket 3.1.0-1 \
         >"$LOG_DIR/luarocks-install-luasocket.log" 2>&1; then
         cat > "$WORK_ROOT/luasocket-main.lua" <<'EOF'
@@ -421,10 +433,12 @@ EOF
         run_case "luasocket" "$WORK_ROOT/luasocket-main.lua" \
             "$WORK_ROOT/case-luasocket" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 1
     else
-        log "skip: luasocket install failed"
+        log "[FAIL] luasocket install failed"
+        failures+=("luasocket install")
     fi
 
-    if "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
+    if "$LUA_BIN" "$PROJECT_ROOT/tools/benchmark-command.lua" "$COMMAND_TIMEOUT" \
+        "$LUAROCKS_BIN" --tree "$ROCK_ROOT" --lua-version "$SCRIPT_LUA_ABI" \
         install luafilesystem 1.9.0-1 \
         >"$LOG_DIR/luarocks-install-luafilesystem.log" 2>&1; then
         cat > "$WORK_ROOT/luafilesystem-main.lua" <<'EOF'
@@ -434,10 +448,12 @@ EOF
         run_case "luafilesystem" "$WORK_ROOT/luafilesystem-main.lua" \
             "$WORK_ROOT/case-luafilesystem" "$DEFAULT_MAX_DEPS" "static" "$lua_path" "$cpath" 0 1
     else
-        log "skip: luafilesystem install failed"
+        log "[FAIL] luafilesystem install failed"
+        failures+=("luafilesystem install")
     fi
 else
     log "skip-native enabled"
+    incomplete+=("native cases explicitly skipped")
 fi
 
 if [ "$SKIP_EXTERNAL" -eq 0 ]; then
@@ -476,16 +492,19 @@ if [ "$SKIP_EXTERNAL" -eq 0 ]; then
             mkdir -p "$WORK_ROOT/neovim-wrapper"
             make_neovim_wrapper "$NVM_RUNTIME" "$WORK_ROOT/neovim-wrapper" "$NEOVIM_WRAP_LIMIT"
             run_case "neovim_runtime_lua" "$WORK_ROOT/neovim-wrapper/main.lua" \
-                "$WORK_ROOT/case-neovim-runtime" "$NEOVIM_MAX_DEPS" "runtime" "" "" 1 0 "$NEOVIM_TIMEOUT"
+                "$WORK_ROOT/case-neovim-runtime" "$NEOVIM_MAX_DEPS" "runtime" "" "" 2 0 "$NEOVIM_TIMEOUT"
         else
-            log "skip: neovim runtime/lua not found"
+            log "[FAIL] neovim runtime/lua not found"
+            failures+=("neovim runtime entry")
         fi
     fi
 else
     log "skip-external enabled"
+    incomplete+=("external cases explicitly skipped")
 fi
 
-for n in $FAKE_SCALES; do
+for n in "${scales[@]}"; do
+    n=$((10#$n))
     make_fake_project "$WORK_ROOT/fake-$n" "$n"
     run_case "fake_${n}" "$WORK_ROOT/fake-$n/main.lua" \
         "$WORK_ROOT/case-fake-${n}" "$((n + 100))" "static" "" "" 0 1
@@ -494,7 +513,11 @@ done
 log "== SUMMARY =="
 benchmark_status=0
 if [ ${#failures[@]} -eq 0 ]; then
-    log "all cases completed"
+    if [ ${#incomplete[@]} -eq 0 ]; then
+        log "all cases completed"
+    else
+        log "incomplete coverage: ${incomplete[*]}"
+    fi
 else
     log "failed: ${failures[*]}"
     benchmark_status=1

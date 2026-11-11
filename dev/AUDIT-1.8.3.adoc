@@ -1,0 +1,356 @@
+= luainstaller 1.8.3 审计记录
+:toc:
+:sectanchors:
+
+== 状态与范围
+
+2026-10-26 的准备记录以 `v1.8.2` 为基线，记载初始 `main` 工作区干净。
+2026-11-11 本轮核对：`HEAD` 与 `v1.8.2^{commit}` 均为
+`0329b092ac54fa2b8c99732c207670e509ab3382`；产品仍为 1.8.2。
+接手时已有五份开发文档改动：`PLAN.adoc`、`PLAN-1.9.0.adoc`、`README.adoc`
+已修改，`PLAN-1.8.3.adoc`、本文件未跟踪。本轮沿用这些草案，没有重置既有改动。
+
+用户指定 Sol 首审与计划 → Terra 复查核实 → Astra 快速检查与最终确认 → Sol 实现。
+Sol 首审、Terra 复查与 Astra 最终确认已完成，等待切回 Sol 实现；完整顺序和停止条件见
+xref:PLAN-1.8.3.adoc#review-handoff[模型交接]。后续按最终确认的计划修复与验收，
+再进入 xref:PLAN-1.9.0.adoc[1.9.0]。
+
+本记录区分代码观察、已复现缺陷和未核实项。尚未完成全面质量审计、
+1.8.3 原生平台矩阵或发布验证，也尚无本轮产品修复。
+
+[#initial-observations]
+== 准备阶段的观察
+
+[cols="1,2,4,4",options="header"]
+|===
+|编号 |当前分类 |依据与影响 |下一步与关闭条件
+
+|Q183-01
+|历史待核项
+|xref:AUDIT-1.8.x.adoc[1.8.x 审计]的 Windows 进程身份章节保留了未解释超时和
+“完整事务恢复复测继续执行”的记录；仅凭该文字不能判断最终提交是否闭环。
+|核对对应提交的最终日志；缺少证据则以相同环境、SDK 和原预算复测，
+记录实际退出、恢复结果与产物运行。补充旧主机结果与必需 MSVC 门禁分开记录。
+
+|Q183-02
+|实现审查入口
+|`src/cgen.lua` 的 `RUNTIME_SOURCE` 与 `src/runtime.lua` 独立维护；
+启动器、宿主 C 和分发材料也存在源码/嵌入副本。已有等价与材料回归，不代表所有异常组合已覆盖。
+|逐对核对现有契约，补充加载失败、状态恢复、别名、FFI、参数及重复调用的行为对照；
+涉及 C 的修改实际编译运行。当前没有确认副本不一致。
+
+|Q183-03
+|已观察到测试工具行为，待反例验证
+|`tools/benchmark-real-world.sh` 的原生依赖安装与部分 clone 失败只写 skip，
+不加入 `failures`；最终可能报告 `all cases completed`。
+`expect_fail` 也没有把意外成功记为失败。缺少 `timeout` 时部分命令失去外层时限。
+逐案例时限通过子进程环境传入，而 `run_cmd` 读取当前 shell 环境中的时限，需核对是否生效。
+|用隔离工具替身复现获取失败、意外成功和挂起，验证时限传递，明确必需覆盖失败返回非零、
+主动缩减运行标明不完整；防止修正测试脚本时放过错误退出原因。
+
+|Q183-04
+|已观察到证据保留差异
+|同一基准脚本把摘要与日志放在工作目录内，默认退出删除该目录；
+`docs/TESTING.adoc` 同时列出了该摘要路径。`SECONDS` 的整秒计时乘以 1000，
+且产物执行主要检查退出状态，现状不足以作为 1.9.0 运行性能证据。
+|1.8.3 明确结果保留方式并用成功/失败运行验证，校准测试说明；
+1.9.0 再实现高精度运行采样、固定负载与统计，不能引用现有耗时宣称运行收益。
+
+|Q183-05
+|已观察到测试维护差异
+|`test/README.adoc` 仍说 `cli_surface.lua` 需要 POSIX shell，并把 lsqlite3 来源写成
+mirror commit；当前套件已有 Windows 分支，下载脚本采用带版本的 Debian 源路径。
+`.github/workflows/ci.yml` 的 Linux x86 作业两次列出 `lock_identity.lua`。
+|核对实际脚本和套件表后同步说明、去除无意重复；检查其他列表是否有遗漏，
+保留必要平台差异，运行相关文档与套件契约。
+|===
+
+这些观察是首轮入口；完整审查范围仍以实施计划的清单为准。
+旧审计里的环境限制与部署边界保留原语境，不自动重新归类为当前缺陷。
+
+== 前期整理验证（2026-10-26 原记录）
+
+本机使用 Lua/luac 5.4.8。以下检查正常退出，退出码均为零：
+
+* `src/` 全部 Lua 文件通过 `luac -p`；`tools/*.sh` 按各自 shebang 通过 Bash 或 POSIX sh 语法检查。
+* `lua test/cli_split_smoke.lua`。
+* `lua test/contract_docs.lua`，包含 `release_docs_contract.lua`。
+* `lua test/smoke_all.lua`，最终输出 `all packaging-target samples passed comprehensive smoke audit`。
+* 本次五份开发文档的 30 个交叉引用及显式锚点检查；`git diff --check`。
+
+原始输出在本机 `/tmp/luainstaller-183-plan-checks.fSUw79/`，
+`results.txt` 记录各检查退出码，`base-commit.txt` 记录基线，检查进程已退出。
+本轮只修改开发文档；这些本地结果不能替代固定补丁版本的原生矩阵、全面审查或发布门禁。
+
+[#sol-review]
+== Sol 首轮审查（2026-11-11）
+
+=== 基线与方法
+
+本机为 Fedora 44 x86_64，Lua/luac 5.4.8，GCC 16.2.1；
+补充进程内对照使用本机 LuaJIT 2.1.1767980792，并非项目固定提交的 LuaJIT 门禁。
+产品源文件保持标签状态。临时夹具、产物和日志在仓库外生成；本轮不加入正式测试或修复。
+
+审查集中在入口调用、runtime/bootstrap、发现脚本、CLI/API 归一化、输出发布与异常清理边界，
+并核对测试驱动、分发材料和旧审计。完整范围仍由实施计划的审查表约束。
+两份实现结果一致只说明没有分歧，不能证明它们与解释器语义一致；Q183-06 正是共同缺陷。
+
+=== 已核实的问题与优先级
+
+[cols="1,2,4,4",options="header"]
+|===
+|编号 |本轮结论 |复现与影响 |验收方向
+|Q183-06（新增）
+|P1 / 已复现产品缺陷，未修复
+|`src/runtime.lua:185`、`src/cgen.lua:463`、`src/discovery.lua:726`
+调用入口 chunk 时没有传入应用参数。
+直接解释器收到 `alpha`、空字符串、`--literal` 时，入口 `select('#', ...)` 为 3；
+两份 runtime 和实际编译的 onedir、extract、no-extract 产物均为 0，
+但 `arg[1..3]` 正确。入口根据 `...` 选择模块时，直接运行成功，runtime discovery 返回
+`DiscoveryError`，内部原因是入口收到 nil。本机 LuaJIT 的两个 runtime 也均返回 0。
+|给入口传入完整实参，保持 `arg` 和多返回值语义；加入直接解释器对照、发现路径与三种真实产物回归。
+五 ABI、固定 LuaJIT 及 Windows/MSVC 的实际复验仍待实施阶段。
+|Q183-03a
+|P1 / 已复现测试结果失真，未修复
+|整脚本使用能生成零退出夹具的 luai 替身；三个 LuaRocks 安装均失败，两个 Git clone 均失败，
+没有主动 skip，脚本仍报告 `all cases completed` 并退出 0。
+替身不访问网络；此结果证明驱动判定有缺口，不证明真实项目已成功构建。
+|默认必需覆盖缺失返回非零；主动 skip 单独列出并显示覆盖不完整，不能混为完整成功。
+|Q183-03b
+|P1 / 已复现时限未生效，未修复
+|对原脚本未改动的 `run_case` / `run_cmd` 定义调用案例预算 1 秒，
+luai 替身每次睡眠 2 秒；三个命令各成功运行约 2 秒，总计 6 秒，失败数为 0。
+`LUAI_CMD_TIMEOUT` 只传进子进程，外层 `run_cmd` 读不到。
+缺少 timeout 时直接执行无外层时限的分支已读码，尚未用挂起进程验证。
+|时限覆盖实际受管命令及后代；缺工具不静默失去边界。补整脚本超时与工具缺失反例。
+|Q183-03c
+|P1 / 已复现失败原因未校验；案例目标待复核
+|原 `run_cmd` 在 `expect_fail=1` 时把退出 0 标为 OK，把无关的退出 42 标为 EXPECT_FAIL，
+两者均不增加失败数。当前静态动态 require 案例应拒绝计算出的模块名；
+Neovim 探索性案例是否必须失败不能仅从参数名判断。
+|明确每个案例的允许结果及原因；真正的负例拒绝意外成功和无关失败，探索性结果单列。
+不把此观察直接解读为所有 `expect_fail=1` 都必须返回非零。
+|Q183-04
+|P2 / 已核实默认不保留证据，待改善用法
+|同样夹具分别在默认与 `--keep-workspace` 下运行，均退出 0；
+默认运行打印的 summary 路径在进程退出后不存在，保留模式下存在。
+指南也说明了默认清理，因此这是证据取得方式的可用性问题，不算新的产品缺陷或默认清理错误。
+现有整秒计时和只看退出码的运行探针不具备 1.9.0 性能验收能力，这是当前测试边界。
+|统一默认结果保留策略或保留用法与双语说明，验证成功、失败和中断；性能采样留在 1.9.0。
+|Q183-05
+|P3 / 静态核实维护问题，未修复
+|`test/README.adoc` 的 POSIX shell 限定与已存在的 Windows 分支不符；
+lsqlite3 的 mirror commit 描述与两个 POSIX 安装驱动的 Debian 版本路径不符。
+CI 的 Linux x86 作业重复执行 `lock_identity.lua`。
+|同步说明和列表，保留平台特有覆盖；不因静态核对宣称对应平台已运行通过。
+|===
+
+=== Q183-06 最小独立复现
+
+从仓库根部执行；`WORK` 是新建的私有工作目录，保留输出供复核：
+
+[source,bash]
+----
+WORK=$(mktemp -d /tmp/luainstaller-varargs-XXXXXX)
+printf '%s\n' 'print(select("#", ...), ...)' > "$WORK/main.lua"
+lua "$WORK/main.lua" alpha '' --literal
+lua bin/luai.lua -b --dir "$WORK/main.lua" -o "$WORK/app"
+"$WORK/app/app" alpha '' --literal
+----
+
+预期两次应用运行的参数数量均为 3；当前直接运行是 3，产物是 0。
+解包、免解包、runtime API、内嵌 runtime 和发现路径的完整夹具为证据目录中的
+`probe-varargs.lua`。以新的空目录作为它的第一个参数，不能覆盖已有 onefile 路径。
+发现对照显式设置夹具的 `LUA_PATH`，避免把普通模块搜索路径失败误判为参数缺陷。
+
+=== 历史待核与已经排除的材料疑点
+
+* Q183-01：旧 Windows 的最终事务恢复日志本轮未取得；历史记载不能作为新一轮通过证据。
+  此项仍待核，不宣称发现了新的 PID 清理缺陷，也不把补充旧主机作为额外必需发布平台。
+* Q183-02：POSIX、Windows 两份宿主 C 与内嵌源逐字节一致；launcher 两个模板生成的源码一致；
+  七份分发材料（包含 RELINKING 和 payload 生成器）与规范源逐字节一致。
+  本轮未发现这些材料的当前漂移；没有据此关闭加载失败、嵌套调用、FFI 等行为审查。
+* 没有新增已确认的输出误删、越界写入或误杀问题。输出锁、父目录保留、恢复日志和
+  onefile 清理只核对了入口及既有回归，本轮未做完整故障注入，不将其记作安全验收通过。
+
+=== 覆盖账本与剩余检查
+
+[cols="2,4,4",options="header"]
+|===
+|区域 |本轮证据 |仍需执行
+|CLI/API
+|读选项归一化与 CLI 边界；`cli_split_smoke`、`cli_boundaries`、`version_contract` 通过
+|新增语义回归在两个入口落地；异常 I/O、取消和状态恢复的完整门禁
+|发现与执行
+|直接解释器、runtime 对照、runtime trace 和三种 Linux 原生产物复现 Q183-06；source_normalization 通过
+|修复前正式失败回归、其他 ABI、固定 LuaJIT 原生编译、模块参数和错误恢复
+|工具链与原生模块
+|核对历史库加载名问题与当前标签；本地三种产物构建成功
+|共享/静态库身份、native/FFI、源码移除、MoonScript 交叉场景及原生 Windows
+|输出、进程与单文件
+|核对公共事务和清理边界；读取历史恢复风险
+|崩溃、恢复中断、并发、PID 复用及用户文件保护的行为回归；旧 Windows 历史证据核对
+|分发、安装与文档
+|宿主源/launcher/七份材料一致；文档契约通过
+|安装树、真实重链接、完整许可证及无系统 Lua 测试，双语内容随实际修复同步
+|测试工具
+|Q183-03a 的整脚本反例，Q183-03b/c 的原函数反例，Q183-04 的退出后文件检查
+|正式整脚本反例、必需条件缺失、超时后代回收、列表接线及完整原生门禁
+|===
+
+=== 本轮检查与证据
+
+证据根目录：`/home/waterrun/.local/tmp/luainstaller-183-sol-review-spkno56d/`。
+`metadata.json` 保存提交与范围，`initial-status.txt` 保存接手时工作区状态。
+这些本地材料不提交；后续正式回归需保存到 `test/`，结论保留在本记录。
+
+* `baseline-results.json`：生产 Lua 和 shell 语法、`lua_abi`、`version_contract`、
+  `cli_split_smoke`、`cli_boundaries`、`contract_docs`（含 release 文档契约）、
+  `source_normalization` 均退出 0。
+* `probe-varargs.log`：三个真实构建成功、三个产物的参数错误、直接发现对照成功与 runtime trace 失败。
+  `probe-luajit-runtime.log` 是未固定的本机 LuaJIT 进程内补充复现。
+* `benchmark-results.json`、`benchmark-retained.log`、`benchmark-default-cleanup.log`：
+  整脚本的错误成功与退出后的证据存留检查；保留模式夹具在
+  `/tmp/luainstaller-benchmark-IPVQaL/`。
+* `probe-benchmark-timeout.log`、`probe-benchmark-negative.log`：时限与失败判定的原函数反例。
+  夹具脚本也在证据根目录中，未改写生产脚本。
+* `material-parity.log`：两份宿主源、launcher 生成源码和七份分发材料一致。
+
+首次本地检查驱动错误地给整个 `smoke_all` 加了 120 秒外层限时，得到 124，
+不是套件自行失败，也不是通过。`smoke_all.log` 和原结果保留。
+确认该进程已经退出且没有匹配的 Lua 检查进程后，按规范命令单独重跑；
+原生构建的单次预算没有调整。完整结果见下面的最终交接状态。
+
+== Terra 接续清单
+
+. 先核对 HEAD、五份开发文档和证据目录；本轮没有产品修改，不能按已修复状态复测。
+. 在新的私有目录独立复现 Q183-06，检查入口 vararg 与模块 loader vararg 的边界，
+  核对 nil/false/多返回值、`arg[0]` 和错误后的 `package.loaded` / searcher / FFI 状态恢复。
+. 对 Q183-03 分别核实时限、退出状态和错误类型，避免让“改成必须失败”制造新的假通过。
+  当前替身证据验证的是驱动；补充真实 static 动态 require 错误的对照。
+  正式基准还需记录实际调用的 luai/Lua 路径与版本，避免检验到已安装的旧版。
+. 检查 Q183-01 的最终日志是否仍可取得，明确补充主机缺证据与必需原生门禁之间的区别。
+. 根据覆盖账本调整实施范围、优先级和验收；记录接受、调整、排除或待核理由后停工，交 Astra。
+
+== Sol 交接状态（历史）
+
+首轮审查与计划完成，Terra 复查、Astra 确认和 Sol 实现均未开始。
+没有运行远程主机、CI 发布或上传；1.9.0 保持排队。
+规范命令 `lua test/smoke_all.lua` 退出 0，耗时 174.35 秒，末行是
+`all packaging-target samples passed comprehensive smoke audit`；
+证据为 `smoke-all-canonical.log` 与 `smoke-result.json`。
+该结果与其余本地检查只验证当前标签及开发文档，不替代最终补丁提交的发布门禁。
+
+五份开发文档的 31 个交叉引用及显式锚点通过检查；最终文档契约和
+`git diff --check` 的结果保存在 `final-results.json`。源码、测试、工具、公开指南、
+版本与发布文件相对 HEAD 均未修改。检查及复现进程已退出，没有需要接管的后台任务。
+
+[#terra-review]
+== Terra 复查（2026-11-11）
+
+基线再次核对：HEAD 与 `v1.8.2` 均为
+`0329b092ac54fa2b8c99732c207670e509ab3382`，沿用已有五份开发文档改动。
+本轮独立复现与对照证据在 `/tmp/luainstaller-terra-183/`；未更改产品、正式测试或公开指南。
+
+[cols="1,2,5",options="header"]
+|===
+|编号 |复查决定 |依据和边界
+|Q183-06
+|接受，补充回归约束
+|直接 Lua 5.4 运行相同参数报告 `count=3`，本轮独立构建的 onedir 报告 `count=0`，
+两者的 `arg[1]` 均为 `alpha`。独立 trace 夹具直接运行退出 0，CLI runtime discovery
+退出 1 并报告 `DiscoveryError`；verbose 输出的原因是入口缺少 vararg。
+两份 runtime 的模块 loader 仍收到模块名，应保留 Lua 原有 loader 调用约定；
+5.2 及后续的 loader data 与 5.1 行为需按运行时分别对照。
+本轮不是完整官方五 ABI 或 Windows 复测。
+|Q183-02
+|保留进一步审查；本轮对照通过
+|两份 runtime 的进程内夹具验证模块名、包含 nil/false 的五个返回值、成功及异常后
+`arg`、searcher、`package.loaded` 恢复。本机未固定 LuaJIT 上，FFI 的失败与嵌套失败
+检查均恢复原 `ffi.load`。这些是有限场景，不代表全部嵌套、别名和异常均已覆盖。
+最初嵌套夹具误用同一个入口导致递归；`ffi.log` 原样保留，以独立内层失败入口修正后
+结果 `ffi-corrected.log` 为准，未把夹具错误计作产品缺陷。
+|Q183-03a/b/c
+|接受；明确负例与探索性案例
+|独立整脚本中，LuaRocks 与 Git 替身失败时仍退出 0 并报告所有案例完成；
+原函数对 1 秒案例预算允许三个各 2 秒命令完成，且意外成功及无关退出 42 均未计入失败。
+真实 luai 对动态静态 require 退出 1，并报 `DynamicRequireError`；这是可断言的负例。
+Neovim 探索案例仍需定义预期，不能简单要求必定失败。缺 timeout 的挂起与后代清理尚未执行。
+|Q183-04
+|接受为用法和证据保留问题
+|原指南已说明默认清理，不能将其定性为产品缺陷；保留或清理策略由最终方案明确，
+并与成功、失败和中断的证据路径一起验证。性能测量留在 1.9.0。
+|Q183-05
+|接受为维护项
+|继续同步测试说明和重复列表；静态观察不代替 Windows 平台实测。
+|Q183-01
+|待核，未关闭
+|复看现有审计及本机临时目录的有限文件名清单，未找到足以绑定最终提交、
+完整退出状态和恢复后产物的旧 Windows 事务证据。本轮未读取历史原始日志或重启远程任务。
+旧主机是补充证据；必需的 Windows/MSVC 门禁仍在最终提交执行。
+|===
+
+=== 新增 Q183-07：逗号分隔的压力规模漏测
+
+`tools/benchmark-real-world.sh --help` 称 `--fake-scales` 支持逗号或空格分隔。
+独立整脚本实验用无网络 luai 替身、显式 `--skip-native --skip-external`，
+传入 `--fake-scales '1,2'`：shell 两次报告 `integer expected`，只生成 `fake_1,2`，
+其项目目录只有 `main.lua`，脚本仍返回 0 并报告 `all cases completed`。
+同一替身用 `'1 2'` 则生成两个案例 `fake_1`、`fake_2`。这是已复现的测试工具缺陷，
+不表示真实打包器执行成功。记录为 P2，纳入 Q183-03 的测试工具修复批次。
+空项、零、负数、非数字和混合分隔的行为须先定义并加入回归，防止错误输入制造空压力集。
+
+=== 证据与 Astra 接续
+
+* `review.lua`、`review.log`、`ffi.lua`、`ffi-corrected.log`：runtime 和有限状态恢复对照。
+* `direct.log`、`build.log`、`artifact.log`、`trace-cli-verbose.log`：实际产物与 runtime 发现。
+* `static.log`：真实静态发现的 `DynamicRequireError`。
+* `unavailable.log`：整脚本必需依赖失败的独立反例；`functions.log`：原函数时限和失败判定。
+* `comma-scales.log`、`space-scales.log`：Q183-07 整脚本对照；生成目录分别为
+  `/tmp/luainstaller-benchmark-6Vzm4a/` 和 `/tmp/luainstaller-benchmark-zWGF9E/`。
+
+Astra 请重点核查入口和模块 loader 参数边界、测试工具成功/预期失败/探索结果的判定、
+Q183-07 参数校验，以及尚缺证据的旧 Windows 恢复风险；检查实现清单是否能进入各适用门禁。
+本轮未启动远程测试或发布，所有本轮检查进程已退出；Astra 最终确认与 Sol 实现尚未开始。
+
+本轮 `lua test/contract_docs.lua` 正常退出，包含 release 文档契约；开发文档 31 处
+交叉引用和显式锚点检查及 `git diff --check` 通过。产品及测试文件相对 HEAD 未修改。
+
+[#astra-confirmation]
+== Astra 最终确认（2026-11-11）
+
+快速核对当前基线、两轮结论及入口调用和基准驱动代码：实施清单通过，可由 Sol 开始实现。
+Q183-06、Q183-03 和 Q183-07 的结论与代码相符；Q183-04 保持用法改进定位，Q183-05 为维护项。
+补充超时验收：覆盖忽略 TERM 的进程与强制结束期限，超时退出不能算预期业务失败。
+Q183-01 继续记录为历史证据缺口；补充主机不可用本身不阻断发布，当前确认的产品缺陷仍须闭环。
+本次确认针对实施计划，最终发布仍需同一提交的必需门禁及发布验收。
+按用户要求未重复运行已有复现或完整套件；仅更新开发文档并检查差异和链接。
+当前停工，无后台任务，等待用户切回 Sol 实现。
+
+[#implementation-183]
+== Sol 实施与验证（2026-11-11）
+
+执行已确认的清单，候选版本为 1.8.3。Q183-06 在两份 runtime 和发现脚本传递入口实参，
+模块 loader 的调用保持 Lua 自身约定。新增 `entry_arguments.lua` 在修复前失败；
+修复后系统 Lua 5.5.1 的进程内、CLI、发现及三种真实产物对照通过。
+
+Q183-03 / Q183-07 的整脚本反例纳入 `benchmark_driver.lua`；基准命令通过
+`benchmark-command.lua` 复用现有原生监督，覆盖无 GNU timeout、忽略 TERM 与后代清理。
+必需获取失败、意外成功、错误失败原因和超时均不再算通过；Neovim 宿主相关结果和主动跳过
+标为覆盖不完整。压力规模支持逗号、空格并拒绝无效输入。
+Q183-04 采用独立私有结果目录，默认清理构建工作区时仍保留摘要与命令日志。
+Q183-05 同步双语测试说明与来源说明，移除 x86 作业的重复锁测试。
+
+本轮证据目录为 `/tmp/luainstaller-183-implementation-v7ikm7h_/`；
+`entry-before.log`、`benchmark-before.log` 保留修改前失败，专项结果为
+`entry-final.log` 和 `benchmark-after.log`。新增入口回归已接入官方两端、x86 和 LuaJIT；
+基准驱动回归接入 POSIX 门禁。版本、rockspec、手册和工具同步为 1.8.3。
+
+接续时本机系统 Lua 已是 5.5.1，原有样例缺 cjson，未把 smoke 的依赖失败记作通过。
+系统 LuaJIT 缺匹配静态 archive，三种产物专项也按环境不足记录。
+随后用项目固定配方构建共享 Lua 5.4.9 与完整、哈希固定的样例依赖，
+本地完整检查在隔离目录运行。`baseline-ci.json`、`baseline-luajit-ci.json`
+核实 1.8.2 精确提交的既有必需 CI 均已完成并成功；不能代替本候选门禁。
+
+实施尚未发布；最终本地、原生 CI 与公开渠道结果在接续时核对实际状态后补记。
+长任务身份和剩余工作保存在证据目录的 `state.json`、`local-active.json` 与各检查日志中。

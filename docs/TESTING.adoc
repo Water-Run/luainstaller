@@ -61,13 +61,16 @@ LUA=${LUA:-lua}
 "$LUA" test/dependency_limits.lua
 "$LUA" test/logger_order.lua
 "$LUA" test/source_normalization.lua
+"$LUA" test/entry_arguments.lua
+# POSIX benchmark driver
+"$LUA" test/benchmark_driver.lua
 "$LUA" test/output_parents.lua
 "$LUA" test/build_cleanup.lua
 "$LUA" test/onefile_lifecycle.lua
 "$LUA" test/distribution_licenses.lua
 "$LUA" test/reproducible_artifacts.lua
 "$LUA" test/smoke_all.lua
-luarocks lint luainstaller-1.8.2-1.rockspec
+luarocks lint luainstaller-1.8.3-1.rockspec
 # Linux: requires Docker, bubblewrap or unprivileged user/mount namespaces
 "$LUA" test/no_lua_target.lua
 ----
@@ -191,6 +194,14 @@ and real POSIX SIGINT status, compiler termination, workspace cleanup and retry
 |`test/dependency_limits.lua`
 |Combined discovered, explicit, native and FFI dependency counts; duplicates,
 excluded inputs, exact limits, public API errors and both CLIs
+
+|`test/entry_arguments.lua`
+|Entry varargs and `arg`, runtime discovery, loader parameters, state restoration
+and all three artifact paths compared with direct Lua execution
+
+|`test/benchmark_driver.lua` (POSIX)
+|Complete benchmark runs with dependency failures, invalid sizes, expected errors,
+explicit skips, retained evidence and process deadlines without GNU timeout
 
 |`test/source_normalization.lua`
 |Mixed-newline shebangs preserve code and line numbers in analysis, runtime
@@ -447,6 +458,13 @@ For realistic shipping scenarios beyond the contract suites, run:
 bash tools/benchmark-real-world.sh
 ----
 
+The driver uses this checkout with `LUA_BIN` (default `lua`). Set `LUAI_BIN`
+to an executable path to test an installed command instead. Missing required
+dependencies and unexpected outcomes fail the run. Explicit skips and Neovim
+probes that need their application host are reported as incomplete coverage.
+Commands use native process supervision, including when GNU timeout is absent;
+`LUAI_CMD_TIMEOUT` sets the general command budget (default 600 seconds).
+
 The matrix covers:
 
 * baseline (hello world)
@@ -463,16 +481,17 @@ Useful options:
 * `--skip-external` to skip GitHub network projects (`luacheck`,
   `neovim`)
 * `--skip-native` to skip native module install and cases
-* `--fake-scales "100 1000 10000"` to adjust pressure sets
+* `--fake-scales "100,1000,10000"` to adjust pressure sets (1–1000000 per size)
 * `--keep-workspace` to preserve fixtures and logs
 * `--neovim-timeout 30` to cap each neovim command
 
-Default behavior cleans the `/tmp/luainstaller-*` workspace after
-completion. Summary and logs are written to:
+Default behavior cleans the build workspace after completion. Summary and
+command logs remain in a separate private results directory, including on failure
+or interruption. The driver prints its location:
 
 [source,bash]
 ----
-/tmp/luainstaller-benchmark-*/results/summary.txt
+/tmp/luainstaller-benchmark-results-*/summary.txt
 ----
 
 [#testing-luajit]
@@ -548,8 +567,8 @@ previous rock until this version's rock is uploaded.
 
 . Tag the qualified commit. The rockspec `source.tag` is that tag.
 . Publish the GitHub release from the tag. Attach
-  `luainstaller-1.8.2.tar.gz`, `luainstaller-1.8.2.zip`,
-  `luainstaller-1.8.2-1.rockspec`, `luainstaller-1.8.2-1.src.rock`, and
+  `luainstaller-1.8.3.tar.gz`, `luainstaller-1.8.3.zip`,
+  `luainstaller-1.8.3-1.rockspec`, `luainstaller-1.8.3-1.src.rock`, and
   `SHA256SUMS`.
 . Download those five files into an empty directory and run
   `sha256sum -c SHA256SUMS`.
@@ -559,7 +578,7 @@ previous rock until this version's rock is uploaded.
 +
 [source,bash]
 ----
-luarocks upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock
+luarocks upload luainstaller-1.8.3-1.rockspec luainstaller-1.8.3-1.src.rock
 ----
 +
 Use the maintainer account that holds the API key. Keep the key out of
@@ -572,14 +591,14 @@ reach the server. Repeat the upload through curl:
 [source,bash]
 ----
 lua -e 'package.preload["ltn12"]=function() error("use curl", 0) end' \
-  "$(command -v luarocks)" upload luainstaller-1.8.2-1.rockspec luainstaller-1.8.2-1.src.rock
+  "$(command -v luarocks)" upload luainstaller-1.8.3-1.rockspec luainstaller-1.8.3-1.src.rock
 ----
 
-. `https://luarocks.org/luainstaller-1.8.2-1.src.rock` and
-  `https://luarocks.org/luainstaller-1.8.2-1.rockspec` both download, and
+. `https://luarocks.org/luainstaller-1.8.3-1.src.rock` and
+  `https://luarocks.org/luainstaller-1.8.3-1.rockspec` both download, and
   their bytes match the GitHub release files.
 . Install with no version into an empty tree, then over the previous
-  install. Both select 1.8.2. `luai -v` prints `luai 1.8.2`, and
+  install. Both select 1.8.3. `luai -v` prints `luai 1.8.3`, and
   `luainstaller version` prints that version. Remove the empty tree.
 . When an older Git tag has a GitHub rock that luarocks.org does not
   serve, upload that rock the same way.

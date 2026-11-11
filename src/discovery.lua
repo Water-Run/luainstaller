@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-21
 Updated:
-    2026-10-15
+    2026-11-11
 ]]
 
 local analyzer = require("luainstaller.analyzer")
@@ -718,12 +718,11 @@ os.exit = function(code, close)
     return original_exit(code, close)
 end
 arg = { [0] = entry }
-for i = 1, select("#", ...) do
-    arg[i] = select(i, ...)
-end
+local entry_arguments = pack_values(...)
+for i = 1, entry_arguments.n do arg[i] = entry_arguments[i] end
 local ok, err = pcall(function()
     local chunk = assert(loadfile(entry))
-    return chunk()
+    return chunk(unpack_values(entry_arguments, 1, entry_arguments.n))
 end)
 flush_records()
 if not ok then

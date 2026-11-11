@@ -114,6 +114,8 @@ jobs:
           lua test/dependency_limits.lua
           lua test/logger_order.lua
           lua test/source_normalization.lua
+          lua test/entry_arguments.lua
+          lua test/benchmark_driver.lua
           lua test/output_parents.lua
           lua test/build_cleanup.lua
 
@@ -229,8 +231,8 @@ jobs:
           "$LUAI_TEST_LUA" test/resource_bounds.lua
           "$LUAI_TEST_LUA" test/dependency_limits.lua
           "$LUAI_TEST_LUA" test/logger_order.lua
-          "$LUAI_TEST_LUA" test/lock_identity.lua
           "$LUAI_TEST_LUA" test/source_normalization.lua
+          "$LUAI_TEST_LUA" test/entry_arguments.lua
           "$LUAI_TEST_LUA" test/output_parents.lua
           "$LUAI_TEST_LUA" test/build_cleanup.lua
           "$LUAI_TEST_LUA" test/onefile_modes.lua

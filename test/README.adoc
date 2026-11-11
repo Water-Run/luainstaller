@@ -12,7 +12,7 @@ Checks the two CLI grammars and their error output.
 
 `cli_surface.lua`::
 Checks JSON output, color and progress policy, log reads, and display width.
-It needs a POSIX shell.
+It runs on POSIX and native Windows.
 
 `contract_docs.lua`::
 Turns documented behavior into executable contracts. It covers discovery,
@@ -105,8 +105,8 @@ For every POSIX ABI the runner also builds an isolated, SHA-256-pinned sample
 tree containing lua-cjson, LuaFileSystem, LuaSocket, mimetypes, lzlib, Pegasus,
 and a directly compiled lsqlite3 plus SQLite amalgamation. LuaRocks dependency
 resolution is disabled, and the cache identity binds the exact source list and
-installation order. The lsqlite3 binding is staged from an immutable mirror
-commit while the pinned SQLite amalgamation is extracted into a separate root.
+installation order. The lsqlite3 binding is staged from a versioned Debian source path with a pinned
+SHA-256 digest, while the pinned SQLite amalgamation is extracted into a separate root.
 Every matrix log records both pinned input names, SHA-256 digests, archive
 members where applicable, the cache identity, and whether the tree was reused
 or rebuilt; cold builds additionally record the exact staged/extraction paths.

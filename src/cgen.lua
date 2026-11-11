@@ -8,7 +8,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-10-15
+    2026-11-11
 ]]
 
 local fs = require("luainstaller.fs")
@@ -460,7 +460,8 @@ local function run(payload, run_args, application_arg0)
   for i = 1, #(run_args or {}) do runtime_arg[i] = run_args[i] end
   _G.arg = runtime_arg
   local results = packValues(pcall(function()
-    return loadPayloadSource(entry, "@" .. tostring(entry.path or entry.id or "__entry__"))()
+    return loadPayloadSource(entry, "@" .. tostring(entry.path or entry.id or "__entry__"))(
+        unpackValues(run_args or {}, 1, #(run_args or {})))
   end))
   _G.arg = old_arg
   local uninstall_ok, uninstall_err = pcall(uninstall)

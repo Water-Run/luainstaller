@@ -12,7 +12,7 @@ File:
 Date:
     2026-06-16
 Updated:
-    2026-10-15
+    2026-11-11
 ]]
 
 local compat = require("luainstaller.compat")
@@ -182,7 +182,7 @@ function M.run(payload, run_args, application_arg0)
 
     local results = compat.pack(pcall(function()
         local entry_loader = loadPayloadSource(entry, "@" .. tostring(entry.path or entry.id or "__entry__"))
-        return entry_loader()
+        return entry_loader(compat.unpack(run_args, 1, #run_args))
     end))
 
     _G.arg = old_arg

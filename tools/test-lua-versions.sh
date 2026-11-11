@@ -667,7 +667,7 @@ run_version() {
     "$lua" test/publish_noreplace.lua
     "$lua" test/doc_payload.lua
     "$lua" test/contract_docs.lua
-    "$luarocks" lint luainstaller-1.8.2-1.rockspec
+    "$luarocks" lint luainstaller-1.8.3-1.rockspec
     "$lua" test/luarocks_install.lua
     "$lua" test/standalone_install.lua
     "$lua" test/toolchain_native.lua
@@ -696,6 +696,8 @@ run_version() {
     "$lua" test/dependency_limits.lua
     "$lua" test/logger_order.lua
     "$lua" test/source_normalization.lua
+    "$lua" test/entry_arguments.lua
+    "$lua" test/benchmark_driver.lua
     "$lua" test/output_parents.lua
     "$lua" test/build_cleanup.lua
     "$lua" test/distribution_licenses.lua
